@@ -2,7 +2,7 @@ import os
 
 from ziplime.data.services.lime_trader_sdk_data_source import LimeTraderSdkDataSource
 from ziplime.exchanges.lime_trader_sdk.lime_trader_sdk_exchange import LimeTraderSdkExchange
-from ziplime.data.providers.fundamental_data.limex_hub_fundamental_data_provider import LimexHubFundamentalDataProvider
+from ziplime.data.data_sources.limex_hub_fundamental_data_source import LimexHubFundamentalDataSource as LimexHubFundamentalDataProvider
 
 
 def get_data_source(code: str):
