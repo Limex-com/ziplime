@@ -2,7 +2,7 @@ import os
 
 from ziplime.data.services.lime_trader_sdk_data_source import LimeTraderSdkDataSource
 from ziplime.exchanges.lime_trader_sdk.lime_trader_sdk_exchange import LimeTraderSdkExchange
-from ziplime.data.data_sources.limex_hub_fundamental_data_source import LimexHubFundamentalDataSource as LimexHubFundamentalDataProvider
+from ziplime.data.data_sources.limex_hub_fundamental_data_source import LimexHubFundamentalDataSource
 
 
 def get_data_source(code: str):
@@ -19,7 +19,7 @@ def get_fundamental_data_provider(code: str):
         maximum_threads = os.environ.get("LIMEX_HUB_MAXIMUM_THREADS", None)
         if limex_hub_key is None:
             raise ValueError("Missing LIMEX_API_KEY environment variable.")
-        return LimexHubFundamentalDataProvider(limex_api_key=limex_hub_key, maximum_threads=maximum_threads)
+        return LimexHubFundamentalDataSource(limex_api_key=limex_hub_key, maximum_threads=maximum_threads)
     raise Exception("Unsupported fundamental data provider!")
 
 def get_exchange(code: str):
