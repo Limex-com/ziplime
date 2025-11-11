@@ -84,7 +84,8 @@ async def _run_simulation():
         stop_on_error=False,
     )
 
-    logger.error(errors)
+    if errors:
+        logger.error(errors)
     print(res.head(n=10).to_markdown())
 
 

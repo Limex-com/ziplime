@@ -13,6 +13,8 @@ async def ingest_data_yahoo_finance():
 
     start_date = datetime.datetime(year=2025, month=1, day=1, tzinfo=datetime.timezone.utc)
     end_date = datetime.datetime(year=2025, month=8, day=30, tzinfo=datetime.timezone.utc)
+    data_frequency = datetime.timedelta(days=1)
+
     market_data_bundle_source = YahooFinanceDataSource(maximum_threads=1)
 
     asset_service = get_asset_service(
@@ -26,7 +28,7 @@ async def ingest_data_yahoo_finance():
         trading_calendar="NYSE",
         bundle_name="yahoo_finance_daily_data",
         data_bundle_source=market_data_bundle_source,
-        data_frequency=datetime.timedelta(days=1),
+        data_frequency=data_frequency,
         asset_service=asset_service
     )
 

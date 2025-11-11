@@ -1,11 +1,26 @@
 import logging
 import sys
-from pathlib import Path
 
 import structlog
 
 
 def configure_logging(level: int = logging.INFO, file_name: str = None) -> None:
+    """
+    Configures logging for both the standard library logging and structlog.
+
+    This function sets up a logging configuration to enable consistent and
+    structured logging across an application. It configures the root logger from
+    the standard library as well as structlog with appropriate handlers,
+    formatters, and processors.
+
+    Args:
+        level (int): The logging level to be used (default is logging.INFO).
+        file_name (str, optional): The name of the file to log messages to. If not
+            provided, logging will be restricted to the console.
+
+    Returns:
+        None
+    """
     # 1) Configure the standard library root logger
     #    All handlers you add will inherit this level.
     logging.basicConfig(

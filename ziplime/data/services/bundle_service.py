@@ -18,12 +18,32 @@ from ziplime.utils.date_utils import period_to_timedelta
 
 
 class BundleService:
+    """
+    Service class responsible for handling operations related to bundles.
+
+    This class is designed to manage the lifecycle of data bundles, including
+    listing existing bundles, ingesting custom data bundles, and ingesting market
+    data bundles. It provides functionality to validate input data, process, and
+    store bundles, as well as perform necessary backfilling for incomplete data.
+    """
 
     def __init__(self, bundle_registry: BundleRegistry):
+        """
+        Args:
+            bundle_registry (BundleRegistry): Registry for managing bundles.
+        """
         self._bundle_registry = bundle_registry
         self._logger = structlog.get_logger(__name__)
 
     async def list_bundles(self) -> list[dict[str, Any]]:
+
+        """Retrieves a list of bundles available in the bundle registry.
+
+        Returns:
+            list[dict[str, Any]]: A list of dictionaries containing bundle metadata.
+                Each dictionary represents a registered bundle with its associated
+                metadata.
+        """
         return await self._bundle_registry.list_bundles()
 
     async def ingest_custom_data_bundle(self, name: str,
@@ -38,8 +58,53 @@ class BundleService:
                                         bundle_storage: BundleStorage,
                                         asset_service: AssetService,
                                         ):
+        """Ingests a custom data bundle into the specified storage. This function processes and validates the provided data,
+        ensures it aligns with the given trading calendar and frequency, and stores it using the provided storage system.
 
-        """Ingest data for a given bundle.        """
+        Args:
+            name: str
+                The name of the custom bundle to ingest.
+            bundle_version: str
+                The version identifier for the custom bundle.
+            date_start: datetime.datetime
+                The start date of the data to include in the bundle. Must be within the bounds of the trading calendar.
+            date_end: datetime.datetime
+                The end date of the data to include in the bundle. Must be within the bounds of the trading calendar.
+            trading_calendar: ExchangeCalendar
+                The trading calendar defining the valid trading sessions and holidays.
+            symbols: list of str
+                The list of symbols to include in the data bundle.
+            data_bundle_source: DataBundleSource
+                The source from where the data is fetched for the ingestion.
+            frequency: datetime.timedelta or Period
+                The frequency of the data to be ingested (e.g., '1w', '1d').
+            data_frequency_use_window_end: bool
+                Indicates whether the frequency uses the window end for calculations.
+                If False, it will use the window start.
+
+                Example: Frequency is 1M (1 month) and data_frequency_use_window_end is False.
+                         Each row will have beginning of the month in 'date' column
+
+                         Frequency is 1M (1 month) and data_frequency_use_window_end is False.
+                         Each row will have end of the month in 'date' column
+
+                This is only valid if frequency is greater than 1 day because that is the largest unit of date where
+                we can get session using exchange calendar.
+            bundle_storage: BundleStorage
+                The storage system where the ingested bundle will be saved.
+            asset_service: AssetService
+                The service that provides asset metadata
+
+        Raises:
+            ValueError:
+                - Raised when date_start is before the first session of the trading calendar or when date_end is past the last session.
+                - Also raised when required data columns are missing or when neither a symbol nor sid column is provided.
+
+        Returns:
+            DataBundle:
+                Prepared and stored data bundle instance.
+
+        """
         self._logger.info(f"Ingesting custom bundle: name={name}, date_start={date_start}, date_end={date_end}, "
                           f"symbols={symbols}, frequency={frequency}")
         if date_start < trading_calendar.first_session.replace(tzinfo=trading_calendar.tz):
@@ -130,8 +195,29 @@ class BundleService:
 
         self._logger.info(f"Finished ingesting custom bundle_name={name}, bundle_version={bundle_version}")
 
-    async def _backfill_sid_data(self, data: pl.DataFrame, asset_service: AssetService, required_sessions: pl.Series):
+        return data_bundle
 
+    async def _backfill_sid_data(self, data: pl.DataFrame, asset_service: AssetService, required_sessions: pl.Series):
+        """Backfills missing symbol ID (sid) data in a DataFrame by performing lookups and handling missing
+        data sessions. Used when symbols are provided in the input DataFrame but not sids.
+
+        The method updates the input DataFrame by:
+        1. Mapping symbols to their corresponding sid using the asset service.
+        2. Backfilling missing data for required sessions.
+        3. Logging warnings for missing data sessions.
+        4. Raising an exception for any symbols absent from the asset database.
+
+        Args:
+            data (pl.DataFrame): A Polars DataFrame containing at least 'symbol' and 'date' columns.
+            asset_service (AssetService): An instance of AssetService used to fetch equities by symbol.
+            required_sessions (pl.Series): A Polars Series containing the required session dates.
+
+        Returns:
+            pl.DataFrame: Updated DataFrame with backfilled sid data.
+
+        Raises:
+            ValueError: If any symbols are missing in the asset database.
+        """
         unique_symbols = list(data["symbol"].unique())
         symbol_to_sid = {a.get_symbol_by_exchange(exchange_name=None): a.sid for a in
                          await asset_service.get_equities_by_symbols(unique_symbols)}
@@ -177,7 +263,37 @@ class BundleService:
                                         forward_fill_missing_ohlcv_data: bool,
                                         ):
 
-        """Ingest data for a given bundle.        """
+        """
+        Asynchronously ingests a market data bundle based on provided parameters and performs validation, repair,
+        and transformation of data before storing it and registering the bundle.
+
+        This function fetches the required data from a source, ensures complete and accurate data integrity based
+        on the provided trading calendar, forward fills missing OHLCV (Open, High, Low, Close, Volume) data if
+        specified, and generates a properly formatted `DataBundle` to be stored and registered.
+
+        Args:
+            name (str): The name of the market data bundle to ingest.
+            bundle_version (str): The version identifier for the market data bundle.
+            date_start (datetime.datetime): The start date for the data to be ingested.
+            date_end (datetime.datetime): The end date for the data to be ingested.
+            trading_calendar (ExchangeCalendar): The trading calendar to be used for session validation and processing.
+            symbols (list[str]): The list of symbols for the equities to be included in the data bundle.
+            data_bundle_source (DataBundleSource): The source from which market data will be retrieved.
+            frequency (datetime.timedelta): The frequency of the market data bars (e.g., 1m, 1d etc.).
+            bundle_storage (BundleStorage): The storage component to persist the ingested and processed market data bundle.
+            asset_service (AssetService): The service to retrieve asset metadata such as equities by symbols and exchange mapping.
+            forward_fill_missing_ohlcv_data (bool): If True, fills missing OHLCV data forward.
+
+        Raises:
+            ValueError:
+                - If the start date is before the first session of the trading calendar or the end date is after
+                  the last session.
+                - If the retrieved market data is missing required columns.
+                - If there are symbols in the market data that are not present in the asset database.
+
+        Returns:
+            DataBundle: Prepared and stored data bundle instance.
+        """
         self._logger.info(f"Ingesting market data bundle: name={name}, date_start={date_start}, date_end={date_end}, "
                           f"symbols={symbols}, frequency={frequency}")
         start_duration = time.time()
@@ -256,8 +372,15 @@ class BundleService:
                 raise ValueError(f"Symbols are missing in asset database: {missing_symbols}")
 
             data = data.with_columns(
-                pl.col("symbol").replace(symbol_to_sid).cast(pl.Int64).alias("sid")
-            ).sort(["sid", "date"])
+                pl.when(
+                    pl.col("exchange") == exchange_name
+                ).then(
+                    pl.col("symbol").replace(symbol_to_sid).cast(pl.Int64, strict=False)
+                ).otherwise(
+                    pl.col("sid")
+                )
+                .alias("sid")
+            ).sort(["exchange","sid", "date"])
         if forward_fill_missing_ohlcv_data:
             data = data.with_columns(pl.col("close", "price").fill_null(strategy="forward"))
             data = data.with_columns(pl.col("high", "low", "open").fill_null(pl.col("price")))
@@ -280,6 +403,8 @@ class BundleService:
         self._logger.info(f"Finished ingesting market data bundle_name={name}, bundle_version={bundle_version}."
                           f"Total duration: {duration:.2f} seconds", duration=duration)
 
+        return data_bundle
+
     async def load_bundle(self, bundle_name: str, bundle_version: str | None,
                           symbols: list[str] | None = None,
                           start_date: datetime.datetime | None = None,
@@ -289,6 +414,49 @@ class BundleService:
                           end_auction_delta: datetime.timedelta = None,
                           aggregations: list[pl.Expr] = None
                           ) -> DataBundle:
+        """
+        Asynchronously loads a data bundle based on specified parameters and validates the configuration
+        including time ranges, frequencies, and auction deltas. Retrieves necessary metadata, dependencies,
+        and initializes a `DataBundle` instance with associated data and metadata.
+
+        Args:
+            bundle_name (str): Name of the data bundle to load.
+            bundle_version (str | None): Version of the bundle to load. Optional if not version-specific.
+            symbols (list[str] | None):
+              Filter data bundle to include only specific symbols. Defaults to None (includes all symbols).
+            start_date (datetime.datetime | None):
+              Filter data bundle to include only data starting with specific date. Defaults to None.
+            end_date (datetime.datetime | None):
+              Filter data bundle to include only data till specific date. Defaults to None.
+            frequency (datetime.timedelta | Period | None): Desired frequency for data. Defaults to None (frequency in which bundle was ingested will be used).
+            start_auction_delta (datetime.timedelta):
+               Used when requested frequency is greater than ingested frequency.
+               It allows defining custom start time for each frequency group.
+               Example:
+                 Ingested frequenct is 1m, requested frequency is 1d, and start_auction_delta is 1h.
+                 Before grouping data by 1d frequency, data will be filtered to include only data in each group that
+                 is greater than 1h after the start of the group.
+                 Can be useful if you want to test strategy on 1d frequenct but when running algorithm callback each day
+                 1 hour after opening time
+            end_auction_delta (datetime.timedelta):
+                Used when requested frequency is greater than ingested frequency.
+                It allows defining custom start time for each frequency group.
+                Example:
+                  Ingested frequenct is 1m, requested frequency is 1d, and end_auction_delta is 1h.
+                  Before grouping data by 1d frequency, data will be filtered to include only data in each group that
+                  is lower than 1h before the end of the group.
+                  Useful if you want to test strategy on 1d frequenct but when running algorithm callback each day
+                  1 hour before closing time
+            aggregations (list[pl.Expr]):
+                List of aggregations to apply on the data. If not specified default aggregations will be used.
+
+        Returns:
+            DataBundle: An initialized `DataBundle` instance containing data and metadata for the specified
+            bundle.
+
+        Raises:
+            ValueError: If the bundle, version, frequency, or date range is invalid.
+        """
         self._logger.info(f"Loading bundle: bundle_name={bundle_name}, bundle_version={bundle_version}")
 
         bundle_metadata_start = time.time()
@@ -360,42 +528,35 @@ class BundleService:
                                                      aggregations=aggregations
                                                      )
         load_duration = time.time() - bundle_data_load_start
+
+        sid_indexes = data.with_row_index().group_by("sid", maintain_order=True).agg([
+            pl.col("index").first().alias("start_index"),
+            pl.col("index").last().alias("end_index")
+        ])
+
         self._logger.info(f"Loaded data bundle in {load_duration:.2f} seconds",
                           duration=load_duration)
         data_bundle.data = data
+        data_bundle.sid_indexes = {row["sid"]: (row["start_index"], row["end_index"] + 1) for row in
+                                   sid_indexes.iter_rows(named=True)}
         return data_bundle
 
     async def clean(self, bundle_name: str, before: datetime.datetime = None, after: datetime.datetime = None,
                     keep_last: bool = None):
-        """Clean up data that was created with ``ingest`` or
-        ``$ python -m ziplime ingest``
+        """
+        Cleans up bundles based on the specified criteria.
 
-        Parameters
-        ----------
-        name : str
-            The name of the bundle to remove data for.
-        before : datetime, optional
-            Remove data ingested before this date.
-            This argument is mutually exclusive with: keep_last
-        after : datetime, optional
-            Remove data ingested after this date.
-            This argument is mutually exclusive with: keep_last
-        keep_last : int, optional
-            Remove all but the last ``keep_last`` ingestions.
-            This argument is mutually exclusive with:
-              before
-              after
+        This method iterates through the bundles in the registry and removes
+        those that match the given parameters.
 
-        Returns
-        -------
-        cleaned : set[str]
-            The names of the runs that were removed.
-
-        Raises
-        ------
-        BadClean
-            Raised when ``before`` and or ``after`` are passed with
-            ``keep_last``. This is a subclass of ``ValueError``.
+        Args:
+            bundle_name (str): The name of the bundle to clean.
+            before (datetime.datetime, optional): A datetime to filter bundles created before
+                this date. Defaults to None.
+            after (datetime.datetime, optional): A datetime to filter bundles created after
+                this date. Defaults to None.
+            keep_last (bool, optional): A flag to indicate whether to keep the most recent
+                bundle. Defaults to None.
         """
 
         for bundle in await self._bundle_registry.list_bundles():

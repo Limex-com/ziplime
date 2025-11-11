@@ -679,10 +679,14 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         #     if self._symbol_lookup_date is not None
         #     else pd.Timestamp(self.sim_params.end_session).to_pydatetime().date()
         # )
-        if exchange_name is None:
-            exchange_name = self.default_exchange.name
+        # if exchange_name is None:
+        #     exchange_name = self.default_exchange.name
+        if "@" in symbol_str:
+            symbol, exchange_name = symbol_str.split("@")
+        else:
+            symbol = symbol_str
 
-        asset = await self.asset_service.get_asset_by_symbol(symbol=symbol_str,
+        asset = await self.asset_service.get_asset_by_symbol(symbol=symbol,
                                                              asset_type=asset_type,
                                                              exchange_name=exchange_name)
         if asset is None:

@@ -1,0 +1,112 @@
+site_name: Ziplime
+site_description: Ziplime is a powerful reimagining of the classic Zipline library, now turbocharged with the speed of Polars and enhanced with a versatile new data storage architecture. Designed for quant traders and data scientists, Ziplime retains the familiar backtesting syntax of Quantopian's Zipline while introducing groundbreaking features
+site_url: https://ziplime.limex.com
+theme:
+  name: material
+  custom_dir: docs/theme
+  palette:
+  - media: (prefers-color-scheme)
+    toggle:
+      icon: material/brightness-7
+      name: Switch to light mode
+  - media: '(prefers-color-scheme: light)'
+    scheme: default
+    primary: green
+    accent: amber
+    toggle:
+      icon: material/brightness-4
+      name: Switch to dark mode
+  - media: '(prefers-color-scheme: dark)'
+    scheme: slate
+    primary: green
+    accent: amber
+    toggle:
+      icon: material/brightness-4
+      name: Switch to system preference
+  features:
+  - content.code.annotate
+  - content.code.copy
+  - content.footnote.tooltips
+  - content.tabs.link
+  - content.tooltips
+  - navigation.footer
+  - navigation.indexes
+  - navigation.instant
+  - navigation.instant.prefetch
+  - navigation.instant.progress
+  - navigation.path
+  - navigation.tabs
+  - navigation.tabs.sticky
+  - navigation.top
+  - navigation.tracking
+  - search.highlight
+  - search.share
+  - search.suggest
+  - toc.follow
+  icon:
+    repo: fontawesome/brands/github-alt
+  logo: docs/img/icon-white.svg
+  favicon: docs/img/favicon.ico
+  language: en
+repo_name: Limex-com/ziplime
+repo_url: https://github.com/Limex-com/ziplime
+nav:
+- Get Started:
+  - Introduction: get-started/introduction.md
+  - Installation: get-started/installation.md
+  - Tutorial - User Guide:
+    - tutorial/index.md
+    - First steps: tutorial/first-steps.md
+    - Algorithm file structure: tutorial/algorithm-file-structure.md
+    - Algorithm parameters: tutorial/algorithm-parameters.md
+  - Logging: get-started/logging.md
+- Data ingestion:
+  - data-ingestion/index.md
+  - Data Sources:
+      - Assets:
+        - LimexHub: data-ingestion/data-sources/assets/limexhub.md
+      - Market Data:
+          - LimexHub: data-ingestion/data-sources/market-data/limexhub.md
+          - Yahoo Finance: data-ingestion/data-sources/market-data/yahoo-finance.md
+- Backtesting:
+  - Backtesting: backtesting/index.md
+
+- Release Notes: release-notes.md
+markdown_extensions:
+  abbr: null
+  attr_list: null
+  footnotes: null
+  md_in_html: null
+  tables: null
+  toc:
+    permalink: true
+  pymdownx.betterem: null
+  pymdownx.caret: null
+  pymdownx.highlight:
+    line_spans: __span
+  pymdownx.inlinehilite: null
+  pymdownx.keys: null
+  pymdownx.mark: null
+  pymdownx.superfences:
+    custom_fences:
+    - name: mermaid
+      class: mermaid
+      format: !!python/name:pymdownx.superfences.fence_code_format ''
+  pymdownx.tilde: null
+  pymdownx.blocks.admonition:
+    types:
+    - note
+    - attention
+    - caution
+    - danger
+    - error
+    - tip
+    - hint
+    - warning
+    - info
+    - check
+  pymdownx.blocks.details: null
+  pymdownx.blocks.tab:
+    alternate_style: true
+  mdx_include: null
+  markdown_include_variants: null

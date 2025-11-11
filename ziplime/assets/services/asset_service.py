@@ -58,7 +58,7 @@ class AssetService:
                                                                                  exchange_name=exchange_name)
 
     @aiocache.cached(cache=Cache.MEMORY)
-    async def get_asset_by_symbol(self, symbol: str, asset_type: AssetType, exchange_name: str) -> Asset | None:
+    async def get_asset_by_symbol(self, symbol: str, asset_type: AssetType, exchange_name: str | None) -> Asset | None:
         return await self._asset_repository.get_asset_by_symbol(symbol=symbol,
                                                                 asset_type=asset_type,
                                                                 exchange_name=exchange_name)

@@ -28,7 +28,7 @@ class DataBundle(DataSource):
                  data_type: DataType,
                  timestamp: datetime.datetime,
                  data: pl.DataFrame = None,
-                 ):
+                 sid_indexes: dict[int, tuple[int, int]] = None):
         super().__init__(name=name,
                          start_date=start_date,
                          end_date=end_date,
@@ -44,6 +44,7 @@ class DataBundle(DataSource):
         self.frequency_td = period_to_timedelta(self.frequency)
         self.timestamp = timestamp
         self.data = data
+        self.sid_indexes = sid_indexes
         self._logger = structlog.get_logger(__name__)
 
     def get_dataframe(self) -> pl.DataFrame:
@@ -67,16 +68,31 @@ class DataBundle(DataSource):
 
         cols = set(fields.union({"date", "sid"}))
         if include_bounds:
-            df = self.get_dataframe().select(pl.col(col) for col in cols).filter(
-                pl.col("date") <= to_date,
-                pl.col("date") >= from_date,
-                pl.col("sid").is_in([asset.sid for asset in assets])
-            ).group_by(pl.col("sid")).all()
+            asset_sid = [asset.sid for asset in assets][0]
+
+            if len(assets) == 1:
+                df = self.get_dataframe_by_sid_and_columns(sid=asset_sid, columns=cols).filter(
+                    pl.col("date") <= to_date,
+                    pl.col("date") >= from_date,
+                )
+            else:
+                df = self.get_dataframe().select(pl.col(col) for col in cols).filter(
+                    pl.col("date") <= to_date,
+                    pl.col("date") >= from_date,
+                    pl.col("sid").is_in([asset.sid for asset in assets])
+                ).group_by(pl.col("sid")).all()
         else:
-            df = self.get_dataframe().select(pl.col(col) for col in cols).filter(
-                pl.col("date") < to_date,
-                pl.col("date") > from_date,
-                pl.col("sid").is_in([asset.sid for asset in assets])).group_by(pl.col("sid")).all()
+            asset_sid = [asset.sid for asset in assets][0]
+            if len(assets) == 1:
+                df = self.get_dataframe_by_sid_and_columns(sid=asset_sid, columns=cols).filter(
+                    pl.col("date") < to_date,
+                    pl.col("date") > from_date,
+                )
+            else:
+                df = self.get_dataframe().select(pl.col(col) for col in cols).filter(
+                    pl.col("date") < to_date,
+                    pl.col("date") > from_date,
+                    pl.col("sid").is_in([asset.sid for asset in assets])).group_by(pl.col("sid")).all()
         if self.frequency < frequency:
             df = df.group_by_dynamic(
                 index_column="date", every=frequency, by="sid").agg(pl.col(field).last() for field in fields)
@@ -104,6 +120,8 @@ class DataBundle(DataSource):
                           include_end_date: bool,
                           ) -> pl.DataFrame:
         frequency_td = period_to_timedelta(frequency)
+        asset_sid = [asset.sid for asset in assets][0]
+
         total_bar_count = limit
         if end_date > self.end_date:
             raise ValueError(f"Requested end date {end_date} is greater than end date {self.end_date} of the bundle.")
@@ -121,15 +139,29 @@ class DataBundle(DataSource):
         cols = list(fields.union({"date", "sid"}))
 
         if include_end_date:
-            df_raw = self.get_dataframe().select(pl.col(col) for col in cols).filter(
-                pl.col("date") <= end_date,
-                pl.col("sid").is_in([asset.sid for asset in assets])
-            ).group_by(pl.col("sid")).tail(total_bar_count).sort(by="date")
+            if len(assets) == 1:
+                sid_index = self.sid_indexes[asset_sid]
+                df_raw = self.get_dataframe()[sid_index[0]:sid_index[1]].select(pl.col(col) for col in cols).filter(
+                    pl.col("date") <= end_date,
+                ).tail(total_bar_count)
+            else:
+                df_raw = self.get_dataframe().select(pl.col(col) for col in cols).filter(
+                    pl.col("date") <= end_date,
+                    pl.col("sid").is_in([asset.sid for asset in assets])
+                ).group_by(pl.col("sid")).tail(total_bar_count).sort(by="date")
         else:
-            df_raw = self.get_dataframe().select(pl.col(col) for col in cols).filter(
-                pl.col("date") < end_date,
-                pl.col("sid").is_in([asset.sid for asset in assets])).group_by(pl.col("sid")).tail(
-                total_bar_count).sort(by="date")
+            if len(assets) == 1:
+                sid_index = self.sid_indexes[asset_sid]
+                df_raw = self.get_dataframe()[sid_index[0]:sid_index[1]].select(pl.col(col) for col in cols).filter(
+                    pl.col("date") < end_date,
+                ).tail(
+                    total_bar_count).sort(by="date")
+
+            else:
+                df_raw = self.get_dataframe().select(pl.col(col) for col in cols).filter(
+                    pl.col("date") < end_date,
+                    pl.col("sid").is_in([asset.sid for asset in assets])).group_by(pl.col("sid")).tail(
+                    total_bar_count).sort(by="date")
 
         if self.frequency_td < frequency_td:
             df = df_raw.group_by_dynamic(

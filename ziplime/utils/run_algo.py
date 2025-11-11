@@ -72,9 +72,14 @@ async def run_algorithm(
 
     benchmark_asset = None
     if benchmark_asset_symbol is not None:
-        benchmark_asset = await asset_service.get_asset_by_symbol(symbol=benchmark_asset_symbol,
+        if "@" in benchmark_asset_symbol:
+            symbol, mic = benchmark_asset_symbol.split("@")
+        else:
+            symbol = benchmark_asset_symbol
+            mic = None
+        benchmark_asset = await asset_service.get_asset_by_symbol(symbol=symbol,
                                                                   asset_type=AssetType.EQUITY,
-                                                                  exchange_name=exchanges[0].name)
+                                                                  exchange_name=mic)
         if benchmark_asset is None:
             raise ValueError(f"No asset found with symbol {benchmark_asset_symbol} for benchmark")
 

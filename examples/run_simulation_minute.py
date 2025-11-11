@@ -28,16 +28,14 @@ async def _run_simulation():
         clear_asset_db=False,
         db_path=str(pathlib.Path(__file__).parent.parent.resolve().joinpath("data", "assets.sqlite"))
     )
-    start_date = datetime.datetime(year=2025, month=1, day=4, tzinfo=pytz.timezone("America/New_York"))
+    start_date = datetime.datetime(year=2025, month=1, day=3, tzinfo=pytz.timezone("America/New_York"))
     end_date = datetime.datetime(year=2025, month=2, day=1, tzinfo=pytz.timezone("America/New_York"))
     market_data_bundle = await bundle_service.load_bundle(bundle_name="limex_us_minute_data",
                                                           bundle_version=None,
                                                           frequency=emission_rate,
                                                           start_date=start_date,
                                                           end_date=end_date,
-                                                          symbols=["VOO", "META", "AMD", "AMGN",
-                                                                   "NVDA",
-                                                                   "AAPL", "AMZN", "NFLX", "GOOGL",
+                                                          symbols=["VOO", "META", "AAPL", "AMZN", "NFLX", "GOOGL",
                                                                    "VXX"],
                                                           )
 
@@ -59,10 +57,10 @@ async def _run_simulation():
         benchmark_asset_symbol="VOO",
         benchmark_returns=None,
         stop_on_error=False,
-        asset_service=asset_service
     )
 
-    logger.error(errors)
+    if errors:
+        logger.error(errors)
     print(res.head(n=10).to_markdown())
 
 

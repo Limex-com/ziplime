@@ -1,5 +1,15 @@
 # Release Notes
 
+### Version 1.11.11
+- Upgrade limexhub version to 1.10.18
+- Add some documentation using mkdocs
+- Add GRPC data source
+- Allow passing specific equity commission model to run_algorithm function
+- Allow ingesting data from multiple exchanges for one asset
+- Add ingestion of exchanges
+- Allow filtering assets by mic directly in symbol name
+- Don't throw error if config file for algorithm is not set
+
 ### Version 1.10.16
 - Raise proper exception when data bundle is not found
 

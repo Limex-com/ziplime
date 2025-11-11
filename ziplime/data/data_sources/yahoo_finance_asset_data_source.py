@@ -33,13 +33,6 @@ class YahooFinanceAssetDataSource(AssetDataSource):
         return assets
 
     async def get_constituents(self, index: str) -> pl.DataFrame:
-        index = "SPY"
-        ticker = yf.Ticker(index)
-        funds_data = ticker.funds_data
-        try:
-            holdings = funds_data.equity_holdings
-        except Exception as e:
-            holdings = pl.DataFrame()
-
+        assets = self._limex_client.constituents(index)
         return assets
 

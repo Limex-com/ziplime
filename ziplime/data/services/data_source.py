@@ -14,6 +14,20 @@ class DataSource:
                  original_frequency: datetime.timedelta | Period,
                  data_type: DataType,
                  aggregation_specification: dict[str, str] = None):
+        """
+        Attributes:
+            name (str): The name of the data source.
+            start_date (datetime.date): Start date for the data.
+            end_date (datetime.date): End date for the data.
+            frequency (datetime.timedelta | Period): Desired data frequency, e.g., 1m, 1d,.
+            original_frequency (datetime.timedelta | Period):
+              The original frequency of data. Used when data in the source is different from the requested frequency.
+              If original frequency is lower than requested frequency, data will be grouped by the requested frequency.
+            data_type (DataType): The type of data associated with the source.
+            aggregation_specification (dict[str, str] | None): A dictionary describing
+                aggregation rules, with keys as data attributes and values as the
+                corresponding aggregation methods.
+        """
         self.name = name
         self.start_date = start_date
         self.end_date = end_date
@@ -33,7 +47,28 @@ class DataSource:
                          assets: frozenset[Asset],
                          include_bounds: bool,
                          ) -> pl.DataFrame:
+        """
+        Fetch data within a specified date range and frequency for specified assets.
 
+        This method retrieves data with specific fields based on provided date range,
+        frequency, and assets. Additionally, it provides an option to include or exclude
+        boundary dates in the filtration process. The returned data is grouped by asset
+        identifier, and further aggregated based on the provided frequency, if
+        necessary. The resultant data is sorted by the date column.
+
+        Arguments:
+            fields (frozenset[str]): Set of fields to retrieve from the data.
+            from_date (datetime.datetime): Start date for data filtration.
+            to_date (datetime.datetime): End date for data filtration.
+            frequency (datetime.timedelta | Period): Frequency for grouping the data.
+            assets (frozenset[Asset]): Set of assets to retrieve data for.
+            include_bounds (bool): If True, includes boundary dates in the data; else
+                excludes them.
+
+        Returns:
+            pl.DataFrame: A dataframe containing filtered and aggregated data sorted
+            by date.
+        """
         cols = set(fields.union({"date", "sid"}))
         if include_bounds:
             df = self.get_dataframe().select(pl.col(col) for col in cols).filter(
@@ -51,7 +86,6 @@ class DataSource:
                 index_column="date", every=frequency, by="sid").agg(pl.col(field).last() for field in fields)
         return df.sort(by="date")
 
-    # @lru_cache(maxsize=100)
     def get_data_by_limit(self, fields: frozenset[str] | None,
                           limit: int,
                           end_date: datetime.datetime,
@@ -59,6 +93,27 @@ class DataSource:
                           assets: frozenset[Asset],
                           include_end_date: bool,
                           ) -> pl.DataFrame:
+        """
+        Fetch data for a specified set of assets, fields, and parameters, limiting the number of entries.
+
+        The method retrieves data from a data source based on the provided limit, end_date,
+        frequency, assets, and fields. It handles cases where the frequency of the requested data
+        differs from the source frequency, adjusting the required bar count accordingly. If the
+        end_date exceeds the available range, it calls another retrieval method. The data is filtered and
+        grouped based on the assets, frequency, and inclusion of the end_date.
+
+        Args:
+            fields (frozenset[str] | None): A set of data fields to include in the result. If None,
+                                            all available fields are included.
+            limit (int): The maximum number of rows to retrieve for each asset.
+            end_date (datetime.datetime): The end date for the data range.
+            frequency (datetime.timedelta | Period): The required frequency for the retrieved data.
+            assets (frozenset[Asset]): A set of assets for which to retrieve the data.
+            include_end_date (bool): Whether the data for the end_date is included in results.
+
+        Returns:
+            pl.DataFrame: The resulting data frame containing the requested data fields and filtered rows.
+        """
         frequency_td = period_to_timedelta(frequency)
         total_bar_count = limit
         if end_date > self.end_date:
@@ -95,32 +150,26 @@ class DataSource:
 
     def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str], dt: datetime.datetime,
                        frequency: datetime.timedelta):
-        """Public API method that returns a scalar value representing the value
-        of the desired asset's field at either the given dt.
-
-        Parameters
-        ----------
-        assets : Asset, ContinuousFuture, or iterable of same.
-            The asset or assets whose data is desired.
-        field : {'open', 'high', 'low', 'close', 'volume',
-                 'price', 'last_traded'}
-            The desired field of the asset.
-        dt : datetime.datetime
-            The timestamp for the desired value.
-        data_frequency : str
-            The frequency of the data to query; i.e. whether the data is
-            'daily' or 'minute' bars
-
-        Returns
-        -------
-        value : float, int, or datetime.datetime
-            The spot value of ``field`` for ``asset`` The return type is based
-            on the ``field`` requested. If the field is one of 'open', 'high',
-            'low', 'close', or 'price', the value will be a float. If the
-            ``field`` is 'volume' the value will be a int. If the ``field`` is
-            'last_traded' the value will be a Timestamp.
         """
-        # print(f"get spot value: {assets}, {fields}, {dt}")
+        Retrieves the most recent spot value for specified assets and fields.
+
+        Fetches data by the provided datetime, fields, and assets. It returns
+        the most recent value for each asset-field combination up to, and
+        including, the given datetime.
+
+        Args:
+            assets (frozenset[Asset]): A collection of Asset objects representing
+                the assets for which the spot value is requested.
+            fields (frozenset[str]): A set of field names for which data is
+                retrieved.
+            dt (datetime.datetime): The datetime up to, and including, which
+                the most recent spot values are retrieved.
+            frequency (datetime.timedelta): The frequency of the data time series.
+
+        Returns:
+            pandas.DataFrame: A DataFrame containing the most recent spot values
+            for the fields and assets provided, up to the specified datetime.
+        """
         df_raw = self.get_data_by_limit(
             fields=fields,
             limit=1,

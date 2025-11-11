@@ -22,32 +22,27 @@ def fetch_historical_limex_data_task(date_from: datetime.datetime,
     limex_client = limexhub.RestAPI(token=limex_api_key)
     timeframe = 3
     if frequency == datetime.timedelta(minutes=1):
-        timeframe = 1
+        timeframe = "1m"
     elif frequency == datetime.timedelta(hours=1):
-        timeframe = 2
+        timeframe = "1h"
     elif frequency == datetime.timedelta(days=1):
-        timeframe = 3
+        timeframe = "1d"
     elif frequency == datetime.timedelta(weeks=1):
-        timeframe = 4
+        timeframe = "1w"
     elif frequency == datetime.timedelta(days=30):
-        timeframe = 5
+        timeframe = "1M"
     elif frequency == datetime.timedelta(days=90):
-        timeframe = 6
-    df = pl.from_pandas(limex_client.candles(symbol=symbol,
-                                             from_date=(date_from - datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
-                                             to_date=(date_to + datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
-                                             timeframe=timeframe), include_index=True,
+        timeframe = "1q"
+    df = pl.from_pandas(limex_client.candles(symbols=symbol,
+                                             start=(date_from - datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
+                                             end=(date_to + datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
+                                             interval=timeframe), include_index=True,
                         schema_overrides={"o": pl.Float64(), "h": pl.Float64(), "l": pl.Float64(), "c": pl.Float64(),
                                           "v": pl.Float64()}
                         )
     if len(df) > 0:
         df = df.rename(
             {
-                "o": "open",
-                "h": "high",
-                "l": "low",
-                "c": "close",
-                "v": "volume",
                 "Date": "date"
             }
         )

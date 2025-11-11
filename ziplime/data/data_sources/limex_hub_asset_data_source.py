@@ -1,18 +1,18 @@
 import datetime
 import multiprocessing
 import os
-import sys
 from typing import Self
 
 import limexhub
 import structlog
-from asyncclick import progressbar
-from joblib import Parallel, delayed
 
 import polars as pl
 
+from ziplime.assets.entities.asset import Asset
+from ziplime.assets.entities.equity import Equity
+from ziplime.assets.entities.equity_symbol_mapping import EquitySymbolMapping
+from ziplime.assets.models.exchange_info import ExchangeInfo
 from ziplime.data.data_sources.asset_data_source import AssetDataSource
-from ziplime.data.services.data_bundle_source import DataBundleSource
 
 
 class LimexHubAssetDataSource(AssetDataSource):
@@ -26,9 +26,43 @@ class LimexHubAssetDataSource(AssetDataSource):
         else:
             self._maximum_threads = multiprocessing.cpu_count() * 2
 
-    async def get_assets(self, symbols: list[str], **kwargs) -> pl.DataFrame:
-        assets = self._limex_client.instruments("SPX")
-        return assets
+    async def get_assets(self, **kwargs) -> list[Asset]:
+        assets = self._limex_client.instruments()
+
+        assets_df = pl.from_dataframe(assets)
+        assets_df = assets_df.rename({
+            "ticker": "symbol"
+        })
+        asset_start_date = datetime.datetime(year=1900, month=1, day=1, tzinfo=datetime.timezone.utc)
+        asset_end_date = datetime.datetime(year=2099, month=1, day=1, tzinfo=datetime.timezone.utc)
+
+        equities = [
+            Equity(
+                asset_name=asset["symbol"],
+                symbol_mapping={
+                    "LIME": EquitySymbolMapping(
+                        symbol=asset["symbol"],
+                        exchange_name="LIME",
+                        start_date=asset_start_date,
+                        end_date=asset_end_date,
+                        company_symbol="",
+                        share_class_symbol=""
+                    )
+                },
+                sid=None,
+                start_date=asset_start_date,
+                end_date=asset_end_date,
+                auto_close_date=asset_end_date,
+                first_traded=asset_start_date,
+                mic="LIME"
+            ) for asset in assets_df.iter_rows(named=True)
+        ]
+
+        return equities
+
+    async def get_exchanges(self, **kwargs) -> list[ExchangeInfo]:
+        exchanges = [ExchangeInfo(exchange="LIME", canonical_name="LIME", country_code="US")]
+        return exchanges
 
     async def get_constituents(self, index: str) -> pl.DataFrame:
         assets = self._limex_client.constituents(index)

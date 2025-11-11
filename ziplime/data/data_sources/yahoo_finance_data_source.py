@@ -1,14 +1,8 @@
 import datetime
 import multiprocessing
-import os
-import sys
 import yfinance as yf
-from typing import Self
 
-import limexhub
 import structlog
-from asyncclick import progressbar
-from joblib import Parallel, delayed
 
 import polars as pl
 from ziplime.data.services.data_bundle_source import DataBundleSource
