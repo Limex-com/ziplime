@@ -5,9 +5,10 @@ Dependency-Graph representation of Pipeline API terms.
 import uuid
 
 import networkx as nx
+
+from ziplime.pipeline import LoadableTerm
 from ziplime.pipeline.visualize import display_graph
 
-from .term import LoadableTerm
 
 
 class CyclicDependency(Exception):

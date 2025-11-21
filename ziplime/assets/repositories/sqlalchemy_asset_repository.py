@@ -1,8 +1,6 @@
 import datetime
-import os
 from collections import deque
 from functools import partial, lru_cache
-from numbers import Integral
 from operator import attrgetter
 from pathlib import Path
 from typing import Any, Self
@@ -45,7 +43,6 @@ from ziplime.errors import (
     SameSymbolUsedAcrossCountries,
     SidsNotFound,
     SymbolNotFound,
-    NotAssetConvertible,
 )
 from ziplime.utils.functional import invert
 from ziplime.utils.numpy_utils import as_column
@@ -104,15 +101,6 @@ class SqlAlchemyAssetRepository(AssetRepository):
         # Populated on first call to `lifetimes`.
         self._asset_lifetimes = {}
         self.migrate()
-
-    # def get_database_path(self, bundle_name: str, bundle_version: str) -> Path:
-    #     return Path(self._base_storage_path, "assets", f"{bundle_name}_{bundle_version}.sqlite")
-
-    # def get_database_url_sync(self, bundle_name: str, bundle_version: str) -> str:
-    #     return f"sqlite:////{self.get_database_path(bundle_name=bundle_name, bundle_version=bundle_version)}"
-    #
-    # def get_database_url_async(self, bundle_name: str, bundle_version: str) -> str:
-    #     return f"sqlite+aiosqlite:////{self.get_database_path(bundle_name=bundle_name, bundle_version=bundle_version)}"
 
     @property
     @lru_cache
@@ -212,6 +200,13 @@ class SqlAlchemyAssetRepository(AssetRepository):
             q = select(ExchangeInfo).where(ExchangeInfo.exchange == exchange_name)
             exchange = (await session.execute(q)).scalar_one_or_none()
             return exchange
+
+    @aiocache.cached(cache=Cache.MEMORY)
+    async def get_exchanges_by_country_codes(self, country_codes: frozenset[str]) -> list[ExchangeInfo]:
+        async with self.session_maker() as session:
+            q = select(ExchangeInfo).where(ExchangeInfo.country_code.in_(country_codes))
+            exchanges = list((await session.execute(q)).scalars())
+            return exchanges
 
     async def save_equities(self, equities: list[Equity]) -> None:
         assets_db = []
@@ -465,38 +460,6 @@ class SqlAlchemyAssetRepository(AssetRepository):
         if equities:
             return equities[0]
         return None
-        # async with self.session_maker() as session:
-        #     q_equity_symbol_mapping = select(EquitySymbolMappingModel).where(
-        #         EquitySymbolMappingModel.exchange == exchange_name,
-        #         EquitySymbolMappingModel.symbol == symbol)
-        #     equity_mapping = (await session.execute(q_equity_symbol_mapping)).scalar_one_or_none()
-        #     if equity_mapping is None:
-        #         return None
-        #     q_equity = select(EquityModel).where(EquityModel.sid == equity_mapping.sid).options(
-        #         selectinload(EquityModel.asset_router)).options(selectinload(EquityModel.equity_symbol_mappings))
-        #     asset: EquityModel = (await session.execute(q_equity)).scalar_one_or_none()
-        #
-        #     if asset is None:
-        #         return None
-        #     return Equity(
-        #         sid=asset.sid,
-        #         asset_name=asset.asset_name,
-        #         start_date=asset.start_date,
-        #         first_traded=asset.first_traded,
-        #         end_date=asset.end_date,
-        #         auto_close_date=asset.auto_close_date,
-        #         symbol_mapping={
-        #             equity_mapping.exchange: EquitySymbolMapping(
-        #                 company_symbol=equity_mapping.company_symbol,
-        #                 symbol=equity_mapping.symbol,
-        #                 exchange_name=equity_mapping.exchange,
-        #                 share_class_symbol=equity_mapping.share_class_symbol,
-        #                 end_date=equity_mapping.end_date,
-        #                 start_date=equity_mapping.start_date
-        #             )
-        #             for equity_mapping in asset.equity_symbol_mappings
-        #         }
-        #     )
 
     def migrate(self) -> None:
         alembic_dir_path = Path(pathlib.Path(__file__).parent.parent.parent, "alembic")
@@ -1054,57 +1017,6 @@ class SqlAlchemyAssetRepository(AssetRepository):
             as_of_date,
         )
 
-    # def lookup_symbols(self, symbols: list[str], as_of_date: datetime.datetime,
-    #                    country_code: str | None = None):
-    #     """Lookup a list of equities by symbol.
-    #
-    #     Equivalent to::
-    #
-    #         [finder.lookup_symbol(s, as_of, fuzzy) for s in symbols]
-    #
-    #     but potentially faster because repeated lookups are memoized.
-    #
-    #     Parameters
-    #     ----------
-    #     symbols : sequence[str]
-    #         Sequence of ticker symbols to resolve.
-    #     as_of_date : datetime.datetime
-    #         Forwarded to ``lookup_symbol``.
-    #     country_code : str or None, optional
-    #         The country to limit searches to. If not provided, the search will
-    #         span all countries which increases the likelihood of an ambiguous
-    #         lookup.
-    #
-    #     Returns
-    #     -------
-    #     equities : list[Equity]
-    #     """
-    #     if not symbols:
-    #         return []
-    #
-    #     multi_country = country_code is None
-    #     f = self._lookup_symbol_strict
-    #     mapping = self._choose_symbol_ownership_map(country_code)
-    #
-    #     if mapping is None:
-    #         raise SymbolNotFound(symbol=symbols[0])
-    #
-    #     memo = {}
-    #     out = []
-    #     append_output = out.append
-    #     for sym in symbols:
-    #         if sym in memo:
-    #             append_output(memo[sym])
-    #         else:
-    #             equity = memo[sym] = f(
-    #                 mapping,
-    #                 multi_country,
-    #                 sym,
-    #                 as_of_date,
-    #             )
-    #             append_output(equity)
-    #     return out
-
     def lookup_future_symbol(self, symbol: str):
         """Lookup a future contract by symbol.
 
@@ -1137,102 +1049,6 @@ class SqlAlchemyAssetRepository(AssetRepository):
         if not data:
             raise SymbolNotFound(symbol=symbol)
         return self.retrieve_asset(sid=data["sid"])
-
-    # def lookup_by_supplementary_field(self, field_name: str, value: float, as_of_date: datetime.datetime):
-    #     try:
-    #         owners = self.equity_supplementary_map[
-    #             field_name,
-    #             value,
-    #         ]
-    #         assert owners, "empty owners list for field %r (sid: %r)" % (
-    #             field_name,
-    #             value,
-    #         )
-    #     except KeyError as exc:
-    #         # no equity has ever held this value
-    #         raise ValueNotFoundForField(field=field_name, value=value) from exc
-    #
-    #     if not as_of_date:
-    #         if len(owners) > 1:
-    #             # more than one equity has held this value, this is ambigious
-    #             # without the date
-    #             raise MultipleValuesFoundForField(
-    #                 field=field_name,
-    #                 value=value,
-    #                 options=set(
-    #                     map(
-    #                         compose(self.retrieve_asset, attrgetter("sid")),
-    #                         owners,
-    #                     )
-    #                 ),
-    #             )
-    #         # exactly one equity has ever held this value, we may resolve
-    #         # without the date
-    #         return self.retrieve_asset(owners[0].sid)
-    #
-    #     for start, end, sid, _ in owners:
-    #         if start <= as_of_date < end:
-    #             # find the equity that owned it on the given asof date
-    #             return self.retrieve_asset(sid)
-    #
-    #     # no equity held the value on the given asof date
-    #     raise ValueNotFoundForField(field=field_name, value=value)
-
-    # def get_supplementary_field(self, sid: int, field_name: str, as_of_date: datetime.datetime):
-    #     """Get the value of a supplementary field for an asset.
-    #
-    #     Parameters
-    #     ----------
-    #     sid : int
-    #         The sid of the asset to query.
-    #     field_name : str
-    #         Name of the supplementary field.
-    #     as_of_date : datetime.datetime, None
-    #         The last known value on this date is returned. If None, a
-    #         value is returned only if we've only ever had one value for
-    #         this sid. If None and we've had multiple values,
-    #         MultipleValuesFoundForSid is raised.
-    #
-    #     Raises
-    #     ------
-    #     NoValueForSid
-    #         If we have no values for this asset, or no values was known
-    #         on this as_of_date.
-    #     MultipleValuesFoundForSid
-    #         If we have had multiple values for this asset over time, and
-    #         None was passed for as_of_date.
-    #     """
-    #     try:
-    #         periods = self.equity_supplementary_map_by_sid[
-    #             field_name,
-    #             sid,
-    #         ]
-    #         assert periods, "empty periods list for field %r and sid %r" % (
-    #             field_name,
-    #             sid,
-    #         )
-    #     except KeyError:
-    #         raise NoValueForSid(field=field_name, sid=sid) from KeyError
-    #
-    #     if not as_of_date:
-    #         if len(periods) > 1:
-    #             # This equity has held more than one value, this is ambigious
-    #             # without the date
-    #             raise MultipleValuesFoundForSid(
-    #                 field=field_name,
-    #                 sid=sid,
-    #                 options={p.value for p in periods},
-    #             )
-    #         # this equity has only ever held this value, we may resolve
-    #         # without the date
-    #         return periods[0].value
-    #
-    #     for start, end, _, value in periods:
-    #         if start <= as_of_date < end:
-    #             return value
-    #
-    #     # Could not find a value for this sid on the as_of_date.
-    #     raise NoValueForSid(field=field_name, sid=sid)
 
     def _get_contract_sids(self, root_symbol: str):
         fc_cols = self.futures_contracts.c
@@ -1314,96 +1130,31 @@ class SqlAlchemyAssetRepository(AssetRepository):
 
         return {None: cf, "mul": mul_cf, "add": add_cf}[adjustment]
 
-    #
-    # def _get_sids(self, tblattr: str) -> list[int]:
-    #     with self.engine.connect() as conn:
-    #         return list((
-    #             conn.execute(sa.select(getattr(self, tblattr).c.sid))
-    #             .scalars()
-    #             .fetchall()
-    #         ))
-
-    # @property
-    # def sids(self) -> list[int]:
-    #     return self._get_sids("asset_router")
-
-    def _lookup_generic_scalar(self, obj: AssetModel, as_of_date: datetime.datetime, country_code: str,
-                               matches: list[AssetModel],
-                               missing: list[AssetModel]):
-        """
-        Convert asset_convertible to an asset.
-
-        On success, append to matches.
-        On failure, append to missing.
-        """
-        result = self._lookup_generic_scalar_helper(
-            obj=obj,
-            as_of_date=as_of_date,
-            country_code=country_code,
-        )
-        if result is not None:
-            matches.append(result)
-        else:
-            missing.append(obj)
-
-    def _lookup_generic_scalar_helper(self, obj: AssetModel, as_of_date: datetime.datetime, country_code: str):
-        if isinstance(obj, (AssetModel, ContinuousFuture)):
-            return obj
-
-        if isinstance(obj, Integral):
-            try:
-                return self.retrieve_asset(int(obj))
-            except SidsNotFound:
-                return None
-
-        if isinstance(obj, str):
-            # Try to look up as an equity first.
-            try:
-                return self.lookup_symbol(
-                    symbol=obj, as_of_date=as_of_date, country_code=country_code
-                )
-            except SymbolNotFound:
-                # Fall back to lookup as a Future
-                try:
-                    # TODO: Support country_code for future_symbols?
-                    return self.lookup_future_symbol(obj)
-                except SymbolNotFound:
-                    return None
-
-        raise NotAssetConvertible("Input was %s, not AssetConvertible." % obj)
-
-    def _compute_asset_lifetimes(self, **kwargs):
+    @aiocache.cached(cache=Cache.MEMORY)
+    async def _compute_asset_lifetimes(self, country_codes: frozenset[str]) -> Lifetimes:
         """Compute and cache a recarray of asset lifetimes"""
         sids = starts = ends = []
-        equities_cols = self.equities.c
-        exchanges_cols = self.exchanges.c
-        if len(kwargs) == 1:
-            if "country_codes" in kwargs.keys():
-                condt = exchanges_cols.country_code.in_(kwargs["country_codes"])
-            if "exchange_names" in kwargs.keys():
-                condt = exchanges_cols.exchange.in_(kwargs["exchange_names"])
-
-            with self.engine.connect() as conn:
-                results = conn.execute(
-                    sa.select(
-                        equities_cols.sid,
-                        equities_cols.start_date,
-                        equities_cols.end_date,
-                    ).where(
-                        (exchanges_cols.exchange == equities_cols.exchange) & (condt)
-                    )
-                ).fetchall()
-            if results:
-                sids, starts, ends = zip(*results)
+        async with self.session_maker() as session:
+            sids_subquery = select(EquitySymbolMappingModel.sid).join(
+                ExchangeInfo, onclause=ExchangeInfo.exchange == EquitySymbolMappingModel.exchange
+            ).where(ExchangeInfo.country_code.in_(country_codes))
+            q = select(
+                EquityModel.sid,
+                EquityModel.start_date,
+                EquityModel.end_date
+            ).where(EquityModel.sid.in_(sids_subquery))
+            result = list((await session.execute(q)))
+            if result:
+                sids, starts, ends = zip(*result)
 
         sid = np.array(sids, dtype="i8")
-        start = np.array(starts, dtype="f8")
-        end = np.array(ends, dtype="f8")
+        start = np.array([datetime.datetime.combine(s, datetime.datetime.min.time(), tzinfo=datetime.timezone.utc).timestamp() for s in starts], dtype="f8")
+        end = np.array([datetime.datetime.combine(s, datetime.datetime.min.time(), tzinfo=datetime.timezone.utc).timestamp() for s in ends], dtype="f8")
         start[np.isnan(start)] = 0  # convert missing starts to 0
         end[np.isnan(end)] = np.iinfo(int).max  # convert missing end to INTMAX
         return Lifetimes(sid, start.astype("i8"), end.astype("i8"))
 
-    def lifetimes(self, dates: pd.DatetimeIndex, include_start_date: bool, country_codes: list[str]):
+    async def lifetimes(self, dates: pd.DatetimeIndex, include_start_date: bool, country_codes: list[str]):
         """Compute a DataFrame representing asset lifetimes for the specified date
         range.
 
@@ -1436,29 +1187,8 @@ class SqlAlchemyAssetRepository(AssetRepository):
         numpy.putmask
         ziplime.pipeline.engine.SimplePipelineEngine._compute_root_mask
         """
-        if isinstance(country_codes, str):
-            raise TypeError(
-                "Got string {!r} instead of an iterable of strings in "
-                "AssetFinder.lifetimes.".format(country_codes),
-            )
-
-        # normalize to a cache-key so that we can memoize results.
-        country_codes = frozenset(country_codes)
-
-        lifetimes = self._asset_lifetimes.get(country_codes)
-        if lifetimes is None:
-            self._asset_lifetimes[country_codes] = lifetimes = (
-                self._compute_asset_lifetimes(country_codes=country_codes)
-            )
-
-        raw_dates = as_column(dates.asi8)
-        if include_start_date:
-            mask = lifetimes.start <= raw_dates
-        else:
-            mask = lifetimes.start < raw_dates
-        mask &= raw_dates <= lifetimes.end
-
-        return pd.DataFrame(mask, index=dates, columns=lifetimes.sid)
+        lifetimes = await self._compute_asset_lifetimes(country_codes=frozenset(country_codes))
+        return lifetimes
 
     # def equities_sids_for_country_code(self, country_code: str):
     #     """Return all of the sids for a given country.

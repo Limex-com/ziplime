@@ -1,6 +1,7 @@
 import datetime
 
 import aiocache
+import pandas as pd
 import polars as pl
 from aiocache import Cache
 
@@ -16,6 +17,7 @@ from ziplime.assets.repositories.adjustments_repository import AdjustmentReposit
 from ziplime.assets.repositories.asset_repository import AssetRepository
 from ziplime.exchanges.exchange import Exchange
 from ziplime.trading.entities.trading_pair import TradingPair
+from ziplime.utils.numpy_utils import as_column
 
 
 class AssetService:
@@ -85,3 +87,19 @@ class AssetService:
 
     async def get_symbols_universe(self, symbol: str) -> SymbolsUniverse | None:
         return await self._asset_repository.get_symbols_universe(symbol=symbol)
+
+    async def lifetimes(self, dates: pd.DatetimeIndex, include_start_date: bool, country_codes: list[str]):
+        # normalize to a cache-key so that we can memoize results.
+        lifetimes = await self._asset_repository.lifetimes(dates=dates, include_start_date=include_start_date,
+                                                     country_codes=country_codes)
+
+        raw_dates = dates.view('int64') // 10**9
+        if include_start_date:
+            mask = lifetimes.start[None, :] <= raw_dates[:, None]
+        else:
+            mask = lifetimes.start[None, :] < raw_dates[:, None]
+        mask &= raw_dates[:, None] <= lifetimes.end[None, :]
+        return pd.DataFrame(mask, index=dates, columns=lifetimes.sid)
+
+    async def retrieve_all(self, sids: list[int], default_none: bool = False):
+        return await self._asset_repository.retrieve_all(sids=sids, default_none=default_none)

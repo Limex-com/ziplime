@@ -233,7 +233,7 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
             for adjustment in adjustments_for_sid
         ]
 
-    def get_dividends_with_ex_date(self, assets, date, asset_finder):
+    def get_dividends_with_ex_date(self, assets, date):
         # seconds = date.value / int(1e9)
         return []
         c = self.conn.cursor()
@@ -260,7 +260,7 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
     def get_stock_dividends(self, sid: int, trading_days: pl.Series) -> list[Dividend]:
         return []
 
-    def get_stock_dividends_with_ex_date(self, assets, date, asset_finder):
+    def get_stock_dividends_with_ex_date(self, assets, date):
         # seconds = date.value / int(1e9)
         return []
 

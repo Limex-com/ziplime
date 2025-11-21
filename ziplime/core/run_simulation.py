@@ -104,7 +104,7 @@ async def run_simulation(
             name=default_exchange_name,
             country_code="US",
             trading_calendar=calendar,
-            data_bundle=market_data_source,
+            data_source=market_data_source,
             equity_slippage=FixedBasisPointsSlippage(),
             equity_commission=equity_commission,
             future_slippage=VolatilityVolumeShare(

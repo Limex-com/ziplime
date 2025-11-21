@@ -14,7 +14,7 @@ from numpy import (
 from numexpr import evaluate
 
 from ziplime.pipeline.data import EquityPricing
-from ziplime.pipeline.factors import CustomFactor
+from ziplime.pipeline.terms.factors import CustomFactor
 from ziplime.pipeline.mixins import SingleInputMixin
 from ziplime.utils.math_utils import (
     nanargmax,

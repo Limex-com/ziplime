@@ -11,6 +11,9 @@ from textwrap import dedent
 from numpy import empty_like, inf, isnan, nan, where
 from scipy.stats import rankdata
 
+from ziplime.pipeline.terms.asset_exists import AssetExists
+from ziplime.pipeline.terms.computable_term import ComputableTerm
+from ziplime.pipeline.terms.term import Term
 from ziplime.utils.compat import wraps
 from ziplime.errors import (
     BadPercentileBounds,
@@ -19,7 +22,7 @@ from ziplime.errors import (
 )
 from ziplime.lib.normalize import naive_grouped_rowwise_apply
 from ziplime.lib.rank import masked_rankdata_2d, rankdata_1d_descending
-from ziplime.pipeline.classifiers import Classifier, Everything, Quantiles
+from ziplime.pipeline.terms.classifiers import Classifier, Everything, Quantiles
 from ziplime.pipeline.dtypes import (
     CLASSIFIER_DTYPES,
     FACTOR_DTYPES,
@@ -36,7 +39,7 @@ from ziplime.pipeline.expression import (
     UNARY_OPS,
     unary_op_name,
 )
-from ziplime.pipeline.filters import (
+from ziplime.pipeline.terms.filters import (
     Filter,
     NumExprFilter,
     PercentileFilter,
@@ -49,7 +52,6 @@ from ziplime.pipeline.mixins import (
     RestrictedDTypeMixin,
     SingleInputMixin,
 )
-from ziplime.pipeline.term import AssetExists, ComputableTerm, Term
 from ziplime.utils.functional import with_doc, with_name
 from ziplime.utils.math_utils import (
     nanmax,

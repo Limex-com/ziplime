@@ -7,10 +7,9 @@ from scipy.stats import (
 )
 
 from ziplime.errors import IncompatibleTerms
-from ziplime.pipeline.factors import CustomFactor
-from ziplime.pipeline.filters import SingleAsset
+from ziplime.pipeline.terms.factors import CustomFactor
+from ziplime.pipeline.terms.filters import SingleAsset
 from ziplime.pipeline.mixins import StandardOutputs
-from ziplime.pipeline.term import AssetExists
 from ziplime.utils.math_utils import nanmean
 from ziplime.utils.numpy_utils import (
     float64_dtype,
@@ -18,6 +17,7 @@ from ziplime.utils.numpy_utils import (
 
 from .basic import Returns
 from ziplime.assets.entities.asset import Asset
+from ..asset_exists import AssetExists
 
 
 class _RollingCorrelation(CustomFactor):

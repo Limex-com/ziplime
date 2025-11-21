@@ -303,17 +303,17 @@ class Ledger:
         held_sids = set(position_tracker.positions)
         if held_sids:
             cash_dividends = adjustment_reader.get_dividends_with_ex_date(
-                held_sids, next_session, None  # self.data_bundle.asset_repository
+                assets=held_sids, date=next_session  # self.data_bundle.asset_repository
             )
             stock_dividends = adjustment_reader.get_stock_dividends_with_ex_date(
-                held_sids, next_session, None  # self.data_bundle.asset_repository
+                assets=held_sids, date=next_session  # self.data_bundle.asset_repository
             )
 
             # Earning a dividend just marks that we need to get paid out on
             # the dividend's pay-date. This does not affect our cash yet.
             position_tracker.earn_dividends(
-                cash_dividends,
-                stock_dividends,
+                cash_dividends=cash_dividends,
+                stock_dividends=stock_dividends,
             )
 
         # Pay out the dividends whose pay-date is the next session. This does

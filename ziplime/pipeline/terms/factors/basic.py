@@ -34,7 +34,7 @@ from ziplime.utils.numpy_utils import (
 )
 
 from .factor import CustomFactor
-from ..mixins import SingleInputMixin
+from ...mixins import SingleInputMixin
 
 
 class Returns(CustomFactor):

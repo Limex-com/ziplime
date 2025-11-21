@@ -22,7 +22,7 @@ from ziplime.utils.numpy_utils import repeat_first_axis
 from .base import PipelineLoader
 from .utils import shift_dates
 from ..data.equity_pricing import EquityPricing
-from ...data.domain.data_bundle import DataBundle
+from ...data.services.data_source import DataSource
 
 UINT32_MAX = iinfo(uint32).max
 
@@ -40,13 +40,12 @@ class EquityPricingLoader(PipelineLoader):
        Reader providing currency conversions.
     """
 
-    def __init__(self, raw_price_reader, adjustments_reader, fx_reader):
-        self.raw_price_reader = raw_price_reader
-        self.adjustments_reader = adjustments_reader
+    def __init__(self, data_source: DataSource, fx_reader):
+        self.data_source = data_source
         self.fx_reader = fx_reader
 
     @classmethod
-    def without_fx(cls, data_bundle: DataBundle):
+    def without_fx(cls, data_source: DataSource):
         """
         Construct an EquityPricingLoader without support for fx rates.
 
@@ -66,8 +65,7 @@ class EquityPricingLoader(PipelineLoader):
             A loader that can only provide currency-naive data.
         """
         return cls(
-            raw_price_reader=None, # fix this
-            adjustments_reader=None,
+            data_source=data_source, # fix this
             fx_reader=ExplodingFXRateReader(),
         )
 
@@ -81,27 +79,28 @@ class EquityPricingLoader(PipelineLoader):
         shifted_dates = shift_dates(sessions, dates[0], dates[-1], shift=1)
 
         ohlcv_cols, currency_cols = self._split_column_types(columns)
-        del columns  # From here on we should use ohlcv_cols or currency_cols.
+        # del columns  # From here on we should use ohlcv_cols or currency_cols.
         ohlcv_colnames = [c.name for c in ohlcv_cols]
 
-        raw_ohlcv_arrays = self.raw_price_reader.load_raw_arrays(
-            ohlcv_colnames,
-            shifted_dates[0],
-            shifted_dates[-1],
-            sids,
+        raw_ohlcv_arrays = self.data_source.get_data_by_date(
+            fields=ohlcv_colnames,
+            from_date=shifted_dates[0],
+            to_date=shifted_dates[-1],
+            assets=sids,
         )
 
         # Currency convert raw_arrays in place if necessary. We use shifted
         # dates to load currency conversion rates to make them line up with
         # dates used to fetch prices.
-        self._inplace_currency_convert(
-            ohlcv_cols,
-            raw_ohlcv_arrays,
-            shifted_dates,
-            sids,
-        )
+        # TODO: set currency conversion
+        # self._inplace_currency_convert(
+        #     ohlcv_cols,
+        #     raw_ohlcv_arrays,
+        #     shifted_dates,
+        #     sids,
+        # )
 
-        adjustments = self.adjustments_reader.load_pricing_adjustments(
+        adjustments = self.data_source.load_pricing_adjustments(
             ohlcv_colnames,
             dates,
             sids,
@@ -208,6 +207,3 @@ class EquityPricingLoader(PipelineLoader):
 
         return ohlcv, currency
 
-
-# Backwards compat alias.
-USEquityPricingLoader = EquityPricingLoader

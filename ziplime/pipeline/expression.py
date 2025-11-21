@@ -12,7 +12,9 @@ from numpy import (
     full,
     inf,
 )
-from ziplime.pipeline.term import Term, ComputableTerm
+from ziplime.pipeline.terms.term import Term
+from ziplime.pipeline.terms.computable_term import ComputableTerm
+
 from ziplime.utils.numpy_utils import bool_dtype
 
 _VARIABLE_NAME_RE = re.compile("^(x_)([0-9]+)$")

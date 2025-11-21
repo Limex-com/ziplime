@@ -28,7 +28,7 @@ async def _run_simulation():
         clear_asset_db=False,
         # db_path=str(pathlib.Path(__file__).parent.parent.resolve().joinpath("data", "assets.sqlite"))
     )
-    symbols = ["META", "AAPL", "AMZN", "NFLX", "GOOGL", "VXX"]
+    symbols = ["META@XNGS", "AAPL", "AMZN", "NFLX", "GOOGL", "VXX"]
     ny = pytz.timezone("America/New_York")
     start_local = datetime.datetime(2025, 9, 1, 0, 0)  # 2025-09-01 00:00 local clock time
     end_local = datetime.datetime(2025, 9, 17, 0, 0)  # 2025-09-01 00:00 local clock time
@@ -66,11 +66,11 @@ async def _run_simulation():
         custom_data_sources=[],
         config_file=str(Path("algorithms/test_algo/test_algo_config.json").absolute()),
         emission_rate=datetime.timedelta(days=1),
-        benchmark_asset_symbol="VXX",
+        benchmark_asset_symbol="META",
         benchmark_returns=None,
         stop_on_error=False,
         asset_service=asset_service,
-        # default_exchange_name="BATS"
+        default_exchange_name="XNGS"
     )
     if errors:
         logger.error(errors)

@@ -11,7 +11,7 @@ class Asset:
     end_date: datetime.date | None
     first_traded: datetime.date | None
     auto_close_date: datetime.date | None
-    mic: str | None
+    # mic: str | None
 
     @abstractmethod
     def get_symbol_by_exchange(self, exchange_name: str | None) -> str | None: ...

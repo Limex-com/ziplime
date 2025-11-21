@@ -31,7 +31,8 @@ from ziplime.utils.pandas_utils import nearest_unequal_elements
 from .downsample_helpers import (
     select_sampling_indices, SUPPORTED_DOWNSAMPLE_FREQUENCIES,
 )
-from .term import Term
+from ziplime.pipeline.terms.term import Term
+
 
 
 class PositiveWindowLengthMixin(Term):
