@@ -188,7 +188,9 @@ class CustomTermMixin(Term):
         inputs = []
         for input_ in windows:
             window = next(input_)
-            if window.shape[1] == 1:
+            # if window.shape[1] == 1:
+            if len(window.shape) == 1:
+
                 # Do not mask single-column inputs.
                 inputs.append(window)
             else:

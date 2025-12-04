@@ -3,13 +3,13 @@ import pandas as pd
 
 from toolz import groupby, merge
 
-from .base import PipelineLoader
+from .pipeline_loader import PipelineLoader
 from ziplime.pipeline.common import (
     EVENT_DATE_FIELD_NAME,
     SID_FIELD_NAME,
     TS_FIELD_NAME,
 )
-from ziplime.pipeline.loaders.frame import DataFrameLoader
+from ziplime.pipeline.loaders.data_frame_loader import DataFrameLoader
 from ziplime.pipeline.loaders.utils import (
     next_event_indexer,
     previous_event_indexer,
@@ -159,11 +159,11 @@ class EventsLoader(PipelineLoader):
             self.events[SID_FIELD_NAME],
         )
 
-    def load_next_events(self, domain, columns, dates, data_query_time, sids, mask):
+    async def load_next_events(self, domain, columns, dates, data_query_time, sids, mask):
         if not columns:
             return {}
 
-        return self._load_events(
+        return await self._load_events(
             name_map=self.next_value_columns,
             indexer=self.next_event_indexer(dates, data_query_time, sids),
             domain=domain,
@@ -173,11 +173,11 @@ class EventsLoader(PipelineLoader):
             mask=mask,
         )
 
-    def load_previous_events(self, domain, columns, dates, data_query_time, sids, mask):
+    async def load_previous_events(self, domain, columns, dates, data_query_time, sids, mask):
         if not columns:
             return {}
 
-        return self._load_events(
+        return await self._load_events(
             name_map=self.previous_value_columns,
             indexer=self.previous_event_indexer(data_query_time, sids),
             domain=domain,
@@ -187,7 +187,7 @@ class EventsLoader(PipelineLoader):
             mask=mask,
         )
 
-    def _load_events(self, name_map, indexer, domain, columns, dates, sids, mask):
+    async def _load_events(self, name_map, indexer, domain, columns, dates, sids, mask):
         def to_frame(array):
             return pd.DataFrame(array, index=dates, columns=sids)
 
@@ -221,7 +221,7 @@ class EventsLoader(PipelineLoader):
 
             # Delegate the actual array formatting logic to a DataFrameLoader.
             loader = DataFrameLoader(c, to_frame(raw), adjustments=None)
-            out[c] = loader.load_adjusted_array(
+            out[c] = await loader.load_adjusted_array(
                 domain,
                 [c],
                 dates,
@@ -230,10 +230,10 @@ class EventsLoader(PipelineLoader):
             )[c]
         return out
 
-    def load_adjusted_array(self, domain, columns, dates, sids, mask):
+    async def load_adjusted_array(self, domain, columns, dates, sids, mask):
         data_query = domain.data_query_cutoff_for_sessions(dates)
         n, p = self.split_next_and_previous_event_columns(columns)
         return merge(
-            self.load_next_events(domain, n, dates, data_query, sids, mask),
-            self.load_previous_events(domain, p, dates, data_query, sids, mask),
+            await self.load_next_events(domain, n, dates, data_query, sids, mask),
+            await self.load_previous_events(domain, p, dates, data_query, sids, mask),
         )

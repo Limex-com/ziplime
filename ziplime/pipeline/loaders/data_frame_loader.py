@@ -10,7 +10,7 @@ import pandas as pd
 from ziplime.lib.adjusted_array import AdjustedArray
 from ziplime.lib.adjustment import make_adjustment_from_labels
 from ziplime.utils.numpy_utils import as_column
-from .base import PipelineLoader
+from .pipeline_loader import PipelineLoader
 
 ADJUSTMENT_COLUMNS = pd.Index(
     [
@@ -139,7 +139,7 @@ class DataFrameLoader(PipelineLoader):
             )
         return out
 
-    def load_adjusted_array(self, domain, columns, dates, sids, mask):
+    async def load_adjusted_array(self, domain, columns, dates, sids, mask):
         """Load data from our stored baseline."""
 
         if len(columns) != 1:

@@ -6,7 +6,7 @@ Base class for Pipeline API data loaders.
 class PipelineLoader:
     """Interface for PipelineLoaders."""
 
-    def load_adjusted_array(self, domain, columns, dates, sids, mask):
+    async def load_adjusted_array(self, domain, columns, dates, sids, mask):
         """
         Load data for ``columns`` as AdjustedArrays.
 

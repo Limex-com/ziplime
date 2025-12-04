@@ -15,4 +15,25 @@ PREVIOUS_ANNOUNCEMENT = "previous_announcement"
 
 EVENT_DATE_FIELD_NAME = "event_date"
 SID_FIELD_NAME = "sid"
+
 TS_FIELD_NAME = "timestamp"
+INVALID_NUM_QTRS_MESSAGE = (
+    "Passed invalid number of quarters %s; " "must pass a number of quarters >= 0"
+)
+NEXT_FISCAL_QUARTER = "next_fiscal_quarter"
+NEXT_FISCAL_YEAR = "next_fiscal_year"
+NORMALIZED_QUARTERS = "normalized_quarters"
+PREVIOUS_FISCAL_QUARTER = "previous_fiscal_quarter"
+PREVIOUS_FISCAL_YEAR = "previous_fiscal_year"
+SHIFTED_NORMALIZED_QTRS = "shifted_normalized_quarters"
+SIMULATION_DATES = "dates"
+# These metadata columns are used to align event indexers.
+metadata_columns = frozenset(
+    {
+        TS_FIELD_NAME,
+        SID_FIELD_NAME,
+        EVENT_DATE_FIELD_NAME,
+        FISCAL_QUARTER_FIELD_NAME,
+        FISCAL_YEAR_FIELD_NAME,
+    }
+)

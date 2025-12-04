@@ -407,7 +407,7 @@ class SimplePipelineEngine(PipelineEngine):
         execution_order = plan.execution_order(workspace, refcounts)
 
         with hooks.computing_chunk(execution_order, start_date, end_date):
-            results = self.compute_chunk(
+            results = await self.compute_chunk(
                 graph=plan,
                 dates=dates,
                 sids=sids,
@@ -417,7 +417,7 @@ class SimplePipelineEngine(PipelineEngine):
                 hooks=hooks,
             )
 
-        return self._to_narrow(
+        return await self._to_narrow(
             terms=plan.outputs,
             data=results,
             mask=results.pop(plan.screen_name),
@@ -479,11 +479,18 @@ class SimplePipelineEngine(PipelineEngine):
         #
         # Build lifetimes matrix reaching back to `extra_rows` days before
         # `start_date.`
-        lifetimes = await self._asset_service.lifetimes(
-            sessions[start_idx - extra_rows : end_idx],
-            include_start_date=False,
-            country_codes=(domain.country_code,),
-        )
+        if domain.assets is not None:
+            lifetimes = await self._asset_service.asset_lifetimes(
+                dates=sessions[start_idx - extra_rows: end_idx],
+                include_start_date=False,
+                assets=domain.assets,
+            )
+        else:
+            lifetimes = await self._asset_service.lifetimes(
+                dates=sessions[start_idx - extra_rows : end_idx],
+                include_start_date=False,
+                country_codes=[domain.country_code,],
+            )
 
         if not lifetimes.columns.unique:
             columns = lifetimes.columns
@@ -559,7 +566,7 @@ class SimplePipelineEngine(PipelineEngine):
                 out.append(input_data)
         return out
 
-    def compute_chunk(
+    async def compute_chunk(
         self, graph, dates, sids, workspace, refcounts, execution_order, hooks
     ):
         """Compute the Pipeline terms in the graph for the requested start and end
@@ -655,7 +662,7 @@ class SimplePipelineEngine(PipelineEngine):
                 )
                 self._ensure_can_load(loader, to_load)
                 with hooks.loading_terms(to_load):
-                    loaded = loader.load_adjusted_array(
+                    loaded = await loader.load_adjusted_array(
                         domain=domain,
                         columns=to_load,
                         dates=mask_dates,
@@ -704,7 +711,7 @@ class SimplePipelineEngine(PipelineEngine):
             out[name] = workspace[term][graph_extra_rows[term] :]
         return out
 
-    def _to_narrow(self, terms, data, mask, dates, assets):
+    async def _to_narrow(self, terms, data, mask, dates, assets):
         """
         Convert raw computed pipeline results into a DataFrame for public APIs.
 
@@ -758,7 +765,7 @@ class SimplePipelineEngine(PipelineEngine):
             # Using this to convert np.records to tuples
             final_columns[name] = terms[name].postprocess(data[name][mask])
 
-        resolved_assets = array(self._asset_service.retrieve_all(assets))
+        resolved_assets = array(await self._asset_service.get_assets_by_sids(sids=list(assets)))
         index = _pipeline_output_index(dates, resolved_assets, mask)
         return pd.DataFrame(
             data=final_columns, index=index, columns=final_columns.keys()

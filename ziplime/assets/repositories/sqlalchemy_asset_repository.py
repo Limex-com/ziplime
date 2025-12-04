@@ -333,7 +333,27 @@ class SqlAlchemyAssetRepository(AssetRepository):
 
     async def get_assets_by_sids(self, sids: list[int]) -> list[Asset]:
         assets_by_sid = await self.get_all_assets()
-        return [assets_by_sid.get(sid, None) for sid in sids]
+        assets = [assets_by_sid.get(sid, None) for sid in sids]
+        return [Equity(
+            sid=asset.sid,
+            asset_name=asset.asset_name,
+            start_date=asset.start_date,
+            first_traded=asset.first_traded,
+            end_date=asset.end_date,
+            auto_close_date=asset.auto_close_date,
+            symbol_mapping={
+                equity_mapping.exchange: EquitySymbolMapping(
+                    company_symbol=equity_mapping.company_symbol,
+                    symbol=equity_mapping.symbol,
+                    exchange_name=equity_mapping.exchange,
+                    share_class_symbol=equity_mapping.share_class_symbol,
+                    end_date=equity_mapping.end_date,
+                    start_date=equity_mapping.start_date
+                )
+                for equity_mapping in asset.equity_symbol_mappings
+            },
+            mic=asset.mic
+        ) for asset in assets]
 
     async def get_symbols_universe(self, symbol: str) -> SymbolsUniverse | None:
         universes_by_symbol = await self.get_all_universes()
@@ -596,7 +616,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         """
 
         async with self.session_maker() as session:
-            q = select(AssetModel).where(AssetModel.sid.in_(sids))
+            q = select(AssetRouter).where(AssetModel.sid.in_(sids))
             assets = (await session.execute(q)).scalars()
             return list(assets)
 
@@ -1131,7 +1151,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         return {None: cf, "mul": mul_cf, "add": add_cf}[adjustment]
 
     @aiocache.cached(cache=Cache.MEMORY)
-    async def _compute_asset_lifetimes(self, country_codes: frozenset[str]) -> Lifetimes:
+    async def _compute_lifetimes(self, country_codes: frozenset[str]) -> Lifetimes:
         """Compute and cache a recarray of asset lifetimes"""
         sids = starts = ends = []
         async with self.session_maker() as session:
@@ -1187,7 +1207,71 @@ class SqlAlchemyAssetRepository(AssetRepository):
         numpy.putmask
         ziplime.pipeline.engine.SimplePipelineEngine._compute_root_mask
         """
-        lifetimes = await self._compute_asset_lifetimes(country_codes=frozenset(country_codes))
+        lifetimes = await self._compute_lifetimes(country_codes=frozenset(country_codes))
+        return lifetimes
+
+    @aiocache.cached(cache=Cache.MEMORY)
+    async def _compute_asset_lifetimes(self, assets: frozenset[Asset]) -> Lifetimes:
+        """Compute and cache a recarray of asset lifetimes"""
+        # sids = starts = ends = []
+        # async with self.session_maker() as session:
+        #     sids_subquery = select(EquitySymbolMappingModel.sid).join(
+        #         ExchangeInfo, onclause=ExchangeInfo.exchange == EquitySymbolMappingModel.exchange
+        #     ).where(ExchangeInfo.country_code.in_(country_codes))
+        #     q = select(
+        #         EquityModel.sid,
+        #         EquityModel.start_date,
+        #         EquityModel.end_date
+        #     ).where(EquityModel.sid.in_(sids_subquery))
+        #     result = list((await session.execute(q)))
+        #     if result:
+        #         sids, starts, ends = zip(*result)
+        sids = [asset.sid for asset in assets]
+        starts = [asset.start_date for asset in assets]
+        ends = [asset.end_date for asset in assets]
+
+        sid = np.array(sids, dtype="i8")
+        start = np.array([datetime.datetime.combine(s, datetime.datetime.min.time(), tzinfo=datetime.timezone.utc).timestamp() for s in starts], dtype="f8")
+        end = np.array([datetime.datetime.combine(s, datetime.datetime.min.time(), tzinfo=datetime.timezone.utc).timestamp() for s in ends], dtype="f8")
+        start[np.isnan(start)] = 0  # convert missing starts to 0
+        end[np.isnan(end)] = np.iinfo(int).max  # convert missing end to INTMAX
+        return Lifetimes(sid, start.astype("i8"), end.astype("i8"))
+
+
+    async def asset_lifetimes(self, assets: list[Asset], dates: pd.DatetimeIndex, include_start_date: bool):
+        """Compute a DataFrame representing asset lifetimes for the specified date
+        range.
+
+        Parameters
+        ----------
+        dates : pd.DatetimeIndex
+            The dates for which to compute lifetimes.
+        include_start_date : bool
+            Whether or not to count the asset as alive on its start_date.
+
+            This is useful in a backtesting context where `lifetimes` is being
+            used to signify "do I have data for this asset as of the morning of
+            this date?"  For many financial metrics, (e.g. daily close), data
+            isn't available for an asset until the end of the asset's first
+            day.
+        country_codes : iterable[str]
+            The country codes to get lifetimes for.
+
+        Returns
+        -------
+        lifetimes : pd.DataFrame
+            A frame of dtype bool with `dates` as index and an Int64Index of
+            assets as columns.  The value at `lifetimes.loc[date, asset]` will
+            be True iff `asset` existed on `date`.  If `include_start_date` is
+            False, then lifetimes.loc[date, asset] will be false when date ==
+            asset.start_date.
+
+        See Also
+        --------
+        numpy.putmask
+        ziplime.pipeline.engine.SimplePipelineEngine._compute_root_mask
+        """
+        lifetimes = await self._compute_asset_lifetimes(assets=frozenset(assets))
         return lifetimes
 
     # def equities_sids_for_country_code(self, country_code: str):

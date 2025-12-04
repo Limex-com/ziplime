@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 import pytz
 
+from ziplime.errors import NoFurtherDataError
 from ziplime.utils.calendar_utils import get_calendar
 
 from ziplime.utils.formatting import bulleted_list
@@ -43,6 +44,9 @@ class Domain:
        the future, we expect to expand this functionality to include more general
        concepts.
     """
+
+    def __init__(self):
+        self.assets = None
 
     def sessions(self):
         """Get all trading sessions for the calendar of this domain.
@@ -104,7 +108,6 @@ class Domain:
             ) from exc
 
 
-
 class GenericDomain(Domain):
     """Special singleton class used to represent generic DataSets and Columns."""
 
@@ -145,7 +148,7 @@ class EquityCalendarDomain(Domain):
     """
 
     def __init__(
-            self, country_code: str, calendar_name:str, data_query_offset=-np.timedelta64(45, "m")
+            self, country_code: str, calendar_name: str, data_query_offset=-np.timedelta64(45, "m")
     ):
         self._country_code = country_code
         self.calendar_name = calendar_name
@@ -164,7 +167,7 @@ class EquityCalendarDomain(Domain):
     def country_code(self):
         return self._country_code
 
-    #@lazyval
+    # @lazyval
     @property
     def calendar(self):
         return get_calendar(self.calendar_name)

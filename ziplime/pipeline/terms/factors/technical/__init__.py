@@ -1,0 +1,2 @@
+class BollingerBands:
+    pass

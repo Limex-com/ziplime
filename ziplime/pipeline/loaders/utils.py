@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from ziplime.errors import NoFurtherDataError
-from ziplime.pipeline.common import TS_FIELD_NAME, SID_FIELD_NAME
+from ziplime.pipeline.common import TS_FIELD_NAME, SID_FIELD_NAME, metadata_columns
 from ziplime.utils.date_utils import make_utc_aware
 from ziplime.utils.numpy_utils import categorical_dtype
 
@@ -14,7 +14,7 @@ def is_sorted_ascending(a):
 def validate_event_metadata(event_dates, event_timestamps, event_sids):
     assert is_sorted_ascending(event_dates), "event dates must be sorted"
     assert (
-        len(event_sids) == len(event_dates) == len(event_timestamps)
+            len(event_sids) == len(event_dates) == len(event_timestamps)
     ), "mismatched arrays: %d != %d != %d" % (
         len(event_sids),
         len(event_dates),
@@ -23,7 +23,7 @@ def validate_event_metadata(event_dates, event_timestamps, event_sids):
 
 
 def next_event_indexer(
-    all_dates, data_query_cutoff, all_sids, event_dates, event_timestamps, event_sids
+        all_dates, data_query_cutoff, all_sids, event_dates, event_timestamps, event_sids
 ):
     """
     Construct an index array that, when applied to an array of values, produces
@@ -81,7 +81,7 @@ def next_event_indexer(
 
 
 def previous_event_indexer(
-    data_query_cutoff_times, all_sids, event_dates, event_timestamps, event_sids
+        data_query_cutoff_times, all_sids, event_dates, event_timestamps, event_sids
 ):
     """
     Construct an index array that, when applied to an array of values, produces
@@ -136,18 +136,18 @@ def previous_event_indexer(
     for i in range(len(event_dates) - 1, -1, -1):
         sid_ix = sid_ixs[i]
         dt_ix = dt_ixs[i]
-        out[dt_ix : last_written.get(sid_ix, None), sid_ix] = i
+        out[dt_ix: last_written.get(sid_ix, None), sid_ix] = i
         last_written[sid_ix] = dt_ix
     return out
 
 
 def last_in_date_group(
-    df,
-    data_query_cutoff_times,
-    assets,
-    reindex=True,
-    have_sids=True,
-    extra_groupers=None,
+        df,
+        data_query_cutoff_times,
+        assets,
+        reindex=True,
+        have_sids=True,
+        extra_groupers=None,
 ):
     """
     Determine the last piece of information known on each date in the date
@@ -192,7 +192,7 @@ def last_in_date_group(
         extra_groupers = []
     idx += extra_groupers
 
-    to_unstack = idx[-1 : -len(idx) : -1]
+    to_unstack = idx[-1: -len(idx): -1]
     last_in_group = (
         df.drop(TS_FIELD_NAME, axis=1)
         .groupby(idx, sort=False)
@@ -211,7 +211,7 @@ def last_in_date_group(
         if have_sids:
             cols = last_in_group.columns
             columns = pd.MultiIndex.from_product(
-                tuple(cols.levels[0 : len(extra_groupers) + 1]) + (assets,),
+                tuple(cols.levels[0: len(extra_groupers) + 1]) + (assets,),
                 names=cols.names,
             )
             last_in_group = last_in_group.reindex(
@@ -343,4 +343,68 @@ def shift_dates(dates, start_date, end_date, shift):
         else:
             raise ValueError("Query end %s not in calendar" % end_date) from exc
 
-    return dates[start - shift : end - shift + 1]  # +1 to be inclusive
+    return dates[start - shift: end - shift + 1]  # +1 to be inclusive
+
+
+def normalize_quarters(years, quarters):
+    return years * 4 + quarters - 1
+
+
+def split_normalized_quarters(normalized_quarters):
+    years = normalized_quarters // 4
+    quarters = normalized_quarters % 4
+    return years, quarters + 1
+
+
+def required_estimates_fields(columns):
+    """Compute the set of resource columns required to serve
+    `columns`.
+    """
+    # We also expect any of the field names that our loadable columns
+    # are mapped to.
+    return metadata_columns.union(columns.values())
+
+
+def validate_column_specs(events, columns):
+    """Verify that the columns of ``events`` can be used by a
+    EarningsEstimatesLoader to serve the BoundColumns described by
+    `columns`.
+    """
+    required = required_estimates_fields(columns)
+    received = set(events.columns)
+    missing = required - received
+    if missing:
+        raise ValueError(
+            "EarningsEstimatesLoader missing required columns {missing}.\n"
+            "Got Columns: {received}\n"
+            "Expected Columns: {required}".format(
+                missing=sorted(missing),
+                received=sorted(received),
+                required=sorted(required),
+            )
+        )
+
+
+def add_new_adjustments(adjustments_dict, adjustments, column_name, ts):
+    try:
+        adjustments_dict[column_name][ts].extend(adjustments)
+    except KeyError:
+        adjustments_dict[column_name][ts] = adjustments
+
+def validate_split_adjusted_column_specs(name_map, columns):
+    to_be_split = set(columns)
+    available = set(name_map.keys())
+    extra = to_be_split - available
+    if extra:
+        raise ValueError(
+            "EarningsEstimatesLoader got the following extra columns to be "
+            "split-adjusted: {extra}.\n"
+            "Got Columns: {to_be_split}\n"
+            "Available Columns: {available}".format(
+                extra=sorted(extra),
+                to_be_split=sorted(to_be_split),
+                available=sorted(available),
+            )
+        )
+
+

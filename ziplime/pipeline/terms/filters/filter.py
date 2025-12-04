@@ -2,8 +2,8 @@ from operator import attrgetter
 
 from ziplime.errors import UnsupportedDataType
 from ziplime.pipeline.dtypes import FILTER_DTYPES
+from ziplime.pipeline.errors.bad_binary_operator import BadBinaryOperator
 from ziplime.pipeline.expression import (
-    BadBinaryOperator,
     FILTER_BINOPS,
     method_name_for_op,
     NumericalExpression,

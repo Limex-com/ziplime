@@ -60,7 +60,9 @@ async def run_algorithm(
         else:
             logger.info(f"\n{algorithm.algorithm_text}")
     exchanges_dict = {exchange.name: exchange for exchange in exchanges}
-    pipeline_loader = EquityPricingLoader.without_fx(None)  # TODO: fix pipeline
+    pipeline_loader = EquityPricingLoader.without_fx(data_source=None,
+                                                     asset_service=asset_service
+                                                     )  # TODO: fix pipeline
 
     def choose_loader(column):
         if column in USEquityPricing.columns:
@@ -93,6 +95,7 @@ async def run_algorithm(
         emission_rate=clock.emission_rate,
         benchmark_fields=frozenset({"close"})
     )
+    await benchmark_source.validate_benchmark(benchmark_asset=benchmark_asset)
 
     tr = TradingAlgorithm(
         exchanges=exchanges_dict,

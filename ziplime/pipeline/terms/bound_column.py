@@ -6,8 +6,6 @@ from ziplime.pipeline.terms.asset_exists import AssetExists
 
 from ziplime.pipeline.terms.classifiers import Classifier, Latest as LatestClassifier
 from ziplime.pipeline.domain import GENERIC
-from ziplime.pipeline.terms.factors import Factor, Latest as LatestFactor
-from ziplime.pipeline.terms.filters import Filter, Latest as LatestFilter
 from ziplime.pipeline.terms.loadable_term import LoadableTerm
 from ziplime.utils.numpy_utils import float64_dtype
 
@@ -175,6 +173,8 @@ class BoundColumn(LoadableTerm):
             Column producing the same data as ``self``, but currency-converted
             into ``currency``.
         """
+        from ziplime.pipeline.data.dataset import CurrencyConversion
+
         conversion = self._currency_conversion
 
         if not self._currency_aware:
@@ -236,6 +236,9 @@ class BoundColumn(LoadableTerm):
 
     @property
     def latest(self):
+        from ziplime.pipeline.terms.factors import Factor, Latest as LatestFactor
+        from ziplime.pipeline.terms.filters import Filter, Latest as LatestFilter
+
         dtype = self.dtype
         if dtype in Filter.ALLOWED_DTYPES:
             Latest = LatestFilter

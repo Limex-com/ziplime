@@ -179,3 +179,12 @@ class DataSource:
             include_end_date=True,
         )
         return df_raw
+
+    def get_data_by_date_and_sids(self, fields: frozenset[str],
+                                  start_date: datetime.datetime,
+                                  end_date: datetime.datetime,
+                                  frequency: datetime.timedelta | Period,
+                                  sids: frozenset[int],
+                                  include_bounds: bool,
+                                  ) -> pl.DataFrame:
+        ...

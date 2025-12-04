@@ -2034,7 +2034,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         for new_order in new_orders.values():
             self._ledger.process_order(order=new_order)
 
-    def once_a_day(
+    async def once_a_day(
             self,
             midnight_dt,
             current_data,
@@ -2060,7 +2060,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         )
 
         if assets_we_care_about:
-            splits = asset_service.get_splits(assets_we_care_about, midnight_dt)
+            splits = await asset_service.get_splits(assets_we_care_about, midnight_dt)
             if splits:
                 self.blotter.process_splits(splits)
                 self._ledger.process_splits(splits)
@@ -2113,7 +2113,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                                                                           handle_data=self.event_manager.handle_data):
                             yield capital_change_packet, []
                     elif action == SimulationEvent.SESSION_START:
-                        for capital_change_packet in self.once_a_day(midnight_dt=dt,
+                        for capital_change_packet in await self.once_a_day(midnight_dt=dt,
                                                                      current_data=self.current_data,
                                                                      asset_service=self.asset_service):
                             yield capital_change_packet, []

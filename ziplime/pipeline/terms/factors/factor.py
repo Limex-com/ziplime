@@ -1,387 +1,38 @@
-"""
-factor.py
-"""
-
-import numpy as np
-from operator import attrgetter
-from numbers import Number
-from math import ceil
 from textwrap import dedent
 
-from numpy import empty_like, inf, isnan, nan, where
+from numpy import inf, nan
 from scipy.stats import rankdata
 
-from ziplime.pipeline.terms.asset_exists import AssetExists
 from ziplime.pipeline.terms.computable_term import ComputableTerm
+from ziplime.pipeline.terms.factors.utils.grouped_row_transform_utils import demean, zscore, winsorize
+from ziplime.pipeline.terms.factors.utils.operators import binary_operator, reflected_binary_operator, unary_operator, \
+    function_application
+from ziplime.pipeline.terms.factors.utils.summary_funcs import summary_method, summary_funcs
 from ziplime.pipeline.terms.term import Term
-from ziplime.utils.compat import wraps
-from ziplime.errors import (
-    BadPercentileBounds,
-    UnknownRankMethod,
-    UnsupportedDataType,
-)
-from ziplime.lib.normalize import naive_grouped_rowwise_apply
-from ziplime.lib.rank import masked_rankdata_2d, rankdata_1d_descending
-from ziplime.pipeline.terms.classifiers import Classifier, Everything, Quantiles
-from ziplime.pipeline.dtypes import (
-    CLASSIFIER_DTYPES,
-    FACTOR_DTYPES,
-    FILTER_DTYPES,
-)
+from ziplime.errors import BadPercentileBounds
+from ziplime.lib.rank import rankdata_1d_descending
+from ziplime.pipeline.terms.classifiers import Classifier, Quantiles
+from ziplime.pipeline.dtypes import FACTOR_DTYPES
+
 from ziplime.pipeline.expression import (
-    BadBinaryOperator,
     COMPARISONS,
-    is_comparison,
     MATH_BINOPS,
     method_name_for_op,
-    NumericalExpression,
     NUMEXPR_MATH_FUNCS,
     UNARY_OPS,
     unary_op_name,
 )
 from ziplime.pipeline.terms.filters import (
     Filter,
-    NumExprFilter,
     PercentileFilter,
     MaximumFilter,
 )
-from ziplime.pipeline.mixins import (
-    CustomTermMixin,
-    LatestMixin,
-    PositiveWindowLengthMixin,
-    RestrictedDTypeMixin,
-    SingleInputMixin,
-)
-from ziplime.utils.functional import with_doc, with_name
-from ziplime.utils.math_utils import (
-    nanmax,
-    nanmean,
-    nanmedian,
-    nanmin,
-    nanstd,
-    nansum,
-)
-from ziplime.utils.numpy_utils import (
-    as_column,
-    bool_dtype,
-    coerce_to_dtype,
-    float64_dtype,
-    is_missing,
-)
+from ziplime.pipeline.mixins import RestrictedDTypeMixin
+
+from ziplime.utils.numpy_utils import float64_dtype
 from ziplime.utils.sharedoc import templated_docstring
 
-_RANK_METHODS = frozenset(["average", "min", "max", "dense", "ordinal"])
 
-
-def coerce_numbers_to_my_dtype(f):
-    """
-    A decorator for methods whose signature is f(self, other) that coerces
-    ``other`` to ``self.dtype``.
-
-    This is used to make comparison operations between numbers and `Factor`
-    instances work independently of whether the user supplies a float or
-    integer literal.
-
-    For example, if I write::
-
-        my_filter = my_factor > 3
-
-    my_factor probably has dtype float64, but 3 is an int, so we want to coerce
-    to float64 before doing the comparison.
-    """
-
-    @wraps(f)
-    def method(self, other):
-        if isinstance(other, Number):
-            other = coerce_to_dtype(self.dtype, other)
-        return f(self, other)
-
-    return method
-
-
-def binop_return_dtype(op, left, right):
-    """
-    Compute the expected return dtype for the given binary operator.
-
-    Parameters
-    ----------
-    op : str
-        Operator symbol, (e.g. '+', '-', ...).
-    left : numpy.dtype
-        Dtype of left hand side.
-    right : numpy.dtype
-        Dtype of right hand side.
-
-    Returns
-    -------
-    outdtype : numpy.dtype
-        The dtype of the result of `left <op> right`.
-    """
-    if is_comparison(op):
-        if left != right:
-            raise TypeError(
-                "Don't know how to compute {left} {op} {right}.\n"
-                "Comparisons are only supported between Factors of equal "
-                "dtypes.".format(left=left, op=op, right=right)
-            )
-        return bool_dtype
-
-    elif left != float64_dtype or right != float64_dtype:
-        raise TypeError(
-            "Don't know how to compute {left} {op} {right}.\n"
-            "Arithmetic operators are only supported between Factors of "
-            "dtype 'float64'.".format(
-                left=left.name,
-                op=op,
-                right=right.name,
-            )
-        )
-    return float64_dtype
-
-
-BINOP_DOCSTRING_TEMPLATE = """
-Construct a :class:`~ziplime.pipeline.{rtype}` computing ``self {op} other``.
-
-Parameters
-----------
-other : ziplime.pipeline.Factor, float
-    Right-hand side of the expression.
-
-Returns
--------
-{ret}
-"""
-
-BINOP_RETURN_FILTER = """\
-filter : ziplime.pipeline.Filter
-    Filter computing ``self {op} other`` with the outputs of ``self`` and
-    ``other``.
-"""
-
-BINOP_RETURN_FACTOR = """\
-factor : ziplime.pipeline.Factor
-    Factor computing ``self {op} other`` with outputs of ``self`` and
-    ``other``.
-"""
-
-
-def binary_operator(op):
-    """
-    Factory function for making binary operator methods on a Factor subclass.
-
-    Returns a function, "binary_operator" suitable for implementing functions
-    like __add__.
-    """
-    # When combining a Factor with a NumericalExpression, we use this
-    # attrgetter instance to defer to the commuted implementation of the
-    # NumericalExpression operator.
-    commuted_method_getter = attrgetter(method_name_for_op(op, commute=True))
-
-    is_compare = is_comparison(op)
-
-    if is_compare:
-        ret_doc = BINOP_RETURN_FILTER.format(op=op)
-        rtype = "Filter"
-    else:
-        ret_doc = BINOP_RETURN_FACTOR.format(op=op)
-        rtype = "Factor"
-
-    docstring = BINOP_DOCSTRING_TEMPLATE.format(
-        op=op,
-        ret=ret_doc,
-        rtype=rtype,
-    )
-
-    @with_doc(docstring)
-    @with_name(method_name_for_op(op))
-    @coerce_numbers_to_my_dtype
-    def binary_operator(self, other):
-        # This can't be hoisted up a scope because the types returned by
-        # binop_return_type aren't defined when the top-level function is
-        # invoked in the class body of Factor.
-        return_type = NumExprFilter if is_compare else NumExprFactor
-
-        if isinstance(self, NumExprFactor):
-            self_expr, other_expr, new_inputs = self.build_binary_op(
-                op,
-                other,
-            )
-            return return_type(
-                "({left}) {op} ({right})".format(
-                    left=self_expr,
-                    op=op,
-                    right=other_expr,
-                ),
-                new_inputs,
-                dtype=binop_return_dtype(op, self.dtype, other.dtype),
-            )
-        elif isinstance(other, NumExprFactor):
-            # NumericalExpression overrides ops to correctly handle merging of
-            # inputs.  Look up and call the appropriate reflected operator with
-            # ourself as the input.
-            return commuted_method_getter(other)(self)
-        elif isinstance(other, Term):
-            if self is other:
-                return return_type(
-                    "x_0 {op} x_0".format(op=op),
-                    (self,),
-                    dtype=binop_return_dtype(op, self.dtype, other.dtype),
-                )
-            return return_type(
-                "x_0 {op} x_1".format(op=op),
-                (self, other),
-                dtype=binop_return_dtype(op, self.dtype, other.dtype),
-            )
-        elif isinstance(other, Number):
-            return return_type(
-                "x_0 {op} ({constant})".format(op=op, constant=other),
-                binds=(self,),
-                # .dtype access is safe here because coerce_numbers_to_my_dtype
-                # will convert any input numbers to numpy equivalents.
-                dtype=binop_return_dtype(op, self.dtype, other.dtype),
-            )
-        raise BadBinaryOperator(op, self, other)
-
-    return binary_operator
-
-
-def reflected_binary_operator(op):
-    """
-    Factory function for making binary operator methods on a Factor.
-
-    Returns a function, "reflected_binary_operator" suitable for implementing
-    functions like __radd__.
-    """
-    assert not is_comparison(op)
-
-    @with_name(method_name_for_op(op, commute=True))
-    @coerce_numbers_to_my_dtype
-    def reflected_binary_operator(self, other):
-
-        if isinstance(self, NumericalExpression):
-            self_expr, other_expr, new_inputs = self.build_binary_op(op, other)
-            return NumExprFactor(
-                "({left}) {op} ({right})".format(
-                    left=other_expr,
-                    right=self_expr,
-                    op=op,
-                ),
-                new_inputs,
-                dtype=binop_return_dtype(op, other.dtype, self.dtype),
-            )
-
-        # Only have to handle the numeric case because in all other valid cases
-        # the corresponding left-binding method will be called.
-        elif isinstance(other, Number):
-            return NumExprFactor(
-                "{constant} {op} x_0".format(op=op, constant=other),
-                binds=(self,),
-                dtype=binop_return_dtype(op, other.dtype, self.dtype),
-            )
-        raise BadBinaryOperator(op, other, self)
-
-    return reflected_binary_operator
-
-
-def unary_operator(op):
-    """
-    Factory function for making unary operator methods for Factors.
-    """
-    # Only negate is currently supported.
-    valid_ops = {"-"}
-    if op not in valid_ops:
-        raise ValueError("Invalid unary operator %s." % op)
-
-    @with_doc("Unary Operator: '%s'" % op)
-    @with_name(unary_op_name(op))
-    def unary_operator(self):
-        if self.dtype != float64_dtype:
-            raise TypeError(
-                "Can't apply unary operator {op!r} to instance of "
-                "{typename!r} with dtype {dtypename!r}.\n"
-                "{op!r} is only supported for Factors of dtype "
-                "'float64'.".format(
-                    op=op,
-                    typename=type(self).__name__,
-                    dtypename=self.dtype.name,
-                )
-            )
-
-        # This can't be hoisted up a scope because the types returned by
-        # unary_op_return_type aren't defined when the top-level function is
-        # invoked.
-        if isinstance(self, NumericalExpression):
-            return NumExprFactor(
-                "{op}({expr})".format(op=op, expr=self._expr),
-                self.inputs,
-                dtype=float64_dtype,
-            )
-        else:
-            return NumExprFactor(
-                "{op}x_0".format(op=op),
-                (self,),
-                dtype=float64_dtype,
-            )
-
-    return unary_operator
-
-
-def function_application(func):
-    """
-    Factory function for producing function application methods for Factor
-    subclasses.
-    """
-    if func not in NUMEXPR_MATH_FUNCS:
-        raise ValueError("Unsupported mathematical function '%s'" % func)
-
-    docstring = dedent(
-        """\
-        Construct a Factor that computes ``{}()`` on each output of ``self``.
-
-        Returns
-        -------
-        factor : ziplime.pipeline.Factor
-        """.format(
-            func
-        )
-    )
-
-    @with_doc(docstring)
-    @with_name(func)
-    def mathfunc(self):
-        if isinstance(self, NumericalExpression):
-            return NumExprFactor(
-                "{func}({expr})".format(func=func, expr=self._expr),
-                self.inputs,
-                dtype=float64_dtype,
-            )
-        else:
-            return NumExprFactor(
-                "{func}(x_0)".format(func=func),
-                (self,),
-                dtype=float64_dtype,
-            )
-
-    return mathfunc
-
-
-# Decorators for Factor methods.
-# if_not_float64_tell_caller_to_use_isnull = restrict_to_dtype(
-#     dtype=float64_dtype,
-#     message_template=(
-#         "{method_name}() was called on a factor of dtype {received_dtype}.\n"
-#         "{method_name}() is only defined for dtype {expected_dtype}."
-#         "To filter missing data, use isnull() or notnull()."
-#     ),
-# )
-
-# float64_only = restrict_to_dtype(
-#     dtype=float64_dtype,
-#     message_template=(
-#         "{method_name}() is only defined on Factors of dtype {expected_dtype},"
-#         " but it was called on a Factor of dtype {received_dtype}."
-#     ),
-# )
 
 CORRELATION_METHOD_NOTE = dedent(
     """\
@@ -394,71 +45,6 @@ CORRELATION_METHOD_NOTE = dedent(
     :meth:`~ziplime.pipeline.Factor.zscore`.
     """
 )
-
-
-class summary_funcs:
-    """Namespace of functions meant to be used with DailySummary."""
-
-    @staticmethod
-    def mean(a, missing_value):
-        return nanmean(a, axis=1)
-
-    @staticmethod
-    def stddev(a, missing_value):
-        return nanstd(a, axis=1)
-
-    @staticmethod
-    def max(a, missing_value):
-        return nanmax(a, axis=1)
-
-    @staticmethod
-    def min(a, missing_value):
-        return nanmin(a, axis=1)
-
-    @staticmethod
-    def median(a, missing_value):
-        return nanmedian(a, axis=1)
-
-    @staticmethod
-    def sum(a, missing_value):
-        return nansum(a, axis=1)
-
-    @staticmethod
-    def notnull_count(a, missing_value):
-        return (~is_missing(a, missing_value)).sum(axis=1)
-
-    names = {k for k in locals() if not k.startswith("_")}
-
-
-def summary_method(name):
-    func = getattr(summary_funcs, name)
-
-    #@float64_only
-    def f(self, mask: Filter | None = None):
-        """Create a 1-dimensional factor computing the {} of self, each day.
-
-        Parameters
-        ----------
-        mask : ziplime.pipeline.Filter, optional
-           A Filter representing assets to consider when computing results.
-           If supplied, we ignore asset/date pairs where ``mask`` produces
-           ``False``.
-
-        Returns
-        -------
-        result : ziplime.pipeline.Factor
-        """
-        return DailySummary(
-            func,
-            self,
-            mask=mask,
-            dtype=self.dtype,
-        )
-
-    f.__name__ = func.__name__
-    f.__doc__ = f.__doc__.format(f.__name__)
-
-    return f
 
 
 class Factor(RestrictedDTypeMixin, ComputableTerm):
@@ -643,6 +229,8 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         --------
         :meth:`pandas.DataFrame.groupby`
         """
+        from ziplime.pipeline.terms.factors.grouped_row_transform import GroupedRowTransform
+
         return GroupedRowTransform(
             transform=demean,
             transform_args=(),
@@ -707,6 +295,8 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         --------
         :meth:`pandas.DataFrame.groupby`
         """
+        from ziplime.pipeline.terms.factors.grouped_row_transform import GroupedRowTransform
+
         return GroupedRowTransform(
             transform=zscore,
             transform_args=(),
@@ -760,6 +350,8 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         --------
         :func:`scipy.stats.rankdata`
         """
+        from ziplime.pipeline.terms.factors.grouped_row_transform import GroupedRowTransform
+        from ziplime.pipeline.terms.factors.rank import Rank
 
         if groupby is None:
             return Rank(self, method=method, ascending=ascending, mask=mask)
@@ -830,7 +422,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         :class:`ziplime.pipeline.factors.RollingPearsonOfReturns`
         :meth:`Factor.spearmanr`
         """
-        from .statistical import RollingPearson
+        from .statistical.rolling_pearson import RollingPearson
 
         return RollingPearson(
             base_factor=self,
@@ -893,7 +485,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         :func:`scipy.stats.spearmanr`
         :meth:`Factor.pearsonr`
         """
-        from .statistical import RollingSpearman
+        from .statistical.rolling_spearman import RollingSpearman
 
         return RollingSpearman(
             base_factor=self,
@@ -953,7 +545,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         --------
         :func:`scipy.stats.linregress`
         """
-        from .statistical import RollingLinearRegression
+        from .statistical.rolling_linear_regression import RollingLinearRegression
 
         return RollingLinearRegression(
             dependent=self,
@@ -1048,6 +640,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
                 max_percentile=max_percentile,
                 upper_bound=1.0,
             )
+        from ziplime.pipeline.terms.factors import GroupedRowTransform
         return GroupedRowTransform(
             transform=winsorize,
             transform_args=(min_percentile, max_percentile),
@@ -1300,7 +893,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         --------
         numpy.clip
         """
-        from .basic import Clip
+        from .basic.clip import Clip
 
         return Clip(
             inputs=[self],
@@ -1313,554 +906,6 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         return Factor
 
 
-class NumExprFactor(NumericalExpression, Factor):
-    """
-    Factor computed from a numexpr expression.
 
-    Parameters
-    ----------
-    expr : string
-       A string suitable for passing to numexpr.  All variables in 'expr'
-       should be of the form "x_i", where i is the index of the corresponding
-       factor input in 'binds'.
-    binds : tuple
-       A tuple of factors to use as inputs.
 
-    Notes
-    -----
-    NumExprFactors are constructed by numerical operators like `+` and `-`.
-    Users should rarely need to construct a NumExprFactor directly.
-    """
 
-    pass
-
-
-class GroupedRowTransform(Factor):
-    """
-    A Factor that transforms an input factor by applying a row-wise
-    shape-preserving transformation on classifier-defined groups of that
-    Factor.
-
-    This is most often useful for normalization operators like ``zscore`` or
-    ``demean`` or for performing ranking using ``rank``.
-
-    Parameters
-    ----------
-    transform : function[ndarray[ndim=1] -> ndarray[ndim=1]]
-        Function to apply over each row group.
-    factor : ziplime.pipeline.Factor
-        The factor providing baseline data to transform.
-    mask : ziplime.pipeline.Filter
-        Mask of entries to ignore when calculating transforms.
-    groupby : ziplime.pipeline.Classifier
-        Classifier partitioning ``factor`` into groups to use when calculating
-        means.
-    transform_args : tuple[hashable]
-        Additional positional arguments to forward to ``transform``.
-
-    Notes
-    -----
-    Users should rarely construct instances of this factor directly.  Instead,
-    they should construct instances via factor normalization methods like
-    ``zscore`` and ``demean`` or using ``rank`` with ``groupby``.
-
-    See Also
-    --------
-    ziplime.pipeline.Factor.zscore
-    ziplime.pipeline.Factor.demean
-    ziplime.pipeline.Factor.rank
-    """
-
-    window_length = 0
-
-    def __new__(
-            cls,
-            transform,
-            transform_args,
-            factor,
-            groupby,
-            dtype,
-            missing_value,
-            mask,
-            **kwargs,
-    ):
-
-        if mask is None:
-            mask = factor.mask
-        else:
-            mask = mask & factor.mask
-
-        if groupby is None:
-            groupby = Everything(mask=mask)
-
-        return super(GroupedRowTransform, cls).__new__(
-            GroupedRowTransform,
-            transform=transform,
-            transform_args=transform_args,
-            inputs=(factor, groupby),
-            missing_value=missing_value,
-            mask=mask,
-            dtype=dtype,
-            **kwargs,
-        )
-
-    def _init(self, transform, transform_args, *args, **kwargs):
-        self._transform = transform
-        self._transform_args = transform_args
-        return super(GroupedRowTransform, self)._init(*args, **kwargs)
-
-    @classmethod
-    def _static_identity(cls, transform, transform_args, *args, **kwargs):
-        return (
-            super(GroupedRowTransform, cls)._static_identity(*args, **kwargs),
-            transform,
-            transform_args,
-        )
-
-    def _compute(self, arrays, dates, assets, mask):
-        data = arrays[0]
-        group_labels, null_label = self.inputs[1]._to_integral(arrays[1])
-        # Make a copy with the null code written to masked locations.
-        group_labels = where(mask, group_labels, null_label)
-        return where(
-            group_labels != null_label,
-            naive_grouped_rowwise_apply(
-                data=data,
-                group_labels=group_labels,
-                func=self._transform,
-                func_args=self._transform_args,
-                out=empty_like(data, dtype=self.dtype),
-            ),
-            self.missing_value,
-        )
-
-    @property
-    def transform_name(self):
-        return self._transform.__name__
-
-    def graph_repr(self):
-        """Short repr to use when rendering Pipeline graphs."""
-        return type(self).__name__ + "(%r)" % self.transform_name
-
-
-class Rank(SingleInputMixin, Factor):
-    """
-    A Factor representing the row-wise rank data of another Factor.
-
-    Parameters
-    ----------
-    factor : ziplime.pipeline.Factor
-        The factor on which to compute ranks.
-    method : str, {'average', 'min', 'max', 'dense', 'ordinal'}
-        The method used to assign ranks to tied elements.  See
-        `scipy.stats.rankdata` for a full description of the semantics for each
-        ranking method.
-
-    See Also
-    --------
-    :func:`scipy.stats.rankdata`
-    :class:`Factor.rank`
-
-    Notes
-    -----
-    Most users should call Factor.rank rather than directly construct an
-    instance of this class.
-    """
-
-    window_length = 0
-    dtype = float64_dtype
-    window_safe = True
-
-    def __new__(cls, factor, method, ascending, mask):
-        return super(Rank, cls).__new__(
-            cls,
-            inputs=(factor,),
-            method=method,
-            ascending=ascending,
-            mask=mask,
-        )
-
-    def _init(self, method, ascending, *args, **kwargs):
-        self._method = method
-        self._ascending = ascending
-        return super(Rank, self)._init(*args, **kwargs)
-
-    @classmethod
-    def _static_identity(cls, method, ascending, *args, **kwargs):
-        return (
-            super(Rank, cls)._static_identity(*args, **kwargs),
-            method,
-            ascending,
-        )
-
-    def _validate(self):
-        """
-        Verify that the stored rank method is valid.
-        """
-        if self._method not in _RANK_METHODS:
-            raise UnknownRankMethod(
-                method=self._method,
-                choices=set(_RANK_METHODS),
-            )
-        return super(Rank, self)._validate()
-
-    def _compute(self, arrays, dates, assets, mask):
-        """
-        For each row in the input, compute a like-shaped array of per-row
-        ranks.
-        """
-        return masked_rankdata_2d(
-            arrays[0],
-            mask,
-            self.inputs[0].missing_value,
-            self._method,
-            self._ascending,
-        )
-
-    def __repr__(self):
-        if self.mask is AssetExists():
-            # Don't include mask in repr if it's the default.
-            mask_info = ""
-        else:
-            mask_info = ", mask={}".format(self.mask.recursive_repr())
-
-        return "{type}({input_}, method='{method}'{mask_info})".format(
-            type=type(self).__name__,
-            input_=self.inputs[0].recursive_repr(),
-            method=self._method,
-            mask_info=mask_info,
-        )
-
-    def graph_repr(self):
-        # Graphviz interprets `\l` as "divide label into lines, left-justified"
-        return "Rank:\\l  method: {!r}\\l  mask: {}\\l".format(
-            self._method,
-            type(self.mask).__name__,
-        )
-
-
-class CustomFactor(PositiveWindowLengthMixin, CustomTermMixin, Factor):
-    '''
-    Base class for user-defined Factors.
-
-    Parameters
-    ----------
-    inputs : iterable, optional
-        An iterable of `BoundColumn` instances (e.g. USEquityPricing.close),
-        describing the data to load and pass to `self.compute`.  If this
-        argument is not passed to the CustomFactor constructor, we look for a
-        class-level attribute named `inputs`.
-    outputs : iterable[str], optional
-        An iterable of strings which represent the names of each output this
-        factor should compute and return. If this argument is not passed to the
-        CustomFactor constructor, we look for a class-level attribute named
-        `outputs`.
-    window_length : int, optional
-        Number of rows to pass for each input.  If this argument is not passed
-        to the CustomFactor constructor, we look for a class-level attribute
-        named `window_length`.
-    mask : ziplime.pipeline.Filter, optional
-        A Filter describing the assets on which we should compute each day.
-        Each call to ``CustomFactor.compute`` will only receive assets for
-        which ``mask`` produced True on the day for which compute is being
-        called.
-
-    Notes
-    -----
-    Users implementing their own Factors should subclass CustomFactor and
-    implement a method named `compute` with the following signature:
-
-    .. code-block:: python
-
-        def compute(self, today, assets, out, *inputs):
-           ...
-
-    On each simulation date, ``compute`` will be called with the current date,
-    an array of sids, an output array, and an input array for each expression
-    passed as inputs to the CustomFactor constructor.
-
-    The specific types of the values passed to `compute` are as follows::
-
-        today : np.datetime64[ns]
-            Row label for the last row of all arrays passed as `inputs`.
-        assets : np.array[int64, ndim=1]
-            Column labels for `out` and`inputs`.
-        out : np.array[self.dtype, ndim=1]
-            Output array of the same shape as `assets`.  `compute` should write
-            its desired return values into `out`. If multiple outputs are
-            specified, `compute` should write its desired return values into
-            `out.<output_name>` for each output name in `self.outputs`.
-        *inputs : tuple of np.array
-            Raw data arrays corresponding to the values of `self.inputs`.
-
-    ``compute`` functions should expect to be passed NaN values for dates on
-    which no data was available for an asset.  This may include dates on which
-    an asset did not yet exist.
-
-    For example, if a CustomFactor requires 10 rows of close price data, and
-    asset A started trading on Monday June 2nd, 2014, then on Tuesday, June
-    3rd, 2014, the column of input data for asset A will have 9 leading NaNs
-    for the preceding days on which data was not yet available.
-
-    Examples
-    --------
-
-    A CustomFactor with pre-declared defaults:
-
-    .. code-block:: python
-
-        class TenDayRange(CustomFactor):
-            """
-            Computes the difference between the highest high in the last 10
-            days and the lowest low.
-
-            Pre-declares high and low as default inputs and `window_length` as
-            10.
-            """
-
-            inputs = [USEquityPricing.high, USEquityPricing.low]
-            window_length = 10
-
-            def compute(self, today, assets, out, highs, lows):
-                from numpy import nanmin, nanmax
-
-                highest_highs = nanmax(highs, axis=0)
-                lowest_lows = nanmin(lows, axis=0)
-                out[:] = highest_highs - lowest_lows
-
-
-        # Doesn't require passing inputs or window_length because they're
-        # pre-declared as defaults for the TenDayRange class.
-        ten_day_range = TenDayRange()
-
-    A CustomFactor without defaults:
-
-    .. code-block:: python
-
-        class MedianValue(CustomFactor):
-            """
-            Computes the median value of an arbitrary single input over an
-            arbitrary window..
-
-            Does not declare any defaults, so values for `window_length` and
-            `inputs` must be passed explicitly on every construction.
-            """
-
-            def compute(self, today, assets, out, data):
-                from numpy import nanmedian
-                out[:] = data.nanmedian(data, axis=0)
-
-        # Values for `inputs` and `window_length` must be passed explicitly to
-        # MedianValue.
-        median_close10 = MedianValue([USEquityPricing.close], window_length=10)
-        median_low15 = MedianValue([USEquityPricing.low], window_length=15)
-
-    A CustomFactor with multiple outputs:
-
-    .. code-block:: python
-
-        class MultipleOutputs(CustomFactor):
-            inputs = [USEquityPricing.close]
-            outputs = ['alpha', 'beta']
-            window_length = N
-
-            def compute(self, today, assets, out, close):
-                computed_alpha, computed_beta = some_function(close)
-                out.alpha[:] = computed_alpha
-                out.beta[:] = computed_beta
-
-        # Each output is returned as its own Factor upon instantiation.
-        alpha, beta = MultipleOutputs()
-
-        # Equivalently, we can create a single factor instance and access each
-        # output as an attribute of that instance.
-        multiple_outputs = MultipleOutputs()
-        alpha = multiple_outputs.alpha
-        beta = multiple_outputs.beta
-
-    Note: If a CustomFactor has multiple outputs, all outputs must have the
-    same dtype. For instance, in the example above, if alpha is a float then
-    beta must also be a float.
-    '''
-
-    dtype = float64_dtype
-
-    def _validate(self):
-        try:
-            super(CustomFactor, self)._validate()
-        except UnsupportedDataType as exc:
-            if self.dtype in CLASSIFIER_DTYPES:
-                raise UnsupportedDataType(
-                    typename=type(self).__name__,
-                    dtype=self.dtype,
-                    hint="Did you mean to create a CustomClassifier?",
-                ) from exc
-            elif self.dtype in FILTER_DTYPES:
-                raise UnsupportedDataType(
-                    typename=type(self).__name__,
-                    dtype=self.dtype,
-                    hint="Did you mean to create a CustomFilter?",
-                ) from exc
-            raise
-
-    def __getattribute__(self, name):
-        outputs = object.__getattribute__(self, "outputs")
-        if outputs is None:
-            return super(CustomFactor, self).__getattribute__(name)
-        elif name in outputs:
-            return RecarrayField(factor=self, attribute=name)
-        else:
-            try:
-                return super(CustomFactor, self).__getattribute__(name)
-            except AttributeError as exc:
-                raise AttributeError(
-                    "Instance of {factor} has no output named {attr!r}. "
-                    "Possible choices are: {choices}.".format(
-                        factor=type(self).__name__,
-                        attr=name,
-                        choices=self.outputs,
-                    )
-                ) from exc
-
-    def __iter__(self):
-        if self.outputs is None:
-            raise ValueError(
-                "{factor} does not have multiple outputs.".format(
-                    factor=type(self).__name__,
-                )
-            )
-        return (RecarrayField(self, attr) for attr in self.outputs)
-
-
-class RecarrayField(SingleInputMixin, Factor):
-    """
-    A single field from a multi-output factor.
-    """
-
-    def __new__(cls, factor, attribute):
-        return super(RecarrayField, cls).__new__(
-            cls,
-            attribute=attribute,
-            inputs=[factor],
-            window_length=0,
-            mask=factor.mask,
-            dtype=factor.dtype,
-            missing_value=factor.missing_value,
-            window_safe=factor.window_safe,
-        )
-
-    def _init(self, attribute, *args, **kwargs):
-        self._attribute = attribute
-        return super(RecarrayField, self)._init(*args, **kwargs)
-
-    @classmethod
-    def _static_identity(cls, attribute, *args, **kwargs):
-        return (
-            super(RecarrayField, cls)._static_identity(*args, **kwargs),
-            attribute,
-        )
-
-    def _compute(self, windows, dates, assets, mask):
-        return windows[0][self._attribute]
-
-    def graph_repr(self):
-        return "{}.{}".format(self.inputs[0].recursive_repr(), self._attribute)
-
-
-class Latest(LatestMixin, CustomFactor):
-    """
-    Factor producing the most recently-known value of `inputs[0]` on each day.
-
-    The `.latest` attribute of DataSet columns returns an instance of this
-    Factor.
-    """
-
-    window_length = 1
-
-    def compute(self, today, assets, out, data):
-        out[:] = data[-1]
-
-
-class DailySummary(SingleInputMixin, Factor):
-    """1D Factor that computes a summary statistic across all assets."""
-
-    ndim = 1
-    window_length = 0
-    params = ("func",)
-
-    def __new__(cls, func, input_, mask, dtype):
-        # TODO: We should be able to support datetime64 as well, but that
-        # requires extra care for handling NaT.
-        if dtype != float64_dtype:
-            raise AssertionError(
-                "DailySummary only supports float64 dtype, got {}".format(dtype),
-            )
-
-        return super(DailySummary, cls).__new__(
-            cls,
-            inputs=[input_],
-            dtype=dtype,
-            missing_value=nan,
-            window_safe=input_.window_safe,
-            func=func,
-            mask=mask,
-        )
-
-    def _compute(self, arrays, dates, assets, mask):
-        func = self.params["func"]
-
-        data = arrays[0]
-        data[~mask] = nan
-        if not isnan(self.inputs[0].missing_value):
-            data[data == self.inputs[0].missing_value] = nan
-
-        return as_column(func(data, self.inputs[0].missing_value))
-
-    def __repr__(self):
-        return "{}.{}()".format(
-            self.inputs[0].recursive_repr(),
-            self.params["func"].__name__,
-        )
-
-    graph_repr = recursive_repr = __repr__
-
-
-# Functions to be passed to GroupedRowTransform.  These aren't defined inline
-# because the transformation function is part of the instance hash key.
-def demean(row):
-    return row - nanmean(row)
-
-
-def zscore(row):
-    with np.errstate(divide="ignore", invalid="ignore"):
-        return (row - nanmean(row)) / nanstd(row)
-
-
-def winsorize(row, min_percentile, max_percentile):
-    """
-    This implementation is based on scipy.stats.mstats.winsorize
-    """
-    a = row.copy()
-    nan_count = isnan(row).sum()
-    nonnan_count = a.size - nan_count
-
-    # NOTE: argsort() sorts nans to the end of the array.
-    idx = a.argsort()
-
-    # Set values at indices below the min percentile to the value of the entry
-    # at the cutoff.
-    if min_percentile > 0:
-        lower_cutoff = int(min_percentile * nonnan_count)
-        a[idx[:lower_cutoff]] = a[idx[lower_cutoff]]
-
-    # Set values at indices above the max percentile to the value of the entry
-    # at the cutoff.
-    if max_percentile < 1:
-        upper_cutoff = int(ceil(nonnan_count * max_percentile))
-        # if max_percentile is close to 1, then upper_cutoff might not
-        # remove any values.
-        if upper_cutoff < nonnan_count:
-            start_of_nans = (-nan_count) if nan_count else None
-            a[idx[upper_cutoff:start_of_nans]] = a[idx[upper_cutoff - 1]]
-
-    return a

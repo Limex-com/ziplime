@@ -151,6 +151,8 @@ class DataSetMeta(type):
     def qualname(cls):
         if cls.domain is GENERIC:
             specialization_key = ""
+        elif cls.domain.assets:
+            specialization_key = f"sids<{[asset.sid for asset in cls.domain.assets]}>"
         else:
             specialization_key = "<" + cls.domain.country_code + ">"
 
