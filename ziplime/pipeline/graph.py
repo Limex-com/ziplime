@@ -1,14 +1,17 @@
 """
 Dependency-Graph representation of Pipeline API terms.
 """
-
+import datetime
 import uuid
 
 import networkx as nx
+import pandas as pd
+from ziplime.lib.adjusted_array import AdjustedArray
 
 from ziplime.pipeline import LoadableTerm
 from ziplime.pipeline.visualize import display_graph
-
+from ziplime.pipeline.terms.term import Term
+from ziplime.pipeline.domain import Domain
 
 
 class CyclicDependency(Exception):
@@ -268,8 +271,8 @@ class ExecutionPlan(TermGraph):
     offset
     """
 
-    def __init__(self, domain, terms, start_date, end_date, min_extra_rows=0):
-        super(ExecutionPlan, self).__init__(terms)
+    def __init__(self, domain: Domain, terms: list[Term], start_date: datetime.date, end_date: datetime.date, min_extra_rows: int=0):
+        super(ExecutionPlan, self).__init__(terms=terms)
 
         # Specialize all the LoadableTerms in the graph to our domain, so that
         # when the engine requests an execution order, we emit the specialized
@@ -283,7 +286,7 @@ class ExecutionPlan(TermGraph):
         # lazyval, and we don't want its result to be cached until after we've
         # specialized.
         specializations = {
-            t: t.specialize(domain) for t in self.graph if isinstance(t, LoadableTerm)
+            t: t.specialize(domain=domain) for t in self.graph if isinstance(t, LoadableTerm)
         }
         self.graph = nx.relabel.relabel_nodes(self.graph, specializations)
 
@@ -292,27 +295,27 @@ class ExecutionPlan(TermGraph):
         sessions = domain.sessions()
         for term in terms.values():
             self.set_extra_rows(
-                term,
-                sessions,
-                start_date,
-                end_date,
+                term=term,
+                all_dates=sessions,
+                start_date=start_date,
+                end_date=end_date,
                 min_extra_rows=min_extra_rows,
             )
 
-        self._assert_all_loadable_terms_specialized_to(domain)
+        self._assert_all_loadable_terms_specialized_to(domain=domain)
 
-    def set_extra_rows(self, term, all_dates, start_date, end_date, min_extra_rows):
+    def set_extra_rows(self, term: Term, all_dates: pd.DatetimeIndex, start_date: datetime.date, end_date: datetime.date, min_extra_rows: int) -> None:
         # Specialize any loadable terms before adding extra rows.
-        term = maybe_specialize(term, self.domain)
+        term = maybe_specialize(term=term, domain=self.domain)
 
         # A term can require that additional extra rows beyond the minimum be
         # computed.  This is most often used with downsampled terms, which need
         # to ensure that the first date is a computation date.
         extra_rows_for_term = term.compute_extra_rows(
-            all_dates,
-            start_date,
-            end_date,
-            min_extra_rows,
+            all_dates=all_dates,
+            start_date=start_date,
+            end_date=end_date,
+            min_extra_rows=min_extra_rows,
         )
         if extra_rows_for_term < min_extra_rows:
             raise ValueError(
@@ -323,20 +326,20 @@ class ExecutionPlan(TermGraph):
                 )
             )
 
-        self._ensure_extra_rows(term, extra_rows_for_term)
+        self._ensure_extra_rows(term=term, N=extra_rows_for_term)
 
         for dependency, additional_extra_rows in term.dependencies.items():
             self.set_extra_rows(
-                dependency,
-                all_dates,
-                start_date,
-                end_date,
+                term=dependency,
+                all_dates=all_dates,
+                start_date=start_date,
+                end_date=end_date,
                 min_extra_rows=extra_rows_for_term + additional_extra_rows,
             )
 
     #@lazyval
     @property
-    def offset(self):
+    def offset(self) -> dict[tuple[Term, Term], int]:
         """
         For all pairs (term, input) such that `input` is an input to `term`,
         compute a mapping::
@@ -405,7 +408,7 @@ class ExecutionPlan(TermGraph):
         out = {}
         for term in self.graph:
             for dep, requested_extra_rows in term.dependencies.items():
-                specialized_dep = maybe_specialize(dep, self.domain)
+                specialized_dep = maybe_specialize(term=dep, domain=self.domain)
 
                 # How much bigger is the result for dep compared to term?
                 size_difference = extra[specialized_dep] - extra[term]
@@ -419,7 +422,7 @@ class ExecutionPlan(TermGraph):
 
     #@lazyval
     @property
-    def extra_rows(self):
+    def extra_rows(self) -> dict[Term, int]:
         """
         A dict mapping `term` -> `# of extra rows to load/compute of `term`.
 
@@ -455,14 +458,14 @@ class ExecutionPlan(TermGraph):
 
         return {term: self.graph.nodes[term]["extra_rows"] for term in self.graph.nodes}
 
-    def _ensure_extra_rows(self, term, N):
+    def _ensure_extra_rows(self, term: Term, N: int) -> None:
         """
         Ensure that we're going to compute at least N extra rows of `term`.
         """
         attrs = dict(self.graph.nodes())[term]
         attrs["extra_rows"] = max(N, attrs.get("extra_rows", 0))
 
-    def mask_and_dates_for_term(self, term, root_mask_term, workspace, all_dates):
+    def mask_and_dates_for_term(self, term: Term, root_mask_term: Term, workspace: dict[Term, AdjustedArray], all_dates: pd.DatetimeIndex):
         """
         Load mask and mask row labels for term.
 
@@ -493,7 +496,7 @@ class ExecutionPlan(TermGraph):
 
         return workspace[mask][mask_offset:], all_dates[dates_offset:]
 
-    def _assert_all_loadable_terms_specialized_to(self, domain):
+    def _assert_all_loadable_terms_specialized_to(self, domain: Domain) -> None:
         """Make sure that we've specialized all loadable terms in the graph."""
         for term in self.graph.nodes():
             if isinstance(term, LoadableTerm):
@@ -502,7 +505,7 @@ class ExecutionPlan(TermGraph):
 
 # XXX: This function exists because we currently only specialize LoadableTerms
 #      when running a Pipeline on a given domain.
-def maybe_specialize(term, domain):
+def maybe_specialize(term: Term, domain: Domain) -> Term:
     """Specialize a term if it's loadable."""
     if isinstance(term, LoadableTerm):
         return term.specialize(domain)

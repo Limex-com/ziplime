@@ -1,6 +1,6 @@
 """Pipeline hooks for tracking and displaying progress.
 """
-
+import datetime
 from collections import namedtuple
 import time
 
@@ -8,6 +8,7 @@ from ziplime.utils.compat import contextmanager, escape_html
 from ziplime.utils.string_formatting import bulleted_list
 
 from .iface import PipelineHooks
+from .. import Term
 
 
 class ProgressHooks(PipelineHooks):
@@ -71,7 +72,7 @@ class ProgressHooks(PipelineHooks):
             self._reset_transient_state()
 
     @contextmanager
-    def computing_chunk(self, terms, start_date, end_date):
+    def computing_chunk(self, terms: list[Term], start_date: datetime.date, end_date: datetime.date):
         # Set up model on first compute_chunk call.
         if self._model is None:
             self._publisher = self._publisher_factory()
@@ -81,31 +82,31 @@ class ProgressHooks(PipelineHooks):
             )
 
         try:
-            self._model.start_chunk(terms, start_date, end_date)
+            self._model.start_chunk(terms=terms, start_date=start_date, end_date=end_date)
             self._publish()
             yield
         finally:
-            self._model.finish_chunk(terms, start_date, end_date)
+            self._model.finish_chunk(terms=terms, start_date=start_date, end_date=end_date)
             self._publish()
 
     @contextmanager
-    def loading_terms(self, terms):
+    def loading_terms(self, terms: list[Term]):
         try:
-            self._model.start_load_terms(terms)
+            self._model.start_load_terms(terms=terms)
             self._publish()
             yield
         finally:
-            self._model.finish_load_terms(terms)
+            self._model.finish_load_terms(terms=terms)
             self._publish()
 
     @contextmanager
-    def computing_term(self, term):
+    def computing_term(self, term: Term):
         try:
-            self._model.start_compute_term(term)
+            self._model.start_compute_term(term=term)
             self._publish()
             yield
         finally:
-            self._model.finish_compute_term(term)
+            self._model.finish_compute_term(term=term)
             self._publish()
 
 
@@ -150,7 +151,7 @@ class ProgressModel:
         List of terms currently being loaded or computed.
     """
 
-    def __init__(self, start_date, end_date):
+    def __init__(self, start_date: datetime.date, end_date: datetime.date):
         self._start_date = start_date
         self._end_date = end_date
 
@@ -210,7 +211,7 @@ class ProgressModel:
         return self._current_work
 
     # These methods form the interface for ProgressHooks.
-    def start_chunk(self, terms, start_date, end_date):
+    def start_chunk(self, terms: list[Term], start_date: datetime.date, end_date: datetime.date):
         days_since_start = (end_date - self._start_date).days + 1
         self._current_chunk_size = days_since_start - self._days_completed
         self._current_chunk_bounds = (start_date, end_date)
