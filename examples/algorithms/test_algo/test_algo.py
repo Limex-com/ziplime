@@ -11,17 +11,11 @@ from ziplime.trading.trading_algorithm import TradingAlgorithm
 logger = structlog.get_logger(__name__)
 async def initialize(context):
     context.assets = [
-        await context.symbol("META@NYSE"),
-        await context.symbol("META@BATS"),
+        await context.symbol("META"),
         await context.symbol("AMZN"),
         await context.symbol("NFLX"),
-        await context.symbol("GOOGL") - GOOGL,MIC
+        await context.symbol("GOOGL")
     ]
-
-    context.meta_symbols( [
-        await context.symbol("META@NYSE"),
-        await context.symbol("META@BATS"),
-    ])
 
 async def handle_data(context, data):
     num_assets = len(context.assets)
@@ -30,4 +24,3 @@ async def handle_data(context, data):
         await context.order_target_percent(asset=asset,
                                            target=target_percent, style=MarketOrder())
 
-    data.history([context.meta, context.google])

@@ -45,6 +45,7 @@ async def _run_simulation():
 
     # run daily simulation
     res, errors = await run_simulation(
+        asset_service=asset_service,
         start_date=start_date,
         end_date=end_date,
         trading_calendar="NYSE",

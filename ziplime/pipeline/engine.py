@@ -60,6 +60,7 @@ from abc import ABC, abstractmethod
 from functools import partial
 from typing import Callable
 
+import numpy
 import pandas as pd
 from numpy import arange, array
 from pandas import DatetimeIndex
@@ -319,10 +320,10 @@ class SimplePipelineEngine(PipelineEngine):
         """
         domain = self.resolve_domain(pipeline)
         ranges = compute_date_range_chunks(
-            domain.sessions(),
-            start_date,
-            end_date,
-            chunksize,
+            sessions=domain.sessions(),
+            start_date=start_date,
+            end_date=end_date,
+            chunksize=chunksize,
         )
         hooks = self._resolve_hooks(hooks=hooks)
 
@@ -338,7 +339,7 @@ class SimplePipelineEngine(PipelineEngine):
         # Filter out empty chunks. Empty dataframes lose dtype information,
         # which makes concatenation fail.
         nonempty_chunks = [c for c in chunks if len(c)]
-        return categorical_df_concat(nonempty_chunks, inplace=True)
+        return categorical_df_concat(df_list=nonempty_chunks, inplace=True)
 
     async def run_pipeline(self, pipeline: Pipeline, start_date: datetime.datetime, end_date: datetime.datetime,
                            hooks: list[PipelineHooks] | None = None):
@@ -678,7 +679,7 @@ class SimplePipelineEngine(PipelineEngine):
                 to_load = sorted(
                     loader_groups[loader_group_key(term)], key=lambda t: t.dataset
                 )
-                self._ensure_can_load(loader, to_load)
+                self._ensure_can_load(loader=loader, terms=to_load)
                 with hooks.loading_terms(to_load):
                     loaded = await loader.load_adjusted_array(
                         domain=domain,
@@ -698,7 +699,7 @@ class SimplePipelineEngine(PipelineEngine):
                 )
                 workspace.update(loaded)
             else:
-                with hooks.computing_term(term):
+                with hooks.computing_term(term=term):
                     workspace[term] = term._compute(
                         self._inputs_for_term(
                             term=term,
@@ -718,7 +719,7 @@ class SimplePipelineEngine(PipelineEngine):
 
                 # Decref dependencies of ``term``, and clear any terms
                 # whose refcounts hit 0.
-                for garbage in graph.decref_dependencies(term, refcounts):
+                for garbage in graph.decref_dependencies(term=term, refcounts=refcounts):
                     del workspace[garbage]
 
         # At this point, all the output terms are in the workspace.
@@ -729,7 +730,7 @@ class SimplePipelineEngine(PipelineEngine):
             out[name] = workspace[term][graph_extra_rows[term]:]
         return out
 
-    async def _to_narrow(self, terms, data, mask, dates, assets):
+    async def _to_narrow(self, terms: dict[str, Term], data: dict[str, AdjustedArray], mask, dates: numpy.ndarray, assets: numpy.ndarray):
         """
         Convert raw computed pipeline results into a DataFrame for public APIs.
 
@@ -789,7 +790,7 @@ class SimplePipelineEngine(PipelineEngine):
             data=final_columns, index=index, columns=final_columns.keys()
         )
 
-    def _validate_compute_chunk_params(self, graph, dates, sids, initial_workspace):
+    def _validate_compute_chunk_params(self, graph: ExecutionPlan, dates: pd.DatetimeIndex, sids: pd.Index, initial_workspace: dict[Term, AdjustedArray]):
         """
         Verify that the values passed to compute_chunk are well-formed.
         """
@@ -867,7 +868,7 @@ class SimplePipelineEngine(PipelineEngine):
                     )
                 )
 
-    def resolve_domain(self, pipeline):
+    def resolve_domain(self, pipeline: Pipeline):
         """Resolve a concrete domain for ``pipeline``."""
         domain = pipeline.domain(default=self._default_domain)
         if domain is GENERIC:
@@ -878,7 +879,7 @@ class SimplePipelineEngine(PipelineEngine):
             )
         return domain
 
-    def _is_special_root_term(self, term):
+    def _is_special_root_term(self, term: Term):
         return term is self._root_mask_term or term is self._root_mask_dates_term
 
     def _resolve_hooks(self, hooks: list[PipelineHooks]):

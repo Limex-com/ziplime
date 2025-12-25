@@ -1953,7 +1953,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         This will be used to infer a domain for pipelines that only use generic
         datasets when running in the context of a TradingAlgorithm.
         """
-        return _DEFAULT_DOMAINS.get(calendar.name, domain.GENERIC)
+        return domain.GENERIC
 
     ##################
     # End Pipeline API
@@ -2052,7 +2052,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         # self.datetime = midnight_dt
         # self.on_dt_changed(midnight_dt)
 
-        self.metrics_tracker.handle_market_open(session_label=midnight_dt)
+        await self.metrics_tracker.handle_market_open(session_label=midnight_dt)
 
         # handle any splits that impact any positions or any open orders.
         assets_we_care_about = (
@@ -2113,7 +2113,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                                                                           handle_data=self.event_manager.handle_data):
                             yield capital_change_packet, []
                     elif action == SimulationEvent.SESSION_START:
-                        for capital_change_packet in await self.once_a_day(midnight_dt=dt,
+                        async for capital_change_packet in self.once_a_day(midnight_dt=dt,
                                                                      current_data=self.current_data,
                                                                      asset_service=self.asset_service):
                             yield capital_change_packet, []
@@ -2231,7 +2231,3 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
         minute_message["minute_perf"]["recorded_vars"] = rvars
         return minute_message
-
-
-# Map from calendar name to default domain for that calendar.
-_DEFAULT_DOMAINS = {d.calendar_name: d for d in domain.BUILT_IN_DOMAINS}

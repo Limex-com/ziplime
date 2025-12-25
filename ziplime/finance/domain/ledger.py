@@ -289,7 +289,7 @@ class Ledger:
         if txn is not None:
             self.process_transaction(transaction=txn)
 
-    def process_dividends(self, next_session, adjustment_reader):
+    async def process_dividends(self, next_session, adjustment_reader):
         """Process dividends for the next session.
 
         This will earn us any dividends whose ex-date is the next session as
@@ -305,7 +305,7 @@ class Ledger:
             cash_dividends = adjustment_reader.get_dividends_with_ex_date(
                 assets=held_sids, date=next_session  # self.data_bundle.asset_repository
             )
-            stock_dividends = adjustment_reader.get_stock_dividends_with_ex_date(
+            stock_dividends = await adjustment_reader.get_stock_dividends_with_ex_date(
                 assets=held_sids, date=next_session  # self.data_bundle.asset_repository
             )
 

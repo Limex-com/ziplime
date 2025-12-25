@@ -24,7 +24,7 @@ try:
 except ImportError:
     PYGMENTS = False
 
-from ziplime.pipeline.data import USEquityPricing
+from ziplime.pipeline.data.equity_pricing import EquityPricing
 
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 
@@ -65,7 +65,7 @@ async def run_algorithm(
                                                      )  # TODO: fix pipeline
 
     def choose_loader(column):
-        if column in USEquityPricing.columns:
+        if column in EquityPricing.columns:
             return pipeline_loader
         try:
             return custom_loader.get(column)

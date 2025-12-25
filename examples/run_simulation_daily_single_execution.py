@@ -6,7 +6,9 @@ import pathlib
 import polars as pl
 import structlog
 
+from ziplime.gens.domain.single_execution_clock import SingleExecutionClock
 from ziplime.utils.bundle_utils import get_bundle_service
+from ziplime.utils.calendar_utils import get_calendar
 from ziplime.utils.logging_utils import configure_logging
 
 from pathlib import Path
@@ -23,7 +25,7 @@ logger = structlog.get_logger(__name__)
 async def _run_simulation():
     start_date = datetime.datetime(year=2025, month=1, day=3, tzinfo=pytz.timezone("America/New_York"))
     end_date = datetime.datetime(year=2025, month=2, day=1, tzinfo=pytz.timezone("America/New_York"))
-
+    emission_rate = datetime.timedelta(days=1)
     bundle_service = get_bundle_service()
 
     asset_service = get_asset_service(
@@ -60,7 +62,12 @@ async def _run_simulation():
         min_trade_cost=DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE,
 
     )
-
+    clock = SingleExecutionClock(
+        trading_calendar=get_calendar("NYSE"),
+        start_date=start_date,
+        end_date=end_date,
+        emission_rate=emission_rate,
+    )
     # run daily simulation
     res, errors = await run_simulation(
         start_date=start_date,
@@ -71,12 +78,13 @@ async def _run_simulation():
         market_data_source=market_data_bundle,
         custom_data_sources=custom_data_sources,
         config_file=str(Path("algorithms/test_algo/test_algo_config.json").absolute()),
-        emission_rate=datetime.timedelta(days=1),
+        emission_rate=emission_rate,
         benchmark_asset_symbol="AAPL",
         benchmark_returns=None,
-        stop_on_error=False,
+        stop_on_error=True,
         asset_service=asset_service,
-        equity_commission=equity_commission
+        equity_commission=equity_commission,
+        clock=clock
     )
 
     if errors:
