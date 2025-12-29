@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ziplime"
-version = "1.12.25"
+version = "1.12.29"
 description = ""
 authors = ["Ziplime"]
 readme = "README.md"
@@ -40,6 +40,13 @@ yfinance = "^0.2.65"
 protobuf = "^6.32.0"
 grpcio = "^1.74.0"
 googleapis-common-protos = "^1.70.0"
+
+[tool.poetry.group.vectorbt]
+optional = true
+
+[tool.poetry.group.vectorbt.dependencies]
+vectorbt = "0.28.2"
+
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = {extras = ["i18n"], version = "^1.6.1"}

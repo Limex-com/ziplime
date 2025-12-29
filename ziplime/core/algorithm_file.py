@@ -1,12 +1,16 @@
 import importlib.util
+import logging
 import sys
+
+import structlog
 
 from ziplime.config.base_algorithm_config import BaseAlgorithmConfig
 
 
 class AlgorithmFile:
 
-    def __init__(self, algorithm_file: str, algorithm_config_file: str | None = None):
+    def __init__(self, algorithm_file: str, algorithm_config_file: str | None = None,
+                 logger: logging.Logger = structlog.get_logger(__name__)):
         """
         Initializes the algorithm environment by loading the specified algorithm script and its optional
         configuration file. The module is dynamically imported and expected functions are retrieved
@@ -35,6 +39,7 @@ class AlgorithmFile:
                 script or the base configuration class `BaseAlgorithmConfig`, loaded using the algorithm
                 configuration file or default parameters.
         """
+
         def noop(*args, **kwargs):
             pass
 
@@ -54,7 +59,7 @@ class AlgorithmFile:
             spec.loader.exec_module(module)
         else:
             raise Exception(f"No module found: {algorithm_file}")
-
+        self._logger = logger
         self.initialize = module.__dict__.get("initialize", noop)
         self.handle_data = module.__dict__.get("handle_data", noop)
         self.before_trading_start = module.__dict__.get("before_trading_start", noop)
@@ -68,8 +73,13 @@ class AlgorithmFile:
                 if issubclass(obj, BaseAlgorithmConfig) and obj != BaseAlgorithmConfig:
                     custom_config_class = obj
                     break
-        if custom_config_class is None:
+        if algorithm_config_file is None or custom_config_class is None:
             custom_config_class = BaseAlgorithmConfig
+        if algorithm_config_file is None and custom_config_class is not None:
+            self._logger.warning(
+                "Algorithm config file is not specified but custom config class is provided. "
+                "Configuration file won't be loaded."
+            )
         if algorithm_config_file is not None:
             with open(algorithm_config_file, "r") as f:
                 config = custom_config_class.model_validate_json(f.read())
