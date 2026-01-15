@@ -44,6 +44,7 @@ from ziplime.trading.entities.trading_pair import TradingPair
 from ziplime.trading.enums.order_side import OrderSide
 from ziplime.trading.enums.order_type import OrderType
 from ziplime.trading.enums.simulation_event import SimulationEvent
+from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 from ziplime.trading.trading_signal_executor import TradingSignalExecutor
 from ziplime.utils.calendar_utils import get_calendar
 
@@ -202,6 +203,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             stop_on_error: bool = False
     ):
         self.algorithm = algorithm
+        self.config = algorithm.config
         self.exchanges = exchanges
         self.stop_on_error = stop_on_error
         self.default_exchange = list(self.exchanges.values())[0]
