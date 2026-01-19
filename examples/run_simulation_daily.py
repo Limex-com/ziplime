@@ -52,8 +52,8 @@ async def _run_simulation():
                                                           )
 
     custom_data_sources = []
-    custom_data_sources.append(
-        await bundle_service.load_bundle(bundle_name="limex_us_fundamental_data", bundle_version=None))
+    # custom_data_sources.append(
+    #     await bundle_service.load_bundle(bundle_name="limex_us_fundamental_data", bundle_version=None))
 
     equity_commission = PerShare(
         cost=DEFAULT_PER_SHARE_COST,
