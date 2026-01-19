@@ -55,30 +55,38 @@ implements the following algorithm for executing pipelines:
    into "narrow" format, with output labels dictated by the Pipeline's
    screen. This logic lives in SimplePipelineEngine._to_narrow.
 """
-
+import datetime
 from abc import ABC, abstractmethod
 from functools import partial
+from typing import Callable
 
+import numpy
 import pandas as pd
 from numpy import arange, array
+from pandas import DatetimeIndex
 from toolz import groupby
 
 from ziplime.errors import NoFurtherDataError
-from ziplime.lib.adjusted_array import ensure_adjusted_array, ensure_ndarray
+from ziplime.lib.adjusted_array import ensure_adjusted_array, ensure_ndarray, AdjustedArray
 from ziplime.utils.date_utils import compute_date_range_chunks
 from ziplime.utils.numpy_utils import as_column, repeat_first_axis, repeat_last_axis
 from ziplime.utils.pandas_utils import categorical_df_concat, explode
 from ziplime.utils.string_formatting import bulleted_list
-
-from .domain import GENERIC, Domain
-from .graph import maybe_specialize
-from .hooks import DelegatingHooks
-from .term import AssetExists, InputDates, LoadableTerm
+from ziplime.pipeline.pipeline import Pipeline
+from ziplime.pipeline.terms.term import Term
+from ziplime.pipeline.terms.loadable_term import LoadableTerm
+from .domain import Domain, GENERIC
+from .graph import maybe_specialize, ExecutionPlan
+from .hooks import DelegatingHooks, PipelineHooks
+from .terms.asset_exists import AssetExists
+from .terms.input_dates import InputDates
+from ..assets.services.asset_service import AssetService
 
 
 class PipelineEngine(ABC):
     @abstractmethod
-    def run_pipeline(self, pipeline, start_date, end_date, hooks=None):
+    def run_pipeline(self, pipeline: Pipeline, start_date: datetime.date, end_date: datetime.date,
+                     hooks: list[PipelineHooks] = None):
         """Compute values for ``pipeline`` from ``start_date`` to ``end_date``.
 
         Parameters
@@ -110,7 +118,8 @@ class PipelineEngine(ABC):
 
     @abstractmethod
     def run_chunked_pipeline(
-        self, pipeline, start_date, end_date, chunksize, hooks=None
+            self, pipeline: Pipeline, start_date: datetime.date, end_date: datetime.date, chunksize: int,
+            hooks: list[PipelineHooks] = None
     ):
         """Compute values for ``pipeline`` from ``start_date`` to ``end_date``, in
         date chunks of size ``chunksize``.
@@ -161,13 +170,15 @@ class NoEngineRegistered(Exception):
 class ExplodingPipelineEngine(PipelineEngine):
     """A PipelineEngine that doesn't do anything."""
 
-    def run_pipeline(self, pipeline, start_date, end_date, hooks=None):
+    def run_pipeline(self, pipeline: Pipeline, start_date: datetime.date, end_date: datetime.date,
+                     hooks: list[PipelineHooks] = None):
         raise NoEngineRegistered(
             "Attempted to run a pipeline but no pipeline " "resources were registered."
         )
 
     def run_chunked_pipeline(
-        self, pipeline, start_date, end_date, chunksize, hooks=None
+            self, pipeline: Pipeline, start_date: datetime.date, end_date: datetime.date, chunksize: int,
+            hooks: list[PipelineHooks] = None
     ):
         raise NoEngineRegistered(
             "Attempted to run a chunked pipeline but no pipeline "
@@ -176,8 +187,12 @@ class ExplodingPipelineEngine(PipelineEngine):
 
 
 def default_populate_initial_workspace(
-    initial_workspace, root_mask_term, execution_plan, dates, assets
-):
+        initial_workspace: dict[Term, AdjustedArray],
+        root_mask_term: Term,
+        execution_plan: ExecutionPlan,
+        dates: pd.DatetimeIndex,
+        assets: pd.Index
+) -> dict[Term, AdjustedArray]:
     """The default implementation for ``populate_initial_workspace``. This
     function returns the ``initial_workspace`` argument without making any
     modifications.
@@ -214,7 +229,7 @@ class SimplePipelineEngine(PipelineEngine):
     get_loader : callable
         A function that is given a loadable term and returns a PipelineLoader
         to use to retrieve raw data for that term.
-    asset_finder : ziplime.assets.AssetFinder
+    asset_service : ziplime.assets.AssetFinder
         An AssetFinder instance.  We depend on the AssetFinder to determine
         which assets are in the top-level universe at any point in time.
     populate_initial_workspace : callable, optional
@@ -233,28 +248,27 @@ class SimplePipelineEngine(PipelineEngine):
 
     __slots__ = (
         "_get_loader",
-        "_finder",
         "_root_mask_term",
         "_root_mask_dates_term",
         "_populate_initial_workspace",
     )
 
     def __init__(
-        self,
-        get_loader,
-        asset_finder,
-        default_domain=GENERIC,
-        populate_initial_workspace=None,
-        default_hooks=None,
+            self,
+            get_loader: Callable,
+            asset_service: AssetService,
+            default_domain: Domain=GENERIC,
+            populate_initial_workspace: Callable=None,
+            default_hooks=None,
     ):
         self._get_loader = get_loader
-        self._finder = asset_finder
+        self._asset_service = asset_service
 
         self._root_mask_term = AssetExists()
         self._root_mask_dates_term = InputDates()
 
         self._populate_initial_workspace = (
-            populate_initial_workspace or default_populate_initial_workspace
+                populate_initial_workspace or default_populate_initial_workspace
         )
         self._default_domain = default_domain
 
@@ -263,8 +277,9 @@ class SimplePipelineEngine(PipelineEngine):
         else:
             self._default_hooks = list(default_hooks)
 
-    def run_chunked_pipeline(
-        self, pipeline, start_date, end_date, chunksize, hooks=None
+    async def run_chunked_pipeline(
+            self, pipeline: Pipeline, start_date: datetime.datetime, end_date: datetime.datetime, chunksize: int,
+            hooks: list[PipelineHooks] = None
     ):
         """Compute values for ``pipeline`` from ``start_date`` to ``end_date``, in
         date chunks of size ``chunksize``.
@@ -276,9 +291,9 @@ class SimplePipelineEngine(PipelineEngine):
         ----------
         pipeline : Pipeline
             The pipeline to run.
-        start_date : pd.Timestamp
+        start_date : datetime.datetime
             The start date to run the pipeline for.
-        end_date : pd.Timestamp
+        end_date : datetime.datetime
             The end date to run the pipeline for.
         chunksize : int
             The number of days to execute at a time.
@@ -305,16 +320,16 @@ class SimplePipelineEngine(PipelineEngine):
         """
         domain = self.resolve_domain(pipeline)
         ranges = compute_date_range_chunks(
-            domain.sessions(),
-            start_date,
-            end_date,
-            chunksize,
+            sessions=domain.sessions(),
+            start_date=start_date,
+            end_date=end_date,
+            chunksize=chunksize,
         )
-        hooks = self._resolve_hooks(hooks)
+        hooks = self._resolve_hooks(hooks=hooks)
 
         run_pipeline = partial(self._run_pipeline_impl, pipeline, hooks=hooks)
         with hooks.running_pipeline(pipeline, start_date, end_date):
-            chunks = [run_pipeline(s, e) for s, e in ranges]
+            chunks = [await run_pipeline(s, e) for s, e in ranges]
 
         if len(chunks) == 1:
             # OPTIMIZATION: Don't make an extra copy in `categorical_df_concat`
@@ -324,18 +339,19 @@ class SimplePipelineEngine(PipelineEngine):
         # Filter out empty chunks. Empty dataframes lose dtype information,
         # which makes concatenation fail.
         nonempty_chunks = [c for c in chunks if len(c)]
-        return categorical_df_concat(nonempty_chunks, inplace=True)
+        return categorical_df_concat(df_list=nonempty_chunks, inplace=True)
 
-    def run_pipeline(self, pipeline, start_date, end_date, hooks=None):
+    async def run_pipeline(self, pipeline: Pipeline, start_date: datetime.datetime, end_date: datetime.datetime,
+                           hooks: list[PipelineHooks] | None = None):
         """Compute values for ``pipeline`` from ``start_date`` to ``end_date``.
 
         Parameters
         ----------
         pipeline : ziplime.pipeline.Pipeline
             The pipeline to run.
-        start_date : pd.Timestamp
+        start_date : datetime.datetime
             Start date of the computed matrix.
-        end_date : pd.Timestamp
+        end_date : datetime.datetime
             End date of the computed matrix.
         hooks : list[implements(PipelineHooks)], optional
             Hooks for instrumenting Pipeline execution.
@@ -354,16 +370,19 @@ class SimplePipelineEngine(PipelineEngine):
             A screen of ``None`` indicates that a row should be returned for
             each asset that existed each day.
         """
-        hooks = self._resolve_hooks(hooks)
-        with hooks.running_pipeline(pipeline, start_date, end_date):
-            return self._run_pipeline_impl(
-                pipeline,
-                start_date,
-                end_date,
-                hooks,
+        hooks = self._resolve_hooks(hooks=hooks)
+        with hooks.running_pipeline(pipeline=pipeline, start_date=start_date, end_date=end_date):
+            return await self._run_pipeline_impl(
+                pipeline=pipeline,
+                start_date=start_date,
+                end_date=end_date,
+                hooks=hooks,
             )
 
-    def _run_pipeline_impl(self, pipeline, start_date, end_date, hooks):
+    async def _run_pipeline_impl(
+            self, pipeline: Pipeline, start_date: datetime.date, end_date: datetime.date,
+            hooks: list[PipelineHooks]
+    ):
         """Shared core for ``run_pipeline`` and ``run_chunked_pipeline``."""
         # See notes at the top of this module for a description of the
         # algorithm implemented here.
@@ -373,39 +392,39 @@ class SimplePipelineEngine(PipelineEngine):
                 f"start_date={start_date}, end_date={end_date}"
             )
 
-        domain = self.resolve_domain(pipeline)
+        domain = self.resolve_domain(pipeline=pipeline)
 
         plan = pipeline.to_execution_plan(
-            domain,
-            self._root_mask_term,
-            start_date,
-            end_date,
+            domain=domain,
+            default_screen=self._root_mask_term,
+            start_date=start_date,
+            end_date=end_date,
         )
         extra_rows = plan.extra_rows[self._root_mask_term]
-        root_mask = self._compute_root_mask(
-            domain,
-            start_date,
-            end_date,
-            extra_rows,
+        root_mask = await self._compute_root_mask(
+            domain=domain,
+            start_date=start_date,
+            end_date=end_date,
+            extra_rows=extra_rows,
         )
-        dates, sids, root_mask_values = explode(root_mask)
+        dates, sids, root_mask_values = explode(df=root_mask)
 
         workspace = self._populate_initial_workspace(
-            {
+            initial_workspace={
                 self._root_mask_term: root_mask_values,
                 self._root_mask_dates_term: as_column(dates.values),
             },
-            self._root_mask_term,
-            plan,
-            dates,
-            sids,
+            root_mask_term=self._root_mask_term,
+            execution_plan=plan,
+            dates=dates,
+            assets=sids,
         )
 
-        refcounts = plan.initial_refcounts(workspace)
-        execution_order = plan.execution_order(workspace, refcounts)
+        refcounts = plan.initial_refcounts(initial_terms=workspace)
+        execution_order = plan.execution_order(workspace=workspace, refcounts=refcounts)
 
-        with hooks.computing_chunk(execution_order, start_date, end_date):
-            results = self.compute_chunk(
+        with hooks.computing_chunk(terms=execution_order, start_date=start_date, end_date=end_date):
+            results = await self.compute_chunk(
                 graph=plan,
                 dates=dates,
                 sids=sids,
@@ -415,15 +434,15 @@ class SimplePipelineEngine(PipelineEngine):
                 hooks=hooks,
             )
 
-        return self._to_narrow(
-            plan.outputs,
-            results,
-            results.pop(plan.screen_name),
-            dates[extra_rows:],
-            sids,
+        return await self._to_narrow(
+            terms=plan.outputs,
+            data=results,
+            mask=results.pop(plan.screen_name),
+            dates=dates[extra_rows:],
+            assets=sids,
         )
 
-    def _compute_root_mask(self, domain, start_date, end_date, extra_rows):
+    async def _compute_root_mask(self, domain: Domain, start_date: datetime.date, end_date: datetime.date, extra_rows: int):
         """Compute a lifetimes matrix from our AssetFinder, then drop columns that
         didn't exist at all during the query dates.
 
@@ -451,19 +470,19 @@ class SimplePipelineEngine(PipelineEngine):
         """
         sessions = domain.sessions()
 
-        if start_date not in sessions:
+        if pd.to_datetime(start_date) not in sessions:
             raise ValueError(
                 f"Pipeline start date ({start_date}) is not a trading session for "
                 f"domain {domain}."
             )
 
-        elif end_date not in sessions:
+        elif pd.to_datetime(end_date) not in sessions:
             raise ValueError(
                 f"Pipeline end date {end_date} is not a trading session for "
                 f"domain {domain}."
             )
 
-        start_idx, end_idx = sessions.slice_locs(start_date, end_date)
+        start_idx, end_idx = sessions.slice_locs(start=start_date, end=end_date)
         if start_idx < extra_rows:
             raise NoFurtherDataError.from_lookback_window(
                 initial_message="Insufficient data to compute Pipeline:",
@@ -477,12 +496,18 @@ class SimplePipelineEngine(PipelineEngine):
         #
         # Build lifetimes matrix reaching back to `extra_rows` days before
         # `start_date.`
-        finder = self._finder
-        lifetimes = finder.lifetimes(
-            sessions[start_idx - extra_rows : end_idx],
-            include_start_date=False,
-            country_codes=(domain.country_code,),
-        )
+        if domain.assets is not None:
+            lifetimes = await self._asset_service.asset_lifetimes(
+                dates=sessions[start_idx - extra_rows: end_idx],
+                include_start_date=False,
+                assets=domain.assets,
+            )
+        else:
+            lifetimes = await self._asset_service.lifetimes(
+                dates=sessions[start_idx - extra_rows: end_idx],
+                include_start_date=False,
+                country_codes=[domain.country_code, ],
+            )
 
         if not lifetimes.columns.unique:
             columns = lifetimes.columns
@@ -510,7 +535,7 @@ class SimplePipelineEngine(PipelineEngine):
         return ret
 
     @staticmethod
-    def _inputs_for_term(term, workspace, graph, domain, refcounts):
+    def _inputs_for_term(term: Term, workspace: dict, graph: ExecutionPlan, domain: Domain, refcounts: dict[str, int]):
         """
         Compute inputs for the given term.
 
@@ -524,7 +549,7 @@ class SimplePipelineEngine(PipelineEngine):
         # We need to specialize here because we don't change ComputableTerm
         # after resolving domains, so they can still contain generic terms as
         # inputs.
-        specialized = [maybe_specialize(t, domain) for t in term.inputs]
+        specialized = [maybe_specialize(term=t, domain=domain) for t in term.inputs]
 
         if term.windowed:
             # If term is windowed, then all input data should be instances of
@@ -558,8 +583,10 @@ class SimplePipelineEngine(PipelineEngine):
                 out.append(input_data)
         return out
 
-    def compute_chunk(
-        self, graph, dates, sids, workspace, refcounts, execution_order, hooks
+    async def compute_chunk(
+            self, graph: ExecutionPlan, dates: DatetimeIndex, sids: pd.Index, workspace: dict[Term, AdjustedArray],
+            refcounts: dict[Term, int], execution_order: list[Term],
+            hooks: PipelineHooks
     ):
         """Compute the Pipeline terms in the graph for the requested start and end
         dates.
@@ -593,7 +620,7 @@ class SimplePipelineEngine(PipelineEngine):
         results : dict
             Dictionary mapping requested results to outputs.
         """
-        self._validate_compute_chunk_params(graph, dates, sids, workspace)
+        self._validate_compute_chunk_params(graph=graph, dates=dates, sids=sids, initial_workspace=workspace)
 
         get_loader = self._get_loader
 
@@ -641,10 +668,10 @@ class SimplePipelineEngine(PipelineEngine):
             # Asset labels are always the same, but date labels vary by how
             # many extra rows are needed.
             mask, mask_dates = graph.mask_and_dates_for_term(
-                term,
-                self._root_mask_term,
-                workspace,
-                dates,
+                term=term,
+                root_mask_term=self._root_mask_term,
+                workspace=workspace,
+                all_dates=dates,
             )
 
             if isinstance(term, LoadableTerm):
@@ -652,38 +679,38 @@ class SimplePipelineEngine(PipelineEngine):
                 to_load = sorted(
                     loader_groups[loader_group_key(term)], key=lambda t: t.dataset
                 )
-                self._ensure_can_load(loader, to_load)
+                self._ensure_can_load(loader=loader, terms=to_load)
                 with hooks.loading_terms(to_load):
-                    loaded = loader.load_adjusted_array(
-                        domain,
-                        to_load,
-                        mask_dates,
-                        sids,
-                        mask,
+                    loaded = await loader.load_adjusted_array(
+                        domain=domain,
+                        columns=to_load,
+                        dates=mask_dates,
+                        sids=sids,
+                        mask=mask,
                     )
                 assert set(loaded) == set(to_load), (
-                    "loader did not return an AdjustedArray for each column\n"
-                    "expected: %r\n"
-                    "got:      %r"
-                    % (
-                        sorted(to_load, key=repr),
-                        sorted(loaded, key=repr),
-                    )
+                        "loader did not return an AdjustedArray for each column\n"
+                        "expected: %r\n"
+                        "got:      %r"
+                        % (
+                            sorted(to_load, key=repr),
+                            sorted(loaded, key=repr),
+                        )
                 )
                 workspace.update(loaded)
             else:
-                with hooks.computing_term(term):
+                with hooks.computing_term(term=term):
                     workspace[term] = term._compute(
                         self._inputs_for_term(
-                            term,
-                            workspace,
-                            graph,
-                            domain,
-                            refcounts,
+                            term=term,
+                            workspace=workspace,
+                            graph=graph,
+                            domain=domain,
+                            refcounts=refcounts,
                         ),
-                        mask_dates,
-                        sids,
-                        mask,
+                        dates=mask_dates,
+                        assets=sids,
+                        mask=mask,
                     )
                 if term.ndim == 2:
                     assert workspace[term].shape == mask.shape
@@ -692,7 +719,7 @@ class SimplePipelineEngine(PipelineEngine):
 
                 # Decref dependencies of ``term``, and clear any terms
                 # whose refcounts hit 0.
-                for garbage in graph.decref_dependencies(term, refcounts):
+                for garbage in graph.decref_dependencies(term=term, refcounts=refcounts):
                     del workspace[garbage]
 
         # At this point, all the output terms are in the workspace.
@@ -700,10 +727,10 @@ class SimplePipelineEngine(PipelineEngine):
         graph_extra_rows = graph.extra_rows
         for name, term in graph.outputs.items():
             # Truncate off extra rows from outputs.
-            out[name] = workspace[term][graph_extra_rows[term] :]
+            out[name] = workspace[term][graph_extra_rows[term]:]
         return out
 
-    def _to_narrow(self, terms, data, mask, dates, assets):
+    async def _to_narrow(self, terms: dict[str, Term], data: dict[str, AdjustedArray], mask, dates: numpy.ndarray, assets: numpy.ndarray):
         """
         Convert raw computed pipeline results into a DataFrame for public APIs.
 
@@ -757,13 +784,13 @@ class SimplePipelineEngine(PipelineEngine):
             # Using this to convert np.records to tuples
             final_columns[name] = terms[name].postprocess(data[name][mask])
 
-        resolved_assets = array(self._finder.retrieve_all(assets))
+        resolved_assets = array(await self._asset_service.get_assets_by_sids(sids=list(assets)))
         index = _pipeline_output_index(dates, resolved_assets, mask)
         return pd.DataFrame(
             data=final_columns, index=index, columns=final_columns.keys()
         )
 
-    def _validate_compute_chunk_params(self, graph, dates, sids, initial_workspace):
+    def _validate_compute_chunk_params(self, graph: ExecutionPlan, dates: pd.DatetimeIndex, sids: pd.Index, initial_workspace: dict[Term, AdjustedArray]):
         """
         Verify that the values passed to compute_chunk are well-formed.
         """
@@ -841,7 +868,7 @@ class SimplePipelineEngine(PipelineEngine):
                     )
                 )
 
-    def resolve_domain(self, pipeline):
+    def resolve_domain(self, pipeline: Pipeline):
         """Resolve a concrete domain for ``pipeline``."""
         domain = pipeline.domain(default=self._default_domain)
         if domain is GENERIC:
@@ -852,10 +879,10 @@ class SimplePipelineEngine(PipelineEngine):
             )
         return domain
 
-    def _is_special_root_term(self, term):
+    def _is_special_root_term(self, term: Term):
         return term is self._root_mask_term or term is self._root_mask_dates_term
 
-    def _resolve_hooks(self, hooks):
+    def _resolve_hooks(self, hooks: list[PipelineHooks]):
         if hooks is None:
             hooks = []
         return DelegatingHooks(self._default_hooks + hooks)

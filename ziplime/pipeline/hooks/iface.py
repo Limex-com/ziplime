@@ -1,6 +1,7 @@
+import datetime
 from ziplime.utils.compat import contextmanager as _contextmanager
-
-
+from ziplime.pipeline.terms.term import Term
+from ziplime.pipeline.pipeline import Pipeline
 # Keep track of which methods of PipelineHooks are contextmanagers. Used by
 # DelegatingHooks to properly delegate to sub-hooks.
 PIPELINE_HOOKS_CONTEXT_MANAGERS = set()
@@ -34,7 +35,7 @@ class PipelineHooks:
     """
 
     @contextmanager
-    def running_pipeline(self, pipeline, start_date, end_date):
+    def running_pipeline(self, pipeline: Pipeline, start_date: datetime.date, end_date: datetime.date):
         """
         Contextmanager entered during execution of run_pipeline or
         run_chunked_pipeline.
@@ -50,7 +51,7 @@ class PipelineHooks:
         """
 
     @contextmanager
-    def computing_chunk(self, terms, start_date, end_date):
+    def computing_chunk(self, terms: list[Term], start_date: datetime.date, end_date: datetime.date):
         """
         Contextmanager entered during execution of compute_chunk.
 

@@ -22,13 +22,13 @@ class Exchange(DataSource):
     def __init__(self, name: str, canonical_name: str, country_code: str,
                  clock: TradingClock,
                  trading_calendar: ExchangeCalendar,
-                 data_bundle: DataBundle | None = None):
+                 data_source: DataBundle | None = None):
         self.name = name
         self.canonical_name = canonical_name
         self.country_code = country_code
         self.clock = clock
         self.trading_calendar = trading_calendar
-        self.data_bundle = data_bundle
+        self.data_source = data_source
 
     def get_start_cash_balance(self):
         pass

@@ -144,7 +144,7 @@ class MetricsTracker:
             )
         return packet
 
-    def handle_market_open(self, session_label: datetime.datetime) -> None:
+    async def handle_market_open(self, session_label: datetime.datetime) -> None:
         """Handles the start of each session.
 
         Parameters
@@ -158,7 +158,7 @@ class MetricsTracker:
         adjustment_reader = self.asset_service._adjustments_repository
         if adjustment_reader is not None:
             # this is None when running with a dataframe source
-            self._ledger.process_dividends(
+            await self._ledger.process_dividends(
                 next_session=session_label,
                 adjustment_reader=adjustment_reader,
             )

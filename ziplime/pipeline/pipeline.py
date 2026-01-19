@@ -4,8 +4,10 @@ from ziplime.errors import UnsupportedPipelineOutput
 
 from .domain import Domain, GENERIC, infer_domain
 from .graph import ExecutionPlan, TermGraph, SCREEN_NAME
-from .filters import Filter
-from .term import AssetExists, ComputableTerm, Term
+from .terms.asset_exists import AssetExists
+from .terms.computable_term import ComputableTerm
+from .terms.filters import Filter
+from .terms.term import Term
 
 
 class Pipeline:

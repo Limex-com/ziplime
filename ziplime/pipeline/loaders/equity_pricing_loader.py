@@ -19,10 +19,12 @@ from ziplime.data.fx import ExplodingFXRateReader
 from ziplime.lib.adjusted_array import AdjustedArray
 from ziplime.utils.numpy_utils import repeat_first_axis
 
-from .base import PipelineLoader
+from .pipeline_loader import PipelineLoader
 from .utils import shift_dates
+from .. import Domain
 from ..data.equity_pricing import EquityPricing
-from ...data.domain.data_bundle import DataBundle
+from ...assets.services.asset_service import AssetService
+from ...data.services.data_source import DataSource
 
 UINT32_MAX = iinfo(uint32).max
 
@@ -40,13 +42,13 @@ class EquityPricingLoader(PipelineLoader):
        Reader providing currency conversions.
     """
 
-    def __init__(self, raw_price_reader, adjustments_reader, fx_reader):
-        self.raw_price_reader = raw_price_reader
-        self.adjustments_reader = adjustments_reader
+    def __init__(self, data_source: DataSource, asset_service: AssetService, fx_reader):
+        self.data_source = data_source
+        self.asset_service = asset_service
         self.fx_reader = fx_reader
 
     @classmethod
-    def without_fx(cls, data_bundle: DataBundle):
+    def without_fx(cls, data_source: DataSource, asset_service: AssetService):
         """
         Construct an EquityPricingLoader without support for fx rates.
 
@@ -66,12 +68,12 @@ class EquityPricingLoader(PipelineLoader):
             A loader that can only provide currency-naive data.
         """
         return cls(
-            raw_price_reader=None, # fix this
-            adjustments_reader=None,
+            data_source=data_source, # fix this
             fx_reader=ExplodingFXRateReader(),
+            asset_service=asset_service
         )
 
-    def load_adjusted_array(self, domain, columns, dates, sids, mask):
+    async def load_adjusted_array(self, domain: Domain, columns, dates, sids, mask):
         # load_adjusted_array is called with dates on which the user's algo
         # will be shown data, which means we need to return the data that would
         # be known at the **start** of each date. We assume that the latest
@@ -81,36 +83,39 @@ class EquityPricingLoader(PipelineLoader):
         shifted_dates = shift_dates(sessions, dates[0], dates[-1], shift=1)
 
         ohlcv_cols, currency_cols = self._split_column_types(columns)
-        del columns  # From here on we should use ohlcv_cols or currency_cols.
+        # del columns  # From here on we should use ohlcv_cols or currency_cols.
         ohlcv_colnames = [c.name for c in ohlcv_cols]
 
-        raw_ohlcv_arrays = self.raw_price_reader.load_raw_arrays(
-            ohlcv_colnames,
-            shifted_dates[0],
-            shifted_dates[-1],
-            sids,
+        raw_ohlcv_arrays = self.data_source.get_data_by_date_and_sids(
+            fields=frozenset(ohlcv_colnames),
+            start_date=shifted_dates[0].tz_localize(domain.calendar.tz).to_pydatetime(),
+            end_date=shifted_dates[-1].tz_localize(domain.calendar.tz).to_pydatetime(),
+            sids=list(sids),
+            frequency=self.data_source.frequency,
+            include_bounds=True
         )
 
         # Currency convert raw_arrays in place if necessary. We use shifted
         # dates to load currency conversion rates to make them line up with
         # dates used to fetch prices.
-        self._inplace_currency_convert(
-            ohlcv_cols,
-            raw_ohlcv_arrays,
-            shifted_dates,
-            sids,
-        )
+        # TODO: set currency conversion
+        # self._inplace_currency_convert(
+        #     ohlcv_cols,
+        #     raw_ohlcv_arrays,
+        #     shifted_dates,
+        #     sids,
+        # )
 
-        adjustments = self.adjustments_reader.load_pricing_adjustments(
+        adjustments = await self.asset_service.load_pricing_adjustments(
             ohlcv_colnames,
             dates,
             sids,
         )
-
+        ohlcv_arrays = [raw_ohlcv_arrays[c.name] for c in ohlcv_cols]
         out = {}
-        for c, c_raw, c_adjs in zip(ohlcv_cols, raw_ohlcv_arrays, adjustments):
+        for c, c_raw, c_adjs in zip(ohlcv_cols, ohlcv_arrays, adjustments):
             out[c] = AdjustedArray(
-                c_raw.astype(c.dtype),
+                c_raw.to_numpy().astype(c.dtype),
                 c_adjs,
                 c.missing_value,
             )
@@ -123,7 +128,6 @@ class EquityPricingLoader(PipelineLoader):
                 adjustments={},
                 missing_value=None,
             )
-
         return out
 
     @property
@@ -208,6 +212,3 @@ class EquityPricingLoader(PipelineLoader):
 
         return ohlcv, currency
 
-
-# Backwards compat alias.
-USEquityPricingLoader = EquityPricingLoader

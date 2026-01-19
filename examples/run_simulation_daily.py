@@ -15,10 +15,7 @@ import pytz
 
 from ziplime.core.ingest_data import get_asset_service
 from ziplime.core.run_simulation import run_simulation
-from ziplime.data.services.bundle_service import BundleService
-from ziplime.data.services.file_system_bundle_registry import FileSystemBundleRegistry
-from ziplime.finance.commission import PerShare, DEFAULT_PER_SHARE_COST, DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE, \
-    PerContract, DEFAULT_PER_CONTRACT_COST, EquityCommissionModel
+from ziplime.finance.commission import PerShare, DEFAULT_PER_SHARE_COST, DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE
 
 logger = structlog.get_logger(__name__)
 
@@ -55,8 +52,8 @@ async def _run_simulation():
                                                           )
 
     custom_data_sources = []
-    custom_data_sources.append(
-        await bundle_service.load_bundle(bundle_name="limex_us_fundamental_data", bundle_version=None))
+    # custom_data_sources.append(
+    #     await bundle_service.load_bundle(bundle_name="limex_us_fundamental_data", bundle_version=None))
 
     equity_commission = PerShare(
         cost=DEFAULT_PER_SHARE_COST,

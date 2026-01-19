@@ -12,7 +12,7 @@ from networkx import topological_sort
 
 from ziplime.pipeline.data import BoundColumn
 from ziplime.pipeline import Filter, Factor, Classifier, Term
-from ziplime.pipeline.term import AssetExists
+from ziplime.pipeline.terms.asset_exists import AssetExists
 
 
 class NoIPython(Exception):

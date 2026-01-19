@@ -11,6 +11,7 @@ from ziplime.exchanges.exchange import Exchange
 
 from ziplime.finance.blotter.in_memory_blotter import InMemoryBlotter
 from ziplime.gens.domain.trading_clock import TradingClock
+from ziplime.pipeline.loaders import EquityPricingLoader
 from ziplime.sources.benchmark_source import BenchmarkSource
 import polars as pl
 
@@ -23,8 +24,7 @@ try:
 except ImportError:
     PYGMENTS = False
 
-from ziplime.pipeline.data import USEquityPricing
-from ziplime.pipeline.loaders import USEquityPricingLoader
+from ziplime.pipeline.data.equity_pricing import EquityPricing
 
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 
@@ -60,10 +60,12 @@ async def run_algorithm(
         else:
             logger.info(f"\n{algorithm.algorithm_text}")
     exchanges_dict = {exchange.name: exchange for exchange in exchanges}
-    pipeline_loader = USEquityPricingLoader.without_fx(None)  # TODO: fix pipeline
+    pipeline_loader = EquityPricingLoader.without_fx(data_source=None,
+                                                     asset_service=asset_service
+                                                     )  # TODO: fix pipeline
 
     def choose_loader(column):
-        if column in USEquityPricing.columns:
+        if column in EquityPricing.columns:
             return pipeline_loader
         try:
             return custom_loader.get(column)
@@ -93,6 +95,7 @@ async def run_algorithm(
         emission_rate=clock.emission_rate,
         benchmark_fields=frozenset({"close"})
     )
+    await benchmark_source.validate_benchmark(benchmark_asset=benchmark_asset)
 
     tr = TradingAlgorithm(
         exchanges=exchanges_dict,
@@ -100,9 +103,7 @@ async def run_algorithm(
         get_pipeline_loader=choose_loader,
         metrics_set=metrics_set,
         blotter=InMemoryBlotter(exchanges=exchanges_dict, cancel_policy=None),
-        # benchmark_source=get_benchmark(clock=clock),
         benchmark_source=benchmark_source,
-        #        benchmark_source=None,
         algorithm=algorithm,
         clock=clock,
         stop_on_error=stop_on_error,

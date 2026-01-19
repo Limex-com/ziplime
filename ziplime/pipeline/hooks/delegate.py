@@ -1,33 +1,6 @@
-from ziplime.utils.compat import ExitStack, contextmanager, wraps
 
-from .iface import PipelineHooks, PIPELINE_HOOKS_CONTEXT_MANAGERS
+from .iface import PipelineHooks
 from .no import NoHooks
-
-
-def delegating_hooks_method(method_name):
-    """Factory function for making DelegatingHooks methods."""
-    if method_name in PIPELINE_HOOKS_CONTEXT_MANAGERS:
-        # Generate a contextmanager that enters the context of all child hooks.
-        @wraps(getattr(PipelineHooks, method_name))
-        @contextmanager
-        def ctx(self, *args, **kwargs):
-            with ExitStack() as stack:
-                for hook in self._hooks:
-                    sub_ctx = getattr(hook, method_name)(*args, **kwargs)
-                    stack.enter_context(sub_ctx)
-                yield stack
-
-        return ctx
-    else:
-        # Generate a method that calls methods of all child hooks.
-        @wraps(getattr(PipelineHooks, method_name))
-        def method(self, *args, **kwargs):
-            for hook in self._hooks:
-                sub_method = getattr(hook, method_name)
-                sub_method(*args, **kwargs)
-
-        return method
-
 
 class DelegatingHooks(PipelineHooks):
     """A PipelineHooks that delegates to one or more other hooks.
@@ -52,15 +25,4 @@ class DelegatingHooks(PipelineHooks):
             self._hooks = hooks
             return self
 
-    # Implement all interface methods by delegating to corresponding methods on
-    # input hooks.
-    # locals().update(
-    #     {
-    #         name: delegating_hooks_method(name)
-    #         # TODO: Expose this publicly on interface.
-    #         for name in PipelineHooks._signatures
-    #     }
-    # )
 
-
-del delegating_hooks_method

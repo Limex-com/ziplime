@@ -15,3 +15,6 @@ class Asset:
 
     @abstractmethod
     def get_symbol_by_exchange(self, exchange_name: str | None) -> str | None: ...
+
+    def __hash__(self):
+        return hash(self.sid)

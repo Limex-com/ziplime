@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 
-def explode(df):
+def explode(df: pd.DataFrame):
     """Take a DataFrame and return a triple of
 
     (df.index, df.columns, df.values)
@@ -86,7 +86,7 @@ def ignore_pandas_nan_categorical_warning():
         yield
 
 
-def categorical_df_concat(df_list, inplace=False):
+def categorical_df_concat(df_list: list[pd.DataFrame], inplace: bool=False):
     """Prepare list of pandas DataFrames to be used as input to pd.concat.
     Ensure any columns of type 'category' have the same categories across each
     dataframe.

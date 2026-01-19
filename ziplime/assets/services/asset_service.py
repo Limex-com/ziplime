@@ -1,6 +1,7 @@
 import datetime
 
 import aiocache
+import pandas as pd
 import polars as pl
 from aiocache import Cache
 
@@ -76,12 +77,45 @@ class AssetService:
         return await self._asset_repository.get_commodity_by_symbol(symbol=symbol,
                                                                     exchange_name=exchange_name)
 
-    def get_stock_dividends(self, sid: int, trading_days: pl.Series) -> list[Dividend]:
-        return self._adjustments_repository.get_stock_dividends(sid=sid,
+    async def get_stock_dividends(self, sid: int, trading_days: pl.Series) -> list[Dividend]:
+        return await self._adjustments_repository.get_stock_dividends(sid=sid,
                                                                 trading_days=trading_days)
 
-    def get_splits(self, assets: frozenset[Asset], dt: datetime.date):
-        return self._adjustments_repository.get_splits(assets=assets, dt=dt)
+    async def get_splits(self, assets: frozenset[Asset], dt: datetime.date):
+        return await self._adjustments_repository.get_splits(assets=assets, dt=dt)
 
     async def get_symbols_universe(self, symbol: str) -> SymbolsUniverse | None:
         return await self._asset_repository.get_symbols_universe(symbol=symbol)
+
+    async def lifetimes(self, dates: pd.DatetimeIndex, include_start_date: bool, country_codes: list[str]):
+        # normalize to a cache-key so that we can memoize results.
+        lifetimes = await self._asset_repository.lifetimes(dates=dates, include_start_date=include_start_date,
+                                                     country_codes=country_codes)
+
+        raw_dates = dates.view('int64') // 10**9
+        if include_start_date:
+            mask = lifetimes.start[None, :] <= raw_dates[:, None]
+        else:
+            mask = lifetimes.start[None, :] < raw_dates[:, None]
+        mask &= raw_dates[:, None] <= lifetimes.end[None, :]
+        return pd.DataFrame(mask, index=dates, columns=lifetimes.sid)
+
+    async def asset_lifetimes(self, assets: list[Asset], dates: pd.DatetimeIndex, include_start_date: bool):
+        # normalize to a cache-key so that we can memoize results.
+        lifetimes = await self._asset_repository.asset_lifetimes(dates=dates, include_start_date=include_start_date,
+                                                     assets=assets)
+
+        raw_dates = dates.view('int64') // 10**9
+        if include_start_date:
+            mask = lifetimes.start[None, :] <= raw_dates[:, None]
+        else:
+            mask = lifetimes.start[None, :] < raw_dates[:, None]
+        mask &= raw_dates[:, None] <= lifetimes.end[None, :]
+        return pd.DataFrame(mask, index=dates, columns=lifetimes.sid)
+
+
+    async def retrieve_all(self, sids: list[int], default_none: bool = False):
+        return await self._asset_repository.retrieve_all(sids=sids, default_none=default_none)
+
+    async def load_pricing_adjustments(self, columns, dates, assets):
+        return await self._adjustments_repository.load_pricing_adjustments(columns=columns, dates=dates, assets=assets)

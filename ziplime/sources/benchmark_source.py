@@ -5,7 +5,6 @@ from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.services.asset_service import AssetService
-from ziplime.data.domain.data_bundle import DataBundle
 from ziplime.errors import (
     InvalidBenchmarkAsset,
     BenchmarkAssetNotAvailableTooEarly,
@@ -38,7 +37,6 @@ class BenchmarkSource:
             self._precalculated_series = pl.Series()
 
         elif benchmark_asset is not None:
-            self._validate_benchmark(benchmark_asset=benchmark_asset)
             self._precalculated_series = self._initialize_precalculated_series(
                 asset=benchmark_asset, trading_calendar=trading_calendar, trading_days=sessions,
                 exchange=exchange
@@ -138,23 +136,23 @@ class BenchmarkSource:
 
         return daily_returns.filter(pl.col("date").is_between(start, end))
 
-    def _validate_benchmark(self, benchmark_asset: Asset):
+    async def validate_benchmark(self, benchmark_asset: Asset):
         # check if this security has a stock dividend.  if so, raise an
         # error suggesting that the user pick a different asset to use
         # as benchmark.
-        stock_dividends = self.asset_service.get_stock_dividends(
-            sid=self.benchmark_asset.sid, trading_days=self.sessions
+        stock_dividends = await self.asset_service.get_stock_dividends(
+            sid=benchmark_asset.sid, trading_days=self.sessions
         )
 
         if len(stock_dividends) > 0:
             raise InvalidBenchmarkAsset(
-                sid=str(self.benchmark_asset), dt=stock_dividends[0]["ex_date"]
+                sid=str(benchmark_asset), dt=stock_dividends[0]["ex_date"]
             )
 
         if benchmark_asset.start_date > self.sessions[0]:
             # the asset started trading after the first simulation day
             raise BenchmarkAssetNotAvailableTooEarly(
-                sid=str(self.benchmark_asset),
+                sid=str(benchmark_asset),
                 dt=self.sessions[0],
                 start_dt=benchmark_asset.start_date,
             )
@@ -162,7 +160,7 @@ class BenchmarkSource:
         if benchmark_asset.end_date < self.sessions[-1]:
             # the asset stopped trading before the last simulation day
             raise BenchmarkAssetNotAvailableTooLate(
-                sid=str(self.benchmark_asset),
+                sid=str(benchmark_asset),
                 dt=self.sessions[-1],
                 end_dt=benchmark_asset.end_date,
             )

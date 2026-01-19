@@ -82,6 +82,7 @@ async def _run_simulation():
         benchmark_asset_symbol="SPX",
         benchmark_returns=None,
         stop_on_error=False,
+        asset_service=asset_service
     )
 
     if errors:

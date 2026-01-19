@@ -31,7 +31,8 @@ from ziplime.utils.pandas_utils import nearest_unequal_elements
 from .downsample_helpers import (
     select_sampling_indices, SUPPORTED_DOWNSAMPLE_FREQUENCIES,
 )
-from .term import Term
+from ziplime.pipeline.terms.term import Term
+
 
 
 class PositiveWindowLengthMixin(Term):
@@ -187,7 +188,9 @@ class CustomTermMixin(Term):
         inputs = []
         for input_ in windows:
             window = next(input_)
-            if window.shape[1] == 1:
+            # if window.shape[1] == 1:
+            if len(window.shape) == 1:
+
                 # Do not mask single-column inputs.
                 inputs.append(window)
             else:

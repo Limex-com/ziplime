@@ -1,11 +1,8 @@
 import datetime
-from pathlib import Path
 
+from ziplime.gens.domain.trading_clock import TradingClock
 from ziplime.utils.calendar_utils import get_calendar
 
-from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES
-from ziplime.assets.repositories.sqlalchemy_adjustments_repository import SqlAlchemyAdjustmentRepository
-from ziplime.assets.repositories.sqlalchemy_asset_repository import SqlAlchemyAssetRepository
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.core.algorithm_file import AlgorithmFile
 from ziplime.data.services.data_source import DataSource
@@ -41,7 +38,8 @@ async def run_simulation(
         benchmark_asset_symbol: str | None = None,
         benchmark_returns: pl.Series | None = None,
         equity_commission: EquityCommissionModel | None = None,
-        future_commission: FutureCommissionModel | None = None
+        future_commission: FutureCommissionModel | None = None,
+        clock: TradingClock  | None = None
 ):
     """
     Run a trading algorithm simulation within a defined time period and trading environment.
@@ -80,13 +78,13 @@ async def run_simulation(
     calendar = get_calendar(trading_calendar)
 
     algo = AlgorithmFile(algorithm_file=algorithm_file, algorithm_config_file=config_file)
-
-    clock = SimulationClock(
-        trading_calendar=calendar,
-        start_date=start_date,
-        end_date=end_date,
-        emission_rate=emission_rate,
-    )
+    if clock is None:
+        clock = SimulationClock(
+            trading_calendar=calendar,
+            start_date=start_date,
+            end_date=end_date,
+            emission_rate=emission_rate,
+        )
     if equity_commission is None:
         equity_commission = PerShare(
             cost=DEFAULT_PER_SHARE_COST,
@@ -104,7 +102,7 @@ async def run_simulation(
             name=default_exchange_name,
             country_code="US",
             trading_calendar=calendar,
-            data_bundle=market_data_source,
+            data_source=market_data_source,
             equity_slippage=FixedBasisPointsSlippage(),
             equity_commission=equity_commission,
             future_slippage=VolatilityVolumeShare(

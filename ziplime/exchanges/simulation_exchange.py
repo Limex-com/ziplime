@@ -10,7 +10,7 @@ from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.constants.period import Period
-from ziplime.data.domain.data_bundle import DataBundle
+from ziplime.data.services.data_source import DataSource
 
 from ziplime.domain.position import Position
 from ziplime.domain.portfolio import Portfolio
@@ -34,13 +34,13 @@ class SimulationExchange(Exchange):
                  future_slippage: SlippageModel,
                  equity_commission: EquityCommissionModel,
                  future_commission: FutureCommissionModel,
-                 data_bundle: DataBundle = None,
+                 data_source: DataSource = None,
                  extra_data_sources: list = None
                  ):
         super().__init__(name=name,
                          canonical_name=name,
                          clock=clock,
-                         data_bundle=data_bundle,
+                         data_source=data_source,
                          country_code=country_code,
                          trading_calendar=trading_calendar)
         self.slippage_models = {
@@ -204,18 +204,18 @@ class SimulationExchange(Exchange):
         # print(f"Getting current: {assets}, fields={fields}, dt={dt}")
         # TODO: check this, uncomment adjust_minutes
         # if not self._adjust_minutes:
-        # return self.data_bundle.get_spot_value(
+        # return self.data_source.get_spot_value(
         #     assets=assets,
         #     fields=fields,
         #     dt=dt,
-        #     frequency=self.data_bundle.frequency
+        #     frequency=self.data_source.frequency
         # )
 
         return self.get_data_by_limit(
             fields=fields,
             limit=1,
             end_date=dt,
-            frequency=self.data_bundle.frequency,
+            frequency=self.data_source.frequency,
             assets=assets,
             include_end_date=True,
         )
@@ -231,7 +231,7 @@ class SimulationExchange(Exchange):
                           include_end_date: bool,
                           source: str
                           ) -> pl.DataFrame:
-        return self.data_bundle.get_data_by_limit(fields=fields,
+        return self.data_source.get_data_by_limit(fields=fields,
                                                   limit=limit,
                                                   end_date=end_date,
                                                   frequency=frequency,
@@ -247,7 +247,7 @@ class SimulationExchange(Exchange):
                           assets: frozenset[Asset],
                           include_end_date: bool,
                           ) -> pl.DataFrame:
-        return self.data_bundle.get_data_by_limit(fields=fields,
+        return self.data_source.get_data_by_limit(fields=fields,
                                                   limit=limit,
                                                   end_date=end_date,
                                                   frequency=frequency,

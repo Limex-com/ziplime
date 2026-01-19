@@ -44,6 +44,7 @@ from ziplime.trading.entities.trading_pair import TradingPair
 from ziplime.trading.enums.order_side import OrderSide
 from ziplime.trading.enums.order_type import OrderType
 from ziplime.trading.enums.simulation_event import SimulationEvent
+from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 from ziplime.trading.trading_signal_executor import TradingSignalExecutor
 from ziplime.utils.calendar_utils import get_calendar
 
@@ -202,6 +203,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             stop_on_error: bool = False
     ):
         self.algorithm = algorithm
+        self.config = algorithm.config
         self.exchanges = exchanges
         self.stop_on_error = stop_on_error
         self.default_exchange = list(self.exchanges.values())[0]
@@ -1953,7 +1955,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         This will be used to infer a domain for pipelines that only use generic
         datasets when running in the context of a TradingAlgorithm.
         """
-        return _DEFAULT_DOMAINS.get(calendar.name, domain.GENERIC)
+        return domain.GENERIC
 
     ##################
     # End Pipeline API
@@ -2034,7 +2036,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         for new_order in new_orders.values():
             self._ledger.process_order(order=new_order)
 
-    def once_a_day(
+    async def once_a_day(
             self,
             midnight_dt,
             current_data,
@@ -2052,7 +2054,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         # self.datetime = midnight_dt
         # self.on_dt_changed(midnight_dt)
 
-        self.metrics_tracker.handle_market_open(session_label=midnight_dt)
+        await self.metrics_tracker.handle_market_open(session_label=midnight_dt)
 
         # handle any splits that impact any positions or any open orders.
         assets_we_care_about = (
@@ -2060,7 +2062,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         )
 
         if assets_we_care_about:
-            splits = asset_service.get_splits(assets_we_care_about, midnight_dt)
+            splits = await asset_service.get_splits(assets_we_care_about, midnight_dt)
             if splits:
                 self.blotter.process_splits(splits)
                 self._ledger.process_splits(splits)
@@ -2113,7 +2115,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                                                                           handle_data=self.event_manager.handle_data):
                             yield capital_change_packet, []
                     elif action == SimulationEvent.SESSION_START:
-                        for capital_change_packet in self.once_a_day(midnight_dt=dt,
+                        async for capital_change_packet in self.once_a_day(midnight_dt=dt,
                                                                      current_data=self.current_data,
                                                                      asset_service=self.asset_service):
                             yield capital_change_packet, []
@@ -2231,7 +2233,3 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
         minute_message["minute_perf"]["recorded_vars"] = rvars
         return minute_message
-
-
-# Map from calendar name to default domain for that calendar.
-_DEFAULT_DOMAINS = {d.calendar_name: d for d in domain.BUILT_IN_DOMAINS}
