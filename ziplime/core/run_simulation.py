@@ -1,6 +1,7 @@
 import datetime
 
 from ziplime.gens.domain.trading_clock import TradingClock
+from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 from ziplime.utils.calendar_utils import get_calendar
 
 from ziplime.assets.services.asset_service import AssetService
@@ -40,7 +41,7 @@ async def run_simulation(
         equity_commission: EquityCommissionModel | None = None,
         future_commission: FutureCommissionModel | None = None,
         clock: TradingClock  | None = None
-):
+) -> TradingAlgorithmExecutionResult:
     """
     Run a trading algorithm simulation within a defined time period and trading environment.
 

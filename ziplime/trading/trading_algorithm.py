@@ -44,7 +44,6 @@ from ziplime.trading.entities.trading_pair import TradingPair
 from ziplime.trading.enums.order_side import OrderSide
 from ziplime.trading.enums.order_type import OrderType
 from ziplime.trading.enums.simulation_event import SimulationEvent
-from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 from ziplime.trading.trading_signal_executor import TradingSignalExecutor
 from ziplime.utils.calendar_utils import get_calendar
 
@@ -353,12 +352,12 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         if self._handle_data:
             await self._handle_data(self, data)
 
-    def analyze(self, perf):
-        if self._analyze is None:
-            return
-
-        with ZiplineAPI(self):
-            self._analyze(self, perf)
+    # def analyze(self, perf):
+    #     if self._analyze is None:
+    #         return
+    #
+    #     with ZiplineAPI(self):
+    #         self._analyze(self, perf)
 
     def compute_eager_pipelines(self):
         """Compute any pipelines attached with eager=True."""
@@ -394,49 +393,49 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.metrics_tracker.handle_start_of_simulation()
         return self.transform()
 
-    async def run(self):
-        """Run the algorithm."""
-        self._logger.info("Running algorithm")
-        # HACK: I don't think we really want to support passing a data portal
-        # this late in the long term, but this is needed for now for backwards
-        # compat downstream.
+    # async def run(self):
+    #     """Run the algorithm."""
+    #     self._logger.info("Running algorithm")
+    #     # HACK: I don't think we really want to support passing a data portal
+    #     # this late in the long term, but this is needed for now for backwards
+    #     # compat downstream.
+    #
+    #     # Create ziplime and loop through simulated_trading.
+    #     # Each iteration returns a perf dictionary
+    #     try:
+    #         perfs = []
+    #         errors = []
+    #         async for perf, errors in await self.get_generator():
+    #             perfs.append(perf)
+    #
+    #         # convert perf dict to pandas dataframe
+    #         daily_stats = self._create_daily_stats(perfs)
+    #
+    #         self.analyze(daily_stats)
+    #     finally:
+    #         self.data_portal = None
+    #         self.metrics_tracker = None
+    #
+    #     return daily_stats, errors
 
-        # Create ziplime and loop through simulated_trading.
-        # Each iteration returns a perf dictionary
-        try:
-            perfs = []
-            errors = []
-            async for perf, errors in await self.get_generator():
-                perfs.append(perf)
-
-            # convert perf dict to pandas dataframe
-            daily_stats = self._create_daily_stats(perfs)
-
-            self.analyze(daily_stats)
-        finally:
-            self.data_portal = None
-            self.metrics_tracker = None
-
-        return daily_stats, errors
-
-    def _create_daily_stats(self, perfs):
-        # create daily and cumulative stats dataframe
-        daily_perfs = []
-        # TODO: the loop here could overwrite expected properties
-        # of daily_perf. Could potentially raise or log a
-        # warning.
-        for perf in perfs:
-            if "daily_perf" in perf:
-                perf["daily_perf"].update(perf["daily_perf"].pop("recorded_vars"))
-                perf["daily_perf"].update(perf["cumulative_risk_metrics"])
-                daily_perfs.append(perf["daily_perf"])
-            else:
-                self.risk_report = perf
-
-        daily_dts = pd.DatetimeIndex([p["period_close"] for p in daily_perfs])
-        daily_dts = make_utc_aware(daily_dts)
-        daily_stats = pd.DataFrame(daily_perfs, index=daily_dts)
-        return daily_stats
+    # def _create_daily_stats(self, perfs):
+    #     # create daily and cumulative stats dataframe
+    #     daily_perfs = []
+    #     # TODO: the loop here could overwrite expected properties
+    #     # of daily_perf. Could potentially raise or log a
+    #     # warning.
+    #     for perf in perfs:
+    #         if "daily_perf" in perf:
+    #             perf["daily_perf"].update(perf["daily_perf"].pop("recorded_vars"))
+    #             perf["daily_perf"].update(perf["cumulative_risk_metrics"])
+    #             daily_perfs.append(perf["daily_perf"])
+    #         else:
+    #             self.risk_report = perf
+    #
+    #     daily_dts = pd.DatetimeIndex([p["period_close"] for p in daily_perfs])
+    #     daily_dts = make_utc_aware(daily_dts)
+    #     daily_stats = pd.DataFrame(daily_perfs, index=daily_dts)
+    #     return daily_stats
 
     def calculate_capital_changes(
             self, dt: datetime.datetime, emission_rate: datetime.timedelta, is_interday: bool,

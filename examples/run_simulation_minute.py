@@ -44,7 +44,7 @@ async def _run_simulation():
         await bundle_service.load_bundle(bundle_name="limex_us_fundamental_data", bundle_version=None))
 
     # run daily simulation
-    res, errors = await run_simulation(
+    result = await run_simulation(
         asset_service=asset_service,
         start_date=start_date,
         end_date=end_date,
@@ -60,9 +60,9 @@ async def _run_simulation():
         stop_on_error=False,
     )
 
-    if errors:
-        logger.error(errors)
-    print(res.head(n=10).to_markdown())
+    if result.errors:
+        logger.error(result.errors)
+    print(result.perf(n=10).to_markdown())
 
 
 if __name__ == "__main__":

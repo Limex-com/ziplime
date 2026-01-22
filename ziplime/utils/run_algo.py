@@ -13,6 +13,7 @@ from ziplime.finance.blotter.in_memory_blotter import InMemoryBlotter
 from ziplime.gens.domain.trading_clock import TradingClock
 from ziplime.pipeline.loaders import EquityPricingLoader
 from ziplime.sources.benchmark_source import BenchmarkSource
+from ziplime.trading.trading_algorithm_executor import TradingAlgorithmExecutor
 import polars as pl
 
 try:
@@ -27,6 +28,7 @@ except ImportError:
 from ziplime.pipeline.data.equity_pricing import EquityPricing
 
 from ziplime.trading.trading_algorithm import TradingAlgorithm
+from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 
 logger = structlog.get_logger(__name__)
 
@@ -43,7 +45,7 @@ async def run_algorithm(
         stop_on_error: bool = False,
         benchmark_asset_symbol: str | None = None,
         benchmark_returns: pl.Series | None = None,
-):
+) -> TradingAlgorithmExecutionResult:
     """Run a backtest for the given algorithm.
     This is shared between the cli and :func:`ziplime.run_algo`.
     """
@@ -109,9 +111,9 @@ async def run_algorithm(
         stop_on_error=stop_on_error,
         custom_data_sources=custom_data_sources
     )
-
+    trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
-    perf, errors = await tr.run()
+    result = await trading_algorithm_executor.run_algorithm(trading_algorithm=tr)
     end_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
-    logger.info(f"Backtest completed in {int((end_time - start_time).total_seconds())} seconds. Errors: {len(errors)}")
-    return perf, errors
+    logger.info(f"Backtest completed in {int((end_time - start_time).total_seconds())} seconds. Errors: {len(result.errors)}")
+    return result

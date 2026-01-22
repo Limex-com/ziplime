@@ -62,7 +62,7 @@ async def _run_simulation():
     )
 
     # run daily simulation
-    res, errors = await run_simulation(
+    result = await run_simulation(
         start_date=start_date,
         end_date=end_date,
         trading_calendar="NYSE",
@@ -79,9 +79,13 @@ async def _run_simulation():
         equity_commission=equity_commission
     )
 
-    if errors:
-        logger.error(errors)
-    print(res.head(n=10).to_markdown())
+    if result.errors:
+        logger.error(result.errors)
+    print(result.perf.head(n=10).to_markdown())
+
+    # Get cash from algo
+    start_cash = sum(exchange.get_start_cash_balance() for exchange in result.trading_algorithm.exchanges.values())
+    logger.info(f"Starting_cash: {start_cash}")
 
 
 if __name__ == "__main__":
