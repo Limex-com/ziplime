@@ -9,5 +9,6 @@ from ziplime.trading.trading_algorithm import TradingAlgorithm
 class TradingAlgorithmExecutionResult:
     trading_algorithm: TradingAlgorithm
     perf: pd.DataFrame
+    risk_report: pd.DataFrame
     errors: list[str]
 

@@ -24,12 +24,12 @@ class TradingAlgorithmExecutor:
                 perf["daily_perf"].update(perf["cumulative_risk_metrics"])
                 daily_perfs.append(perf["daily_perf"])
             else:
-                self.risk_report = perf
+                risk_report = perf
 
         daily_dts = pd.DatetimeIndex([p["period_close"] for p in daily_perfs])
         daily_dts = make_utc_aware(daily_dts)
         daily_stats = pd.DataFrame(daily_perfs, index=daily_dts)
-        return daily_stats
+        return daily_stats, risk_report
 
 
     async def run_algorithm(self, trading_algorithm: TradingAlgorithm) -> TradingAlgorithmExecutionResult:
@@ -45,7 +45,7 @@ class TradingAlgorithmExecutor:
                 perfs.append(perf)
 
             # convert perf dict to pandas dataframe
-            daily_stats = self._create_daily_stats(perfs)
+            daily_stats, risk_report = self._create_daily_stats(perfs)
 
             self.analyze(trading_algorithm=trading_algorithm, perf=daily_stats)
         finally:
@@ -55,6 +55,7 @@ class TradingAlgorithmExecutor:
         return TradingAlgorithmExecutionResult(
             trading_algorithm=trading_algorithm,
             perf=daily_stats,
+            risk_report=risk_report,
             errors=errors
         )
 
