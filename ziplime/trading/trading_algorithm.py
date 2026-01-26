@@ -44,7 +44,6 @@ from ziplime.trading.entities.trading_pair import TradingPair
 from ziplime.trading.enums.order_side import OrderSide
 from ziplime.trading.enums.order_type import OrderType
 from ziplime.trading.enums.simulation_event import SimulationEvent
-from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 from ziplime.trading.trading_signal_executor import TradingSignalExecutor
 from ziplime.utils.calendar_utils import get_calendar
 
