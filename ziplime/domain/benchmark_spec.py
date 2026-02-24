@@ -3,18 +3,16 @@ import datetime
 import pandas as pd
 import structlog
 
-from zipline.data.benchmarks import get_benchmark_returns_from_file
+from ziplime.data.benchmarks import get_benchmark_returns_from_file
 
-from zipline.errors import SymbolNotFound
+from ziplime.errors import SymbolNotFound
 
-from ziplime.assets.repositories.asset_repository import AssetRepository
-from ziplime.utils.run_algo import _RunAlgoError
-
+from ziplime.assets.repositories.sqlalchemy_asset_repository import SqlAlchemyAssetRepository
 
 class BenchmarkSpec:
     """
     Helper for different ways we can get benchmark data for the Zipline CLI and
-    zipline.utils.run_algo.run_algorithm.
+    ziplime.utils.run_algo.run_algorithm.
 
     Parameters
     ----------
@@ -49,7 +47,7 @@ class BenchmarkSpec:
         self.benchmark_symbol = benchmark_symbol
         self.no_benchmark = no_benchmark
 
-    def resolve(self, asset_repository: AssetRepository, start_date: datetime.date, end_date: datetime.date):
+    def resolve(self, asset_repository: SqlAlchemyAssetRepository, start_date: datetime.date, end_date: datetime.date):
         """
         Resolve inputs into values to be passed to TradingAlgorithm.
 
@@ -59,11 +57,11 @@ class BenchmarkSpec:
 
         Parameters
         ----------
-        asset_repository : zipline.assets.AssetFinder
+        asset_repository : ziplime.assets.AssetFinder
             Asset finder for the algorithm to be run.
-        start_date : pd.Timestamp
+        start_date : datetime.datetime
             Start date of the algorithm to be run.
-        end_date : pd.Timestamp
+        end_date : datetime.datetime
             End date of the algorithm to be run.
 
         Returns
@@ -93,7 +91,7 @@ class BenchmarkSpec:
                 benchmark_sid = asset.sid
                 benchmark_returns = None
             except SymbolNotFound:
-                raise _RunAlgoError(f"Symbol {self.benchmark_symbol} as a benchmark not found in this bundle.")
+                raise ValueError(f"Symbol {self.benchmark_symbol} as a benchmark not found in this bundle.")
         elif self.no_benchmark:
             benchmark_sid = None
             benchmark_returns = pd.Series(

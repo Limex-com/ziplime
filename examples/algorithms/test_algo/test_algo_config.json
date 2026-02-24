@@ -1,0 +1,17 @@
+{
+  "currency": "USD",
+  "equities_to_trade": [
+    {
+      "symbol": "AAPL",
+      "target_percentage": 10.0
+    },
+    {
+      "symbol": "AMZN",
+      "target_percentage": 10.0
+    },
+    {
+      "symbol": "NVDA",
+      "target_percentage": 10.0
+    }
+  ]
+}

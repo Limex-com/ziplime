@@ -1,0 +1,42 @@
+"""
+Base class for Pipeline API data loaders.
+"""
+
+
+class PipelineLoader:
+    """Interface for PipelineLoaders."""
+
+    async def load_adjusted_array(self, domain, columns, dates, sids, mask):
+        """
+        Load data for ``columns`` as AdjustedArrays.
+
+        Parameters
+        ----------
+        domain : ziplime.pipeline.domain.Domain
+            The domain of the pipeline for which the requested data must be
+            loaded.
+        columns : list[ziplime.pipeline.data.dataset.BoundColumn]
+            Columns for which data is being requested.
+        dates : pd.DatetimeIndex
+            Dates for which data is being requested.
+        sids : pd.Int64Index
+            Asset identifiers for which data is being requested.
+        mask : np.array[ndim=2, dtype=bool]
+            Boolean array of shape (len(dates), len(sids)) indicating dates on
+            which we believe the requested assets were alive/tradeable. This is
+            used for optimization by some loaders.
+
+        Returns
+        -------
+        arrays : dict[BoundColumn -> ziplime.lib.adjusted_array.AdjustedArray]
+            Map from column to an AdjustedArray representing a point-in-time
+            rolling view over the requested dates for the requested sids.
+        """
+
+    @property
+    def currency_aware(self):
+        """Whether or not this loader supports currency-conversions.
+
+        By default, assume that loaders to not support currency conversions.
+        """
+        return False

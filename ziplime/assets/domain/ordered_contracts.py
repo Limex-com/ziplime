@@ -1,39 +1,9 @@
-# cython: embedsignature=True
-#
-# Copyright 2016 Quantopian, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""Cythonized ContinuousFutures object."""
-
-# cimport cython
-# from cpython.number cimport PyNumber_Index
-# from cpython.object cimport (
-#     Py_EQ,
-#     Py_NE,
-#     Py_GE,
-#     Py_LE,
-#     Py_GT,
-#     Py_LT,
-# )
-# from cpython cimport bool
 from functools import partial
 
-from numpy import array, empty, iinfo
-# from numpy cimport int64_t, int64_t
+from numpy import array, iinfo
 from pandas import Timestamp
-from zipline.utils.calendar_utils import get_calendar
-# import warnings
+
+from ziplime.assets.domain.contract_node import ContractNode
 
 
 def delivery_predicate(codes, contract):

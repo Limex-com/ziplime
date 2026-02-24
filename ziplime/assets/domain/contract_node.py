@@ -1,9 +1,5 @@
 class ContractNode:
 
-    # cdef readonly object contract
-    # cdef public object prev
-    # cdef public object next
-
     def __init__(self, contract):
         self.contract = contract
         self.prev = None

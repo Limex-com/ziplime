@@ -1,0 +1,9 @@
+import enum
+
+
+class SimulationEvent(enum.Enum):
+    BAR = "BAR"
+    SESSION_START = "SESSION_START"
+    SESSION_END = "SESSION_END"
+    EMISSION_RATE_END = "EMISSION_RATE_END"
+    BEFORE_TRADING_START_BAR = "BEFORE_TRADING_START_BAR"

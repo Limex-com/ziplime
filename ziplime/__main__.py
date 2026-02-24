@@ -1,35 +1,40 @@
+import asyncio
 import datetime
-import errno
 import logging
 import os
+from pathlib import Path
 
-import pandas as pd
-from zipline.__main__ import ipython_only
+import asyncclick as click
 
-from zipline.utils.calendar_utils import get_calendar
-
-from ziplime.constants.default_columns import OHLCV_COLUMNS_POLARS, DEFAULT_COLUMNS_POLARS
+from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES
+from ziplime.assets.repositories.sqlalchemy_adjustments_repository import SqlAlchemyAdjustmentRepository
+from ziplime.assets.repositories.sqlalchemy_asset_repository import SqlAlchemyAssetRepository
 from ziplime.constants.fundamental_data import FUNDAMENTAL_DATA_COLUMNS
-from ziplime.data.storages.polars_data_bundle import PolarsDataBundle
+from ziplime.data.services.bundle_service import BundleService
+from ziplime.data.services.file_system_bundle_registry import FileSystemBundleRegistry
+from ziplime.data.services.limex_hub_data_source import LimexHubDataSource
+from ziplime.data.services.file_system_parquet_bundle_storage import FileSystemParquetBundleStorage
 from ziplime.domain.benchmark_spec import BenchmarkSpec
 from ziplime.domain.data_frequency import DataFrequency
+from ziplime.finance.commission import DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE, DEFAULT_PER_CONTRACT_COST, PerContract, \
+    DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE, DEFAULT_PER_SHARE_COST, PerShare
+from ziplime.finance.constants import FUTURE_EXCHANGE_FEES_BY_SYMBOL
+from ziplime.finance.domain.simulation_paremeters import SimulationParameters
+from ziplime.finance.metrics import default_metrics
+from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
+from ziplime.finance.slippage.slippage_model import DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT
+from ziplime.finance.slippage.volatility_volume_share import VolatilityVolumeShare
+from ziplime.gens.domain.simulation_clock import SimulationClock
+from ziplime.exchanges.lime_trader_sdk.lime_trader_sdk_exchange import LimeTraderSdkExchange
+from ziplime.exchanges.simulation_exchange import SimulationExchange
+from ziplime.utils.date_utils import strip_time_and_timezone_info
 from ziplime.utils.run_algo import run_algorithm
+from exchange_calendars import get_calendar as ec_get_calendar
 
-import click
-from ziplime.data import bundles as bundles_module
+from asyncclick import DateTime
+from ziplime.utils.cli import Timestamp
 
-from click import DateTime
-from lime_trader.models.market import Period
-from zipline.utils.cli import Timestamp
-
-from ziplime.config.register_bundles import register_lime_symbol_list_equities_bundle
-
-from zipline import __main__ as zipline__main__
-
-from ziplime.utils.bundle_utils import register_default_bundles, get_historical_market_data_provider, \
-    get_fundamental_data_provider, get_live_market_data_provider, get_broker
-
-DEFAULT_BUNDLE = "lime"
+from ziplime.utils.bundle_utils import get_fundamental_data_provider, get_data_source
 
 
 def validate_date_range(date_min: datetime.datetime, date_max: datetime.datetime):
@@ -43,39 +48,28 @@ def validate_date_range(date_min: datetime.datetime, date_max: datetime.datetime
 
 @click.group()
 @click.pass_context
-def main(ctx):
+async def main(ctx):
     """Top level ziplime entry point."""
     # install a logging handler before performing any other operations
-
     logging.basicConfig(
         format="[%(asctime)s-%(levelname)s][%(name)s]\n %(message)s",
         level=logging.INFO,
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
 
-    register_default_bundles()
-
 
 @main.command(context_settings=dict(
-    # ignore_unknown_options=True,
-    # allow_extra_args=True,
 ))
 @click.option(
     "-b",
     "--bundle",
-    default=DEFAULT_BUNDLE,
-    metavar="BUNDLE-NAME",
-    show_default=True,
     help="The data bundle to ingest.",
 )
 @click.option(
     "-c",
-    "--calendar",
-    default="NYSE",
-    show_default=True,
+    "--trading-calendar",
     help="Default calendar to use.",
 )
-@click.option('--new-bundle-name', default=None)
 @click.option(
     "--start-date",
     type=DateTime(),
@@ -106,12 +100,6 @@ def main(ctx):
 @click.option("-s", '--symbols')
 @click.option('--fundamental-data')
 @click.option(
-    "--assets-version",
-    type=int,
-    multiple=True,
-    help="Version of the assets db to which to downgrade.",
-)
-@click.option(
     "--show-progress/--no-show-progress",
     default=True,
     help="Print progress information to the terminal.",
@@ -136,46 +124,31 @@ def main(ctx):
     is_flag=True,
     help="If passed, fundamental data won't be ingested.",
 )
+@click.option(
+    "--bundle-storage-path",
+    default=Path(Path.home(), ".ziplime", "data"),
+    show_default=True,
+    help="Path to the bundle storage on filesystem.",
+)
 @click.pass_context
-def ingest(ctx, bundle, new_bundle_name, start_date, end_date, frequency, symbols, fundamental_data, show_progress,
-           assets_version, calendar,
-           historical_market_data_provider,
-           fundamental_data_provider,
-           skip_fundamental_data
-           ):
+async def ingest(ctx, bundle, start_date, end_date, frequency, symbols, fundamental_data, show_progress,
+                 trading_calendar,
+                 historical_market_data_provider,
+                 fundamental_data_provider,
+                 skip_fundamental_data,
+                 bundle_storage_path,
+                 ):
     """Top level ziplime entry point."""
     symbols_parsed = symbols.split(',') if symbols else None
     if skip_fundamental_data:
         fundamental_data_list = set()
     else:
         fundamental_data_list = fundamental_data.split(",") if fundamental_data else None
-
-    if new_bundle_name:
-        bundle_name = f"{DEFAULT_BUNDLE}-{new_bundle_name}"
-        ctx.args = ['-b', new_bundle_name] + ctx.args
-    else:
-        bundle_name = bundle
-        ctx.args = ['-b', bundle] + ctx.args
     # install a logging handler before performing any other operations
     fundamental_data_list_cols = fundamental_data_list if fundamental_data_list is not None else [
         col.name for col in
         FUNDAMENTAL_DATA_COLUMNS
     ]
-    register_lime_symbol_list_equities_bundle(
-        bundle_name=bundle_name,
-        symbols=symbols_parsed,
-        start_session=start_date,
-        end_session=end_date,
-        frequency=DataFrequency(frequency).to_timedelta(),
-        calendar_name=calendar,
-        fundamental_data_list=fundamental_data_list_cols,
-    )
-
-    new_params = dict(**ctx.params)
-
-    # clean up lime only params and set new bundle name
-    new_params["bundle"] = bundle_name
-
     fundamental_data_provider_instance = get_fundamental_data_provider(code=fundamental_data_provider)
     fundamental_data_column_names = fundamental_data_provider_instance.get_fundamental_data_column_names(
         fundamental_data_fields=set(fundamental_data_list_cols))
@@ -188,18 +161,35 @@ def ingest(ctx, bundle, new_bundle_name, start_date, end_date, frequency, symbol
         if fundamental_data_list is not None
         else FUNDAMENTAL_DATA_COLUMNS
     )
-    bundles_module.ingest(
-        name=bundle_name,
-        timestamp=pd.Timestamp.utcnow(),
-        assets_version=assets_version,
-        show_progress=show_progress,
-        historical_market_data_provider=get_historical_market_data_provider(code=historical_market_data_provider),
-        fundamental_data_provider=fundamental_data_provider_instance,
-        data_bundle_writer_class=PolarsDataBundle,
-        fundamental_data_writer_class=PolarsDataBundle,
-        market_data_fields=OHLCV_COLUMNS_POLARS,
-        fundamental_data_fields=fundamental_data_cols,
-        frequency=DataFrequency(frequency).to_timedelta()
+    bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
+    bundle_service = BundleService(bundle_registry=bundle_registry)
+    bundle_storage = FileSystemParquetBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
+    data_bundle_source = LimexHubDataSource.from_env()
+
+    calendar = ec_get_calendar(trading_calendar, start=start_date - datetime.timedelta(days=30))
+
+    bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
+    assets_repository = SqlAlchemyAssetRepository(base_storage_path=bundle_storage_path,
+                                                  bundle_name=bundle,
+                                                  bundle_version=bundle_version,
+                                                  future_chain_predicates=CHAIN_PREDICATES)
+    adjustments_repository = SqlAlchemyAdjustmentRepository(base_storage_path=bundle_storage_path,
+                                                            bundle_name=bundle,
+                                                            bundle_version=bundle_version)
+
+    await bundle_service.ingest_bundle(
+        date_start=start_date.replace(tzinfo=calendar.tz),
+        date_end=end_date.replace(tzinfo=calendar.tz),
+        bundle_storage=bundle_storage,
+        data_bundle_source=data_bundle_source,
+        frequency=DataFrequency(frequency).to_timedelta(),
+        symbols=symbols_parsed,
+        name=bundle,
+        bundle_version=bundle_version,
+        trading_calendar=calendar,
+        assets_repository=assets_repository,
+        adjustments_repository=adjustments_repository,
+        forward_fill_missing_ohlcv_data=True
     )
 
 
@@ -208,9 +198,14 @@ def ingest(ctx, bundle, new_bundle_name, start_date, end_date, frequency, symbol
     allow_extra_args=True,
 ))
 @click.option(
+    "--bundle-storage-path",
+    default=Path(Path.home(), ".ziplime", "data"),
+    show_default=True,
+    help="Path to the bundle storage on filesystem.",
+)
+@click.option(
     "-b",
     "--bundle",
-    default=DEFAULT_BUNDLE,
     metavar="BUNDLE-NAME",
     show_default=True,
     help="The data bundle to clean.",
@@ -238,36 +233,33 @@ def ingest(ctx, bundle, new_bundle_name, start_date, end_date, frequency, symbol
          " This may not be passed with -e / --before or -a / --after",
 )
 @click.pass_context
-def clean(ctx, bundle, before, after, keep_last):
+async def clean(ctx, bundle_storage_path, bundle, before, after, keep_last):
     """Top level ziplime entry point."""
 
-    func = getattr(zipline__main__, "clean")
-    ctx.forward(func)
+    bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
+
+    bundle_service = BundleService(bundle_registry=bundle_registry)
+    await bundle_service.clean(bundle_name=bundle, after=after, before=before,
+                               keep_last=keep_last)
 
 
 @main.command(context_settings=dict(
     ignore_unknown_options=True,
     allow_extra_args=True,
 ))
+@click.option(
+    "--bundle-storage-path",
+    default=Path(Path.home(), ".ziplime", "data"),
+    show_default=True,
+    help="Path to the bundle storage on filesystem.",
+)
 @click.pass_context
-def bundles(ctx):
+async def bundles(ctx, bundle_storage_path):
     """Top level ziplime entry point."""
-    for bundle in sorted(bundles_module.bundles.keys()):
-        if bundle.startswith("."):
-            # hide the test data
-            continue
-        try:
-            ingestions = list(map(str, bundles_module.ingestions_for_bundle(bundle)))
-        except OSError as e:
-            if e.errno != errno.ENOENT:
-                raise
-            ingestions = []
+    bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
 
-        # If we got no ingestions, either because the directory didn't exist or
-        # because there were no entries, print a single message indicating that
-        # no ingestions have yet been made.
-        for timestamp in ingestions or ["<no ingestions>"]:
-            click.echo("%s %s" % (bundle, timestamp))
+    for bundle in await bundle_registry.list_bundles():
+        click.echo(f"{bundle["name"]} {bundle["version"]} - {bundle['timestamp']}")
 
 
 @main.command()
@@ -294,13 +286,6 @@ def bundles(ctx):
     "--bundle",
     metavar="BUNDLE-NAME",
     help="The data bundle to use for the simulation.",
-)
-@click.option(
-    "--bundle-timestamp",
-    type=Timestamp(),
-    default=pd.Timestamp.utcnow(),
-    show_default=False,
-    help="The date to lookup data on or before.\n" "[default: <current-time>]",
 )
 @click.option(
     "-bf",
@@ -332,13 +317,13 @@ def bundles(ctx):
 @click.option(
     "-s",
     "--start-date",
-    type=click.DateTime(formats=["%Y-%m-%d"]),
+    type=click.DateTime(),
     help="The start date of the simulation.",
 )
 @click.option(
     "-e",
     "--end-date",
-    type=click.DateTime(formats=["%Y-%m-%d"]),
+    type=click.DateTime(),
     help="The end date of the simulation.",
 )
 @click.option(
@@ -363,16 +348,16 @@ def bundles(ctx):
     help="Print the algorithm to stdout.",
 )
 @click.option(
-    "--metrics-set",
-    default="default",
-    help="The metrics set to use. New metrics sets may be registered in your"
-         " extension.py.",
+    "--exchange-name",
+    default='LIME',
+    help="The exchange to use for trading.",
+    show_default=True,
 )
 @click.option(
-    "--broker",
-    default=None,
-    type=click.Choice(['lime-trader-sdk']),
-    help="The broker to use for live trading.",
+    "--exchange-type",
+    default='simulation',
+    type=click.Choice(['simulation', 'lime-trader-sdk']),
+    help="The exchange to use for trading.",
     show_default=True,
 )
 @click.option(
@@ -380,24 +365,20 @@ def bundles(ctx):
     type=click.Choice(['lime-trader-sdk']),
     default=None,
     help="Market data provider for live trading",
-    # show_default=True,
 )
-@ipython_only(
-    click.option(
-        "--local-namespace/--no-local-namespace",
-        is_flag=True,
-        default=None,
-        help="Should the algorithm methods be " "resolved in the local namespace.",
-    )
+@click.option(
+    "--bundle-storage-path",
+    default=Path(Path.home(), ".ziplime", "data"),
+    show_default=True,
+    help="Path to the bundle storage on filesystem.",
 )
 @click.pass_context
-def run(
+async def run(
         ctx,
         algofile,
         emission_rate,
         capital_base,
         bundle,
-        bundle_timestamp,
         benchmark_file,
         benchmark_symbol,
         benchmark_sid,
@@ -407,13 +388,15 @@ def run(
         output,
         trading_calendar,
         print_algo,
-        metrics_set,
-        local_namespace,
-        broker: str | None,
+        bundle_storage_path,
+        exchange_name: str,
+        exchange_type: str,
         live_market_data_provider: str | None,
 ):
     """Run a backtest for the given algorithm."""
-    trading_calendar = get_calendar(trading_calendar)
+
+    calendar = ec_get_calendar(trading_calendar,
+                               start=strip_time_and_timezone_info(start_date) - datetime.timedelta(days=30))
 
     benchmark_spec = BenchmarkSpec(
         benchmark_returns=None,
@@ -425,30 +408,90 @@ def run(
     algotext = None
     if algofile is not None:
         algotext = algofile.read()
+    bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
 
-    if broker is not None:
-        start_date = pd.Timestamp.now(tz=datetime.timezone.utc).replace(tzinfo=None)  # - pd.Timedelta(days=3)
-        end_date = start_date + pd.Timedelta('5 day')
-    return run_algorithm(
+    if exchange_type == "simulation":
+        exchange_class = SimulationExchange(
+            name=exchange_name,
+            equity_slippage=FixedBasisPointsSlippage(),
+            equity_commission=PerShare(
+                cost=DEFAULT_PER_SHARE_COST,
+                min_trade_cost=DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE,
+
+            ),
+            future_slippage=VolatilityVolumeShare(
+                volume_limit=DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT,
+            ),
+            future_commission=PerContract(
+                cost=DEFAULT_PER_CONTRACT_COST,
+                exchange_fee=FUTURE_EXCHANGE_FEES_BY_SYMBOL,
+                min_trade_cost=DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE
+            ),
+        )
+    elif exchange_type == "lime-trader-sdk":
+        exchange_class = LimeTraderSdkExchange(
+            name=exchange_name,
+            lime_sdk_credentials_file=None
+        )
+
+    else:
+        raise Exception("Not valid exchange.")
+    max_shares = int(1e11)
+
+    sim_params = SimulationParameters(
+        start_date=start_date.replace(tzinfo=calendar.tz),
+        end_date=end_date.replace(tzinfo=calendar.tz),
+        trading_calendar=calendar,
+        capital_base=capital_base,
+        emission_rate=DataFrequency(emission_rate).to_timedelta(),
+        max_shares=max_shares,
+        exchange=exchange_class,
+        bundle_name=bundle
+    )
+
+    clock = SimulationClock(
+        sessions=sim_params.sessions,
+        market_opens=sim_params.market_opens,
+        market_closes=sim_params.market_closes,
+        before_trading_start_minutes=sim_params.before_trading_start_minutes,
+        emission_rate=sim_params.emission_rate,
+        timezone=sim_params.trading_calendar.tz
+    )
+    timedelta_diff_from_current_time = datetime.datetime.now(tz=sim_params.trading_calendar.tz) - start_date.replace(
+        tzinfo=sim_params.trading_calendar.tz)
+
+    # clock = RealtimeClock(
+    #     sessions=sim_params.sessions,
+    #     market_opens=sim_params.market_opens,
+    #     market_closes=sim_params.market_closes,
+    #     before_trading_start_minutes=sim_params.before_trading_start_minutes,
+    #     emission_rate=sim_params.emission_rate,
+    #     timezone=sim_params.trading_calendar.tz,
+    #     timedelta_diff_from_current_time=-timedelta_diff_from_current_time
+    # )
+
+    result = await run_algorithm(
         algofile=getattr(algofile, "name", "<algorithm>"),
         algotext=algotext,
-        emission_rate=DataFrequency(emission_rate).to_timedelta(),
-        capital_base=capital_base,
-        bundle=bundle,
-        bundle_timestamp=bundle_timestamp,
-        start_date=start_date,
-        end_date=end_date,
-        output=output,
-        trading_calendar=trading_calendar,
         print_algo=print_algo,
-        metrics_set=metrics_set,
+        metrics_set=default_metrics(),
         benchmark_spec=benchmark_spec,
         custom_loader=None,
-        broker=get_broker(broker) if broker is not None else None,
-        market_data_provider=get_live_market_data_provider(
+        missing_data_bundle_source=get_data_source(
             live_market_data_provider) if live_market_data_provider is not None else None,
+        bundle_registry=bundle_registry,
+        simulation_params=sim_params,
+        clock=clock
+
     )
+
+    if output == "-":
+        click.echo(str(result))
+    elif output != os.devnull:  # make the ziplime magic not write any data
+        # TODO: test this
+        result.to_pickle(output)
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

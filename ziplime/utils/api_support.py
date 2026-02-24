@@ -1,27 +1,12 @@
-#
-# Copyright 2014 Quantopian, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 from functools import wraps
 
-import zipline.api
-from zipline.utils.algo_instance import get_algo_instance, set_algo_instance
+import ziplime.api
+from ziplime.utils.algo_instance import get_algo_instance, set_algo_instance
 
 
 class ZiplineAPI(object):
     """
-    Context manager for making an algorithm instance available to zipline API
+    Context manager for making an algorithm instance available to ziplime API
     functions within a scoped block.
     """
 
@@ -44,20 +29,20 @@ class ZiplineAPI(object):
 
 def api_method(f):
     # Decorator that adds the decorated class method as a callable
-    # function (wrapped) to zipline.api
+    # function (wrapped) to ziplime.api
     @wraps(f)
     def wrapped(*args, **kwargs):
         # Get the instance and call the method
         algo_instance = get_algo_instance()
         if algo_instance is None:
             raise RuntimeError(
-                'zipline api method %s must be called during a simulation.'
+                'ziplime api method %s must be called during a simulation.'
                 % f.__name__
             )
         return getattr(algo_instance, f.__name__)(*args, **kwargs)
-    # Add functor to zipline.api
-    setattr(zipline.api, f.__name__, wrapped)
-    zipline.api.__all__.append(f.__name__)
+    # Add functor to ziplime.api
+    setattr(ziplime.api, f.__name__, wrapped)
+    ziplime.api.__all__.append(f.__name__)
     f.is_api_method = True
     return f
 
@@ -128,23 +113,23 @@ def disallowed_in_before_trading_start(exception):
     return decorator
 
 
-def allowed_only_in_before_trading_start(exception):
-    """
-    Decorator for API methods that can be called only from within
-    TradingAlgorithm.before_trading_start.  `exception` will be raised if the
-    method is called outside `before_trading_start`.
-
-    Usage
-    -----
-    @allowed_only_in_before_trading_start(SomeException("Don't do that!"))
-    def method(self):
-        # Do stuff that is only allowed inside before_trading_start.
-    """
-    def decorator(method):
-        @wraps(method)
-        def wrapped_method(self, *args, **kwargs):
-            if not self._in_before_trading_start:
-                raise exception
-            return method(self, *args, **kwargs)
-        return wrapped_method
-    return decorator
+# def allowed_only_in_before_trading_start(exception):
+#     """
+#     Decorator for API methods that can be called only from within
+#     TradingAlgorithm.before_trading_start.  `exception` will be raised if the
+#     method is called outside `before_trading_start`.
+#
+#     Usage
+#     -----
+#     @allowed_only_in_before_trading_start(SomeException("Don't do that!"))
+#     def method(self):
+#         # Do stuff that is only allowed inside before_trading_start.
+#     """
+#     def decorator(method):
+#         @wraps(method)
+#         def wrapped_method(self, *args, **kwargs):
+#             if not self._in_before_trading_start:
+#                 raise exception
+#             return method(self, *args, **kwargs)
+#         return wrapped_method
+#     return decorator

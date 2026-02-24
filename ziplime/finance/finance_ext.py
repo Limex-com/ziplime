@@ -2,32 +2,11 @@ from math import sqrt
 
 import numpy as np
 import pandas as pd
+import structlog
 
-from ziplime.assets.domain.future import Future
+from ziplime.assets.entities.futures_contract import FuturesContract
 
-
-def update_position_last_sale_prices(positions, get_price, dt):
-    """Update the positions' last sale prices.
-
-    Parameters
-    ----------
-    positions : OrderedDict
-        The positions to update.
-    get_price : callable[Asset, float]
-        The function to retrieve the price for the asset.
-    dt : pd.Timestamp
-        The dt to set as the last sale date if the price is not nan.
-    """
-
-    for outer_position in positions.values():
-        inner_position = outer_position
-
-        last_sale_price = get_price(inner_position.asset)["close"][0]
-
-        # inline ~isnan because this gets called once per position per minute
-        if last_sale_price == last_sale_price:
-            inner_position.last_sale_price = last_sale_price
-            inner_position.last_sale_date = dt
+logger = structlog.get_logger(__name__)
 
 
 class PositionStats:
@@ -202,9 +181,12 @@ def calculate_position_tracker_stats(positions, stats):
         # we call this function every time the portfolio value is needed,
         # which is at least once per simulation day, so let's not iterate
         # through every single position multiple times.
+        # try:
         exposure = position.amount * position.last_sale_price
-
-        if type(position.asset) is Future:
+        # except Exception as e:
+        #     print("exception multiplying a")
+        #     raise
+        if type(position.asset) is FuturesContract:
             # Futures don't have an inherent position value.
             value = 0
 
@@ -283,7 +265,11 @@ def minute_annual_volatility(date_labels,
 
             # variance /= day_ix  # day_count - 1 for ddof=1
             variance = variance/day_ix
-
-        out[ix] = sqrt(variance) * annualization_factor
+        # print(ix, sqrt(variance) * annualization_factor)
+        res = sqrt(variance) * annualization_factor
+        if np.isnan(res):
+            out[ix] = 0
+        else:
+            out[ix] = res
 
     return out

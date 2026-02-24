@@ -1,0 +1,16 @@
+# Ziplime AI Assistant — additional dependencies
+# Install with:  pip install -r ai_assistant/requirements.txt
+
+# LLM API (OpenAI SDK works with OpenRouter's compatible API)
+openai>=1.30.0
+
+# Beautiful terminal output
+rich>=13.0.0
+
+# Ziplime itself and its dependencies are assumed to be already installed.
+# numpy is included for Sharpe ratio calculation.
+numpy>=1.24.0
+
+# QuantStats — portfolio analytics and HTML report generation
+# Gracefully skipped if not installed (metrics will fall back to manual calculation)
+quantstats>=0.0.62

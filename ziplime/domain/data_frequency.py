@@ -3,6 +3,7 @@ import enum
 
 
 class DataFrequency(enum.Enum):
+    SECOND = "1s"
     MINUTE = "1m"
     MINUTE_3 = "3m"
     MINUTE_5 = "5m"
@@ -26,6 +27,8 @@ class DataFrequency(enum.Enum):
     def to_timedelta(self) -> datetime.timedelta:
         time_unit, value = self.value[-1:], int(self.value[:-1])
         match time_unit:
+            case "s":
+                return datetime.timedelta(seconds=value)
             case "m":
                 return datetime.timedelta(minutes=value)
             case "h":

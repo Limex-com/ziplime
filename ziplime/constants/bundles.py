@@ -1,1 +1,0 @@
-DEFAULT_BUNDLE = "lime"

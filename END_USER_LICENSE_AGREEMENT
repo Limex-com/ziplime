@@ -1,0 +1,55 @@
+END USER LICENSE AGREEMENT
+1. SUBJECT OF THE AGREEMENT
+1.1. Lime FinTech, LLC, having its principal place of business at 1 Penn Plaza 16th Floor, New York, NY (the "Company"), is the developer and holder of the exclusive rights to a software suite for algorithmic trading available at https://www.ziplime.limex.com (the "Software").
+1.2. This Agreement applies to both individuals and legal entities engaging with the Software through the Company’s designated website and any authorized distribution platforms (the "Official Source").
+1.3. By downloading, installing, or using the Software, the User agrees to all terms outlined in this Agreement. This acceptance forms a legally binding contract between the User and the Company.
+2. PURPOSE AND FUNCTIONALITY OF THE SOFTWARE
+2.1. The Software is intended to facilitate algorithmic trading of financial assets. It provides tools for data integration, strategy development, backtesting, and execution in automated trading environments. Users can leverage the Software to enhance their trading strategies and operational efficiencies.
+2.2. Core components of the Software include: 
+(1) Data Integration System: Allows seamless importing and management of data from various financial markets and sources. 
+(2) Algorithmic Strategy Builder: Provides tools and frameworks for developing custom trading algorithms using user-defined parameters. 
+(3) Backtesting Module: Enables users to test their trading strategies against historical data to evaluate potential performance. 
+(4) Execution Engine: Automates the execution of trading strategies in real-time, integrating with brokerage APIs for seamless operations. 
+(5) Performance Analytics: Offers advanced analytics and reporting features to assess and optimize trading strategies’ effectiveness.
+2.3. The Company reserves the right to update the Software by adding, modifying, or removing features at its discretion. Such changes will be announced on the Official Source.
+3. LICENSE GRANT AND USAGE RIGHTS
+3.1. Consistent with the GNU General Public License (GPL) v3.0, the Company grants a non-exclusive, non-transferable, revocable license to use the Software, subject to this Agreement's additional provisions.
+3.2. Permitted Uses: 
+(1) Personal use for trading activities, without the intent of commercial profit. 
+(2) Modification of the Software’s source code for personal improvement or educational purposes, provided such modifications are not redistributed or commercialized. 
+(3) Educational dissemination, including creating tutorials and coursework, provided that all credits to the Company are maintained.
+3.3. Restrictive Covenants: 
+(1) Commercial exploitation by legal entities and/ or individuals (except for personal use), including brokers and fintech institutions, requires an explicit, separate licensing agreement with the Company. 
+(2) Unauthorized distribution, resale, or public release of the Software in any altered or unaltered form is strictly prohibited.
+4. RESTRICTIONS AND PROHIBITED USES
+4.1. Unlawful Use: Users shall not employ the Software for any activities deemed illegal under applicable local, state, national, or international laws, including but not limited to fraud, identity theft, or unauthorized access to financial markets.
+4.2. Intellectual Property Violations: Users must not alter or efface any proprietary notices, labels, or branding within the Software or related documentation.
+4.3. Code Manipulation:
+(1) Users may not attempt to reverse engineer, decompile, or disassemble the Software except as explicitly permitted by law. Such actions, if legally permissible, must be reported to the Company.
+(2) Users are prohibited from studying the Software’s architecture for the purpose of developing derivative or competing products.
+4.4. Derivative Works: Users are not authorized to integrate the Software into other software or hardware systems intended for commercial use without obtaining prior written consent from the Company.
+4.5. Security Measures:
+(1) Any attempt to bypass, disable, or circumvent security features implemented in the Software is strictly forbidden.
+(2) Users must not engage in activities that could compromise the Software's security or integrity, including hacking or introducing malware.
+4.6. Third-Party Software Integration: Incorporating third-party software that could affect the operation of the Software is prohibited unless expressly permitted by the Company in writing.
+5. INTELLECTUAL PROPERTY RIGHTS
+5.1. Ownership: The Software, including its code, design, algorithms, and any accompanying documentation, remains the sole property of the Company. This encompasses all versions, updates, and enhancements thereof.
+5.2. Derivative Works:
+(1) Any modifications or derivative works based on the Software must be disclosed to the Company and cannot be distributed without adhering to the terms of this Agreement.
+(2) Such works must retain all original copyright notices and explicitly credit the Company as the original developer.
+5.3. Reporting Requirements: Users creating derivative works must report such creations to the Company, including descriptions of the modifications made and their intended use.
+5.4. Legal Recourse: The Company reserves the right to pursue all available legal remedies against any infringement of its intellectual property rights, including but not limited to immediate injunctive relief and compensation for damages.
+5.5. Trademarks: Any trademarks, logos, or service marks of the Company used in connection with the Software are protected by law. Unauthorized use is strictly prohibited.
+6. DISCLAIMER AND LIMITATION OF LIABILITY
+6.1. General Disclaimer: The Software is provided on an "as is" and "as available" basis. The Company makes no warranties, express or implied, including, but not limited to, implied warranties of merchantability, fitness for a particular purpose, and non-infringement.
+6.2. Performance Disclaimer: The Company does not warrant that the Software will meet the User’s requirements, be uninterrupted, timely, secure, or error-free, or that defects will be corrected.
+6.3. Risk Acknowledgment: Users acknowledge that they are responsible for the results obtained from the use of the Software and for any decisions made based on such results.
+6.4. Exclusion of Liability:
+(1) In no event will the Company be liable for any indirect, incidental, special, consequential, or punitive damages, including but not limited to loss of profits, data, business, or goodwill, arising out of or related to this Agreement or use of the Software.
+(2) The Company’s total cumulative liability in connection with this Agreement, whether in contract or tort or otherwise, shall not exceed the greater of $100 or the amount paid by the User for the Software.
+6.5. Indemnification: Users agree to indemnify, defend, and hold harmless the Company and its affiliates from any claims, damages, liabilities, and expenses (including reasonable attorneys' fees) arising out of the User's use or misuse of the Software or breach of this Agreement.
+7. TERMINATION AND AMENDMENT
+7.1. The Company reserves the right to modify this Agreement at any time. Changes become effective when published on the Official Source.
+7.2. Users must review the terms regularly. Continued use of the Software after any modifications signifies acceptance of the updated Agreement.
+7.3. The Company may terminate this Agreement and the User’s access to the Software for any breach of terms without prior notice.
+7.4. Upon termination, Users must cease all use of the Software and remove all copies from their systems.

@@ -2,8 +2,8 @@ import enum
 
 
 class OrderStatus(enum.Enum):
-    OPEN = "open"
-    FILLED = "filled"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    HELD = "held"
+    OPEN = "OPEN"
+    FILLED = "FILLED"
+    CANCELLED = "CANCELLED"
+    REJECTED = "REJECTED"
+    HELD = "HELD"

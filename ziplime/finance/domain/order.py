@@ -1,69 +1,32 @@
-#
-# Copyright 2016 Quantopian, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import math
-import uuid
-from enum import IntEnum
 
-import zipline.protocol as zp
-from zipline.assets import Asset
-
-from zipline.utils.input_validation import expect_types
-
+from ziplime.assets.entities.asset import Asset
 from ziplime.finance.domain.order_status import OrderStatus
+from ziplime.finance.execution import ExecutionStyle
+from ziplime.protocol import DataSourceType
 
 SELL = 1 << 0
 BUY = 1 << 1
 STOP = 1 << 2
 LIMIT = 1 << 3
 
-ORDER_FIELDS_TO_IGNORE = {"type", "direction", "_status", "asset"}
+
+# ORDER_FIELDS_TO_IGNORE = {"type", "direction", "_status", "asset"}
 
 
 class Order:
-    # using __slots__ to save on memory usage.  Simulations can create many
-    # Order objects and we keep them all in memory, so it's worthwhile trying
-    # to cut down on the memory footprint of this object.
-    __slots__ = [
-        "id",
-        "dt",
-        "reason",
-        "created",
-        "asset",
-        "amount",
-        "filled",
-        "commission",
-        "_status",
-        "stop",
-        "limit",
-        "stop_reached",
-        "limit_reached",
-        "direction",
-        "type",
-        "broker_order_id",
-    ]
-
     def __init__(
             self,
+            id,
             dt,
             asset: Asset,
             amount: int,
-            stop: float | None = None,
-            limit: float | None = None,
-            filled: int= 0,
-            commission: float = 0,
-            id=None,
+            filled: int,
+            commission: float,
+            execution_style: ExecutionStyle,
+            status: OrderStatus,
+            exchange_name: str,
+            exchange_order_id: str = None
     ):
         """
         @dt - datetime.datetime that the order was placed
@@ -75,7 +38,7 @@ class Order:
         """
 
         # get a string representation of the uuid.
-        self.id = self.make_id() if id is None else id
+        self.id = id
         self.dt = dt
         self.reason = None
         self.created = dt
@@ -83,45 +46,36 @@ class Order:
         self.amount = amount
         self.filled = filled
         self.commission = commission
-        self._status = OrderStatus.OPEN
-        self.stop = stop
-        self.limit = limit
+        self.exchange_name = exchange_name
+        self._status = status
+
+        is_buy = amount > 0
+        self.stop = execution_style.get_stop_price(is_buy=is_buy)
+        self.limit = execution_style.get_limit_price(is_buy=is_buy)
         self.stop_reached = False
         self.limit_reached = False
         self.direction = math.copysign(1, self.amount)
-        self.type = zp.DATASOURCE_TYPE.ORDER
-        self.broker_order_id = None
-
-    @staticmethod
-    def make_id():
-        return uuid.uuid4().hex
+        self.type = DataSourceType.ORDER
+        self.execution_style = execution_style
+        self.exchange_order_id = exchange_order_id
 
     def to_dict(self):
         dct = {
-            name: getattr(self, name)
-            for name in self.__slots__
-            if name not in ORDER_FIELDS_TO_IGNORE
+            "amount": self.amount,
+            "commission": self.commission,
+            "created": self.created,
+            "dt": self.dt,
+            "exchange_order_id": self.exchange_order_id,
+            "filled": self.filled,
+            "id": self.id,
+            "limit": self.limit,
+            "limit_reached": self.limit_reached,
+            "reason": self.reason,
+            "stop": self.stop,
+            "stop_reached": self.stop_reached,
+            "status": self.status
         }
-
-        if self.broker_order_id is None:
-            del dct["broker_order_id"]
-
-        # Adding 'sid' for backwards compatibility with downstream consumers.
-        dct["sid"] = self.asset
-        dct["status"] = self.status
-
         return dct
-
-    @property
-    def sid(self):
-        # For backwards compatibility because we pass this object to
-        # custom slippage models.
-        return self.asset
-
-    def to_api_obj(self):
-        pydict = self.to_dict()
-        obj = zp.Order(initial_values=pydict)
-        return obj
 
     def check_triggers(self, price, dt):
         """
@@ -144,6 +98,21 @@ class Order:
             # Change the STOP LIMIT order into a LIMIT order
             self.stop = None
 
+    def get_order_type(self) -> int:
+        order_type = 0
+
+        if self.amount > 0:
+            order_type |= BUY
+        else:
+            order_type |= SELL
+
+        if self.stop is not None:
+            order_type |= STOP
+
+        if self.limit is not None:
+            order_type |= LIMIT
+        return order_type
+
     # TODO: simplify
     # flake8: noqa: C901
     def check_order_triggers(self, current_price):
@@ -165,20 +134,7 @@ class Order:
         stop_reached = False
         limit_reached = False
         sl_stop_reached = False
-
-        order_type = 0
-
-        if self.amount > 0:
-            order_type |= BUY
-        else:
-            order_type |= SELL
-
-        if self.stop is not None:
-            order_type |= STOP
-
-        if self.limit is not None:
-            order_type |= LIMIT
-
+        order_type = self.get_order_type()
         if order_type == BUY | STOP | LIMIT:
             if current_price >= self.stop:
                 sl_stop_reached = True
@@ -203,7 +159,7 @@ class Order:
             if current_price >= self.limit:
                 limit_reached = True
 
-        return (stop_reached, limit_reached, sl_stop_reached)
+        return stop_reached, limit_reached, sl_stop_reached
 
     def handle_split(self, ratio):
         # update the amount, limit_price, and stop_price

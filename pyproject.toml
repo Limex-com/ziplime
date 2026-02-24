@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ziplime"
-version = "0.1.24"
+version = "1.14.9"
 description = ""
 authors = ["Ziplime"]
 readme = "README.md"
@@ -8,17 +8,49 @@ packages = [{include = "ziplime"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-zipline-reloaded = "3.1"
-dask = "^2024.9.1"
-setuptools = "^72.1.0"
+aiocache = "^0.12.3"
+aiofiles = "^24.1.0"
+aiosqlite = "^0.21.0"
+alembic = "^1.15.2"
+asyncclick = "^8.1.8"
+empyrical-reloaded = "^0.5.11"
+exchange-calendars = "^4.10"
+greenlet = "^3.2.2"
+h5py = "^3.13.0"
+iso3166 = "^2.1.1"
+iso4217 = "^1.12.20240625"
+joblib = "^1.5.1"
 lime-trader-sdk = "^0.3.9"
-limexhub = "^0.1.29"
-joblib = "^1.4.2"
-pygments = "^2.18.0"
+limexhub = "^1.10.18"
+networkx = "^3.4.2"
+numexpr = "^2.10.2"
+orjson = "^3.10.15"
+pandas = "^2.0.0"
 polars = "^1.24.0"
 pyarrow = "^19.0.1"
-orjson = "^3.10.15"
-structlog = "^25.1.0"
+pydantic = "^2.11.2"
+pygments = "^2.18.0"
+scipy = "^1.15.3"
+setuptools = "^79.0.1"
+sqlalchemy = "^2.0.40"
+structlog = "^25.4.0"
+tabulate = "^0.9.0"
+python-dateutil = "^2.9.0.post0"
+yfinance = "^0.2.65"
+
+[tool.poetry.group.vectorbt]
+optional = true
+
+[tool.poetry.group.vectorbt.dependencies]
+vectorbt = "0.28.2"
+
+
+[tool.poetry.group.docs.dependencies]
+mkdocs = {extras = ["i18n"], version = "^1.6.1"}
+mkdocs-material = "^9.6.22"
+mkdocstrings = {extras = ["python"], version = "^0.30.1"}
+mdx-include = "^1.4.2"
+markdown-include-variants = "^0.0.5"
 
 [tool.poetry.scripts]
 ziplime = "ziplime.__main__:main"

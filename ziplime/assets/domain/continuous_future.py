@@ -1,4 +1,4 @@
-from zipline.utils.calendar_utils import get_calendar
+from ziplime.utils.calendar_utils import get_calendar
 
 
 class ContinuousFuture:
@@ -77,42 +77,6 @@ class ContinuousFuture:
     def __hash__(self):
         return self.sid_hash
 
-    # def __richcmp__(x, y, int op):
-    #     """Cython rich comparison method.
-    #     This is used in place of various
-    #     equality checkers in pure python.
-    #     """
-    #     cdef int64_t x_as_int, y_as_int
-    #
-    #     try:
-    #         x_as_int = PyNumber_Index(x)
-    #     except (TypeError, OverflowError):
-    #         return NotImplemented
-    #
-    #     try:
-    #         y_as_int = PyNumber_Index(y)
-    #     except (TypeError, OverflowError):
-    #         return NotImplemented
-    #
-    #     compared = x_as_int - y_as_int
-    #
-    #     # Handle == and != first because they're significantly more common
-    #     # operations.
-    #     if op == Py_EQ:
-    #         return compared == 0
-    #     elif op == Py_NE:
-    #         return compared != 0
-    #     elif op == Py_LT:
-    #         return compared < 0
-    #     elif op == Py_LE:
-    #         return compared <= 0
-    #     elif op == Py_GT:
-    #         return compared > 0
-    #     elif op == Py_GE:
-    #         return compared >= 0
-    #     else:
-    #         raise AssertionError('%d is not an operator' % op)
-
     def __str__(self):
         return '%s(%d [%s, %s, %s, %s])' % (
             type(self).__name__,
@@ -167,7 +131,7 @@ class ContinuousFuture:
 
         Parameters
         ----------
-        session_label: pd.Timestamp
+        session_label: datetime.datetime
             The desired session label to check. (midnight UTC)
 
         Returns
@@ -184,7 +148,7 @@ class ContinuousFuture:
 
         Parameters
         ----------
-        dt_minute: pd.Timestamp (UTC, tz-aware)
+        dt_minute: datetime.datetime (UTC, tz-aware)
             The minute to check.
 
         Returns

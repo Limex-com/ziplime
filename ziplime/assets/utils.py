@@ -1,10 +1,10 @@
-from abc import ABC
+import re
 from collections import namedtuple
-from numbers import Integral
 
 import logging
 import pandas as pd
 import sqlalchemy as sa
+import structlog
 from toolz import (
     concatv,
     curry,
@@ -15,22 +15,9 @@ from toolz import (
 
 import numpy as np
 
-
-
-from .domain.asset import Asset
 from .domain.continuous_future import ContinuousFuture
-from .domain.equity import Equity
-from .domain.future import Future
 
-
-def make_asset_array(size, asset):
-    out = np.empty([size], dtype=object)
-    out.fill(asset)
-    return out
-
-
-
-log = logging.getLogger("assets.py")
+log = structlog.get_logger("assets.py")
 
 # A set of fields that need to be converted to timestamps in UTC
 _asset_timestamp_fields = frozenset(
@@ -43,8 +30,58 @@ _asset_timestamp_fields = frozenset(
         "auto_close_date",
     }
 )
+_delimited_symbol_default_triggers = frozenset({np.nan, None, ""})
+_delimited_symbol_delimiters_regex = re.compile(r"[./\-_]")
 
 OwnershipPeriod = namedtuple("OwnershipPeriod", "start end sid value")
+SYMBOL_COLUMNS = frozenset(
+    {
+        "symbol",
+        "company_symbol",
+        "share_class_symbol",
+    }
+)
+
+
+def split_delimited_symbol(symbol):
+    """
+    Takes in a symbol that may be delimited and splits it in to a company
+    symbol and share class symbol. Also returns the fuzzy symbol, which is the
+    symbol without any fuzzy characters at all.
+
+    Parameters
+    ----------
+    symbol : str
+        The possibly-delimited symbol to be split
+
+    Returns
+    -------
+    company_symbol : str
+        The company part of the symbol.
+    share_class_symbol : str
+        The share class part of a symbol.
+    """
+    # return blank strings for any bad fuzzy symbols, like NaN or None
+    if symbol in _delimited_symbol_default_triggers:
+        return "", ""
+
+    symbol = symbol.upper()
+
+    split_list = re.split(
+        pattern=_delimited_symbol_delimiters_regex,
+        string=symbol,
+        maxsplit=1,
+    )
+
+    # Break the list up in to its two components, the company symbol and the
+    # share class symbol
+    company_symbol = split_list[0]
+    if len(split_list) > 1:
+        share_class_symbol = split_list[1]
+    else:
+        share_class_symbol = ""
+
+    return company_symbol, share_class_symbol
 
 
 def merge_ownership_periods(mappings):
@@ -155,8 +192,20 @@ def _filter_kwargs(names, dict_):
     return {k: v for k, v in dict_.items() if k in names and v is not None}
 
 
-_filter_future_kwargs = _filter_kwargs(Future._kwargnames)
-_filter_equity_kwargs = _filter_kwargs(Equity._kwargnames)
+asset_args = frozenset({
+    'sid',
+    'symbol',
+    'asset_name',
+    'start_date',
+    'end_date',
+    'first_traded',
+    'auto_close_date',
+    'tick_size',
+    'multiplier',
+    'exchange_info',
+})
+_filter_future_kwargs = _filter_kwargs(asset_args)
+_filter_equity_kwargs = _filter_kwargs(asset_args)
 
 
 def _convert_asset_timestamp_fields(dict_):
@@ -199,81 +248,3 @@ def _encode_continuous_future_sid(root_symbol, offset, roll_style, adjustment_st
 
 
 Lifetimes = namedtuple("Lifetimes", "sid start end")
-
-
-
-
-class AssetConvertible(ABC):
-    """
-    ABC for types that are convertible to integer-representations of
-    Assets.
-
-    Includes Asset, str, and Integral
-    """
-
-    pass
-
-
-AssetConvertible.register(Integral)
-AssetConvertible.register(Asset)
-AssetConvertible.register(str)
-
-
-class NotAssetConvertible(ValueError):
-    pass
-
-
-class PricingDataAssociable(ABC):
-    """ABC for types that can be associated with pricing data.
-
-    Includes Asset, Future, ContinuousFuture
-    """
-
-    pass
-
-
-PricingDataAssociable.register(Asset)
-PricingDataAssociable.register(Future)
-PricingDataAssociable.register(ContinuousFuture)
-
-
-def was_active(reference_date_value, asset):
-    """Whether or not `asset` was active at the time corresponding to
-    `reference_date_value`.
-
-    Parameters
-    ----------
-    reference_date_value : int
-        Date, represented as nanoseconds since EPOCH, for which we want to know
-        if `asset` was alive.  This is generally the result of accessing the
-        `value` attribute of a pandas Timestamp.
-    asset : Asset
-        The asset object to check.
-
-    Returns
-    -------
-    was_active : bool
-        Whether or not the `asset` existed at the specified time.
-    """
-    return asset.start_date.value <= reference_date_value <= asset.end_date.value
-
-
-def only_active_assets(reference_date_value, assets):
-    """Filter an iterable of Asset objects down to just assets that were alive at
-    the time corresponding to `reference_date_value`.
-
-    Parameters
-    ----------
-    reference_date_value : int
-        Date, represented as nanoseconds since EPOCH, for which we want to know
-        if `asset` was alive.  This is generally the result of accessing the
-        `value` attribute of a pandas Timestamp.
-    assets : iterable[Asset]
-        The assets to filter.
-
-    Returns
-    -------
-    active_assets : list
-        List of the active assets from `assets` on the requested date.
-    """
-    return [a for a in assets if was_active(reference_date_value, a)]
