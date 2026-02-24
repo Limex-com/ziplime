@@ -1,4 +1,8 @@
-# 🍋 Ziplime
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="ai_assistant/img/logo_white.png">
+  <source media="(prefers-color-scheme: light)" srcset="ai_assistant/img/logo_black.png">
+  <img src="ai_assistant/img/logo_black.png" alt="Ziplime" height="80">
+</picture>
 
 ### The first open-source backtester with native AI support
 
@@ -56,6 +60,8 @@ The AI engine will:
 4. Return full performance metrics and a QuantStats tearsheet
 
 Everything stays on your machine. Your strategies are yours.
+
+![Ziplime AI assistant in action](ai_assistant/img/ai_animation.gif)
 
 ```bash
 # Install dependencies
