@@ -1,5 +1,5 @@
-<table><tr>
-<td valign="middle">
+<table border="0" cellspacing="0" cellpadding="0"><tr>
+<td valign="middle" align="left">
 
 ### The first open-source backtester with native AI support
 
@@ -8,12 +8,9 @@
 *Built on the legacy of Zipline. Rebuilt for the age of AI.*
 
 </td>
-<td valign="middle" align="right">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="ai_assistant/img/logo_black.png">
-  <source media="(prefers-color-scheme: light)" srcset="ai_assistant/img/logo_white.png">
-  <img src="ai_assistant/img/logo_white.png" alt="Ziplime" height="80">
-</picture>
+<td valign="middle" align="right" width="260">
+<img src="ai_assistant/img/logo_black.png#gh-dark-mode-only" alt="Ziplime" height="80">
+<img src="ai_assistant/img/logo_white.png#gh-light-mode-only" alt="Ziplime" height="80">
 </td>
 </tr></table>
 
