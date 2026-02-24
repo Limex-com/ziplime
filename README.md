@@ -1,18 +1,11 @@
-<table border="0" cellspacing="0" cellpadding="0"><tr>
-<td valign="middle" align="left">
+<img src="ai_assistant/img/logo_black.png#gh-dark-mode-only" alt="Ziplime">
+<img src="ai_assistant/img/logo_white.png#gh-light-mode-only" alt="Ziplime">
 
 ### The first open-source backtester with native AI support
 
 **Write trading strategies in plain English. Backtest them in seconds.**
 
 *Built on the legacy of Zipline. Rebuilt for the age of AI.*
-
-</td>
-<td valign="middle" align="right" width="260">
-<img src="ai_assistant/img/logo_black.png#gh-dark-mode-only" alt="Ziplime" height="80">
-<img src="ai_assistant/img/logo_white.png#gh-light-mode-only" alt="Ziplime" height="80">
-</td>
-</tr></table>
 
 <a target="new" href="https://pypi.python.org/pypi/ziplime"><img border=0 src="https://img.shields.io/badge/python-3.12+-blue.svg?style=flat" alt="Python version"></a>
 <a target="new" href="https://pypi.python.org/pypi/ziplime"><img border=0 src="https://img.shields.io/pypi/v/ziplime?maxAge=60%" alt="PyPi version"></a>
