@@ -38,42 +38,86 @@ fundamental_data_fields = [
     "size",
     "trading_activity",
     "value",
-    "volatility"
-    ]
+    "volatility",
+]
 
 
-def fetch_fundamental_data_task(date_from: datetime.datetime,
-                                date_to: datetime.datetime,
-                                limex_api_key: str,
-                                symbol: str,
-                                ) -> pl.DataFrame:
-    limex_client = limexhub.RestAPI(token=limex_api_key)
-    df = pl.from_pandas(limex_client.fundamental(
-        symbol=symbol,
-        from_date=(date_from - datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
-        to_date=(date_to + datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
-        fields=','.join(fundamental_data_fields),
-    ), include_index=True)
+def _normalize_fundamental_result(
+    df: pl.DataFrame,
+    date_from: datetime.datetime,
+    date_to: datetime.datetime,
+    symbol: str,
+) -> pl.DataFrame:
     if len(df) == 0:
         return df
 
+    if "date" not in df.columns:
+        raise ValueError("Fundamental response is missing required column 'date'.")
+
     df = df.with_columns(
         pl.lit(symbol).alias("symbol"),
-        date=pl.col("date").cast(pl.Datetime).dt.replace_time_zone(str(date_from.tzinfo)),
+        date=pl.col("date").cast(pl.Datetime, strict=False).dt.replace_time_zone(str(date_from.tzinfo)),
     ).filter(pl.col("date") >= date_from, pl.col("date") <= date_to)
 
     if len(df) == 0:
         return df
 
-    # Pivot: field column → separate columns, values from "value"
-    df = df.pivot(
-        on="field",
-        index=["date", "symbol"],
-        values="value",
-        aggregate_function="last",
-    ).sort(["symbol", "date"])
+    if "field" in df.columns and "value" in df.columns:
+        df = df.pivot(
+            on="field",
+            index=["date", "symbol"],
+            values="value",
+            aggregate_function="last",
+        )
+    else:
+        keep_columns = ["date", "symbol"]
+        if "period" in df.columns:
+            keep_columns.append("period")
+        keep_columns.extend([field for field in fundamental_data_fields if field in df.columns])
+        df = df.select(keep_columns).unique(subset=["date", "symbol"], keep="last")
 
-    return df
+    if "period" in df.columns:
+        df = df.with_columns(pl.col("period").cast(pl.Utf8, strict=False))
+
+    for field in fundamental_data_fields:
+        if field not in df.columns:
+            df = df.with_columns(pl.lit(None, dtype=pl.Float64).alias(field))
+        else:
+            df = df.with_columns(pl.col(field).cast(pl.Float64, strict=False))
+
+    ordered_columns = ["date", "symbol"]
+    if "period" in df.columns:
+        ordered_columns.append("period")
+    ordered_columns.extend(fundamental_data_fields)
+
+    return df.select(ordered_columns).sort(["symbol", "date"])
+
+
+def fetch_fundamental_data_task(
+    date_from: datetime.datetime,
+    date_to: datetime.datetime,
+    limex_api_key: str,
+    symbol: str,
+) -> pl.DataFrame:
+    limex_client = limexhub.RestAPI(token=limex_api_key)
+    df = pl.from_pandas(
+        limex_client.fundamental(
+            symbol=symbol,
+            from_date=(date_from - datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
+            to_date=(date_to + datetime.timedelta(days=1)).strftime("%Y-%m-%d"),
+            fields=",".join(fundamental_data_fields),
+        ),
+        include_index=True,
+    )
+    if len(df) == 0:
+        return df
+
+    return _normalize_fundamental_result(
+        df=df,
+        date_from=date_from,
+        date_to=date_to,
+        symbol=symbol,
+    )
 
 
 class LimexHubFundamentalDataSource(DataBundleSource):
@@ -87,20 +131,24 @@ class LimexHubFundamentalDataSource(DataBundleSource):
         else:
             self._maximum_threads = multiprocessing.cpu_count() * 2
 
-    async def get_data(self, symbols: list[str],
-                       frequency: datetime.timedelta,
-                       date_from: datetime.datetime,
-                       date_to: datetime.datetime,
-                       **kwargs
-                       ) -> pl.DataFrame:
+    async def get_data(
+        self,
+        symbols: list[str],
+        frequency: datetime.timedelta,
+        date_from: datetime.datetime,
+        date_to: datetime.datetime,
+        **kwargs,
+    ) -> pl.DataFrame:
 
         def fetch_fundamental_data(limex_api_key: str, symbol: str) -> pl.DataFrame | None:
             try:
-                result = fetch_fundamental_data_task(date_from=date_from, date_to=date_to,
-                                                     limex_api_key=limex_api_key,
-                                                     symbol=symbol)
-                return result
-            except Exception as e:
+                return fetch_fundamental_data_task(
+                    date_from=date_from,
+                    date_to=date_to,
+                    limex_api_key=limex_api_key,
+                    symbol=symbol,
+                )
+            except Exception:
                 self._logger.exception(
                     f"Exception fetching historical data for symbol {symbol}, date_from={date_from}, date_to={date_to}. Skipping."
                 )
@@ -109,18 +157,21 @@ class LimexHubFundamentalDataSource(DataBundleSource):
         total_days = (date_to - date_from).days
         final = pl.DataFrame()
 
-        with progressbar(length=len(symbols) * total_days, label="Downloading fundamental data from LimexHub",
-                         file=sys.stdout) as pbar:
-            res = Parallel(n_jobs=multiprocessing.cpu_count() * 2, prefer="threads",
-                           return_as="generator_unordered")(
-                delayed(fetch_fundamental_data)(self._limex_api_key, symbol) for symbol in symbols)
+        with progressbar(
+            length=len(symbols) * total_days,
+            label="Downloading fundamental data from LimexHub",
+            file=sys.stdout,
+        ) as pbar:
+            res = Parallel(
+                n_jobs=multiprocessing.cpu_count() * 2,
+                prefer="threads",
+                return_as="generator_unordered",
+            )(delayed(fetch_fundamental_data)(self._limex_api_key, symbol) for symbol in symbols)
             for item in res:
                 pbar.update(total_days)
-                if item is None:
+                if item is None or len(item) == 0:
                     continue
-                if len(item) > 0:
-                    item = item.select(final.columns)
-                    final = pl.concat([final, item])
+                final = pl.concat([final, item], how="diagonal_relaxed")
 
         return final
 
