@@ -1347,9 +1347,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                                                                       exchange=exchange)
         commission = exchange.get_commission_model(asset=asset)
         slippage = exchange.get_slippage_model(asset=asset)
-        projected_commission = commission.calculate_for_asset(asset=asset, quantity=requested_quantity, transaction_amount=value)
+        projected_commission = commission.calculate_for_asset(asset=asset, quantity=requested_quantity,
+                                                              transaction_amount=value)
         new_quantity = await self._calculate_order_value_amount(asset=asset, value=value - projected_commission,
                                                                 exchange=exchange)
+        self._logger.info(
+            f"Projected commission for {requested_quantity} quantity of {asset.symbol} is {projected_commission}. Quantity corrected to {new_quantity}"
+        )
         # return new_quantity
         estimated_price, estimated_quantity = await slippage.order_target_percentage_maximum_quantity(asset=asset,
                                                                                                       exchange=exchange,
@@ -1434,7 +1438,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             exchange_name=exchange_name
         )
 
-    def _calculate_order_target_amount(self, exchange: Exchange, trading_account_id: str, asset: ExchangeAsset, target: int):
+    def _calculate_order_target_amount(self, exchange: Exchange, trading_account_id: str, asset: ExchangeAsset,
+                                       target: int):
         current_position = self.portfolio.positions.get(exchange.name, {}).get(trading_account_id, {}).get(asset, None)
         if current_position is not None:
             # current_position = self.portfolio.positions[asset].amount
