@@ -157,7 +157,6 @@ class MetricsTracker:
 
         for metric in self._start_of_session_metrics:
             metric.start_of_session(ledger=self._ledger, session=session_label, exchanges=self.exchanges)
-        print("A")
         # self.start_of_session(ledger=self._ledger, session=session_label, data_bundle=data_bundle)
 
     def handle_market_close(self, dt: datetime.datetime):
