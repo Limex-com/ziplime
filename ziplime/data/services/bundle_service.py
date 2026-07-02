@@ -6,6 +6,7 @@ import polars as pl
 import structlog
 from exchange_calendars import ExchangeCalendar, get_calendar
 
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.constants.data_type import DataType
 from ziplime.constants.period import Period
@@ -17,6 +18,7 @@ from ziplime.utils.class_utils import load_class
 from ziplime.utils.date_utils import period_to_timedelta
 from ziplime.utils.data_utils import backfill_sid_data
 from ziplime.assets.entities.asset_symbol import AssetSymbol
+
 
 class BundleService:
     """
@@ -58,6 +60,7 @@ class BundleService:
                                         data_frequency_use_window_end: bool,
                                         bundle_storage: BundleStorage,
                                         asset_service: AssetService,
+                                        merge: bool
                                         ):
         """Ingests a custom data bundle into the specified storage. This function processes and validates the provided data,
         ensures it aligns with the given trading calendar and frequency, and stores it using the provided storage system.
@@ -177,7 +180,7 @@ class BundleService:
                                                     required_sessions=required_sessions)
         else:
             data = await backfill_sid_data(data=data, asset_service=asset_service,
-                                                 required_sessions=required_sessions)
+                                           required_sessions=required_sessions)
 
         data_bundle = DataBundle(name=name,
                                  start_date=date_start,
@@ -191,8 +194,10 @@ class BundleService:
                                  data_type=DataType.CUSTOM
                                  )
 
-        await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage)
-        await bundle_storage.store_bundle(data_bundle=data_bundle)
+        await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage,
+                                                    merge=merge)
+        await bundle_storage.store_bundle(data_bundle=data_bundle, merge=merge,
+                                          merge_columns=None)
 
         self._logger.info(f"Finished ingesting custom bundle_name={name}, bundle_version={bundle_version}")
 
@@ -212,6 +217,7 @@ class BundleService:
                                         bundle_storage: BundleStorage,
                                         asset_service: AssetService,
                                         forward_fill_missing_ohlcv_data: bool,
+                                        merge: bool
                                         ):
 
         """
@@ -301,7 +307,8 @@ class BundleService:
         for row in equities_by_exchange.iter_rows(named=True):
             exchange_mic = row["mic"]
             symbols = row["symbol"]
-            equities = await asset_service.get_exchange_equities_by_symbols(symbols=[AssetSymbol(mic=exchange_mic, symbol=symbol) for symbol in symbols])
+            equities = await asset_service.get_exchange_equities_by_symbols(
+                symbols=[AssetSymbol(mic=exchange_mic, symbol=symbol) for symbol in symbols])
             symbol_to_sid = {e.symbol: e.sid for e in equities}
 
             for symbol in symbols:
@@ -328,11 +335,14 @@ class BundleService:
                     pl.col("sid")
                 )
                 .alias("sid")
-            ).sort(["mic","sid", "date"])
+            ).sort(["mic", "sid", "date"])
         if forward_fill_missing_ohlcv_data:
             data = data.with_columns(pl.col("close", "price").fill_null(strategy="forward"))
             data = data.with_columns(pl.col("high", "low", "open").fill_null(pl.col("price")))
             data = data.with_columns(pl.col("volume").fill_null(pl.lit(0.0)))
+            # check
+            data = data.with_columns(pl.col("low", "open", "close", "high", "price").fill_null(pl.lit(0.0)))
+            data = data.with_columns(pl.col("backfilled").fill_null(pl.lit(False)))
 
         data_bundle = DataBundle(name=name,
                                  start_date=date_start,
@@ -345,8 +355,9 @@ class BundleService:
                                  version=bundle_version,
                                  data_type=DataType.MARKET_DATA
                                  )
-        await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage)
-        await bundle_storage.store_bundle(data_bundle=data_bundle)
+        await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage, merge=merge)
+        await bundle_storage.store_bundle(data_bundle=data_bundle,
+                                          merge=merge, merge_columns=["sid", "date"])
         duration = time.time() - start_duration
         self._logger.info(f"Finished ingesting market data bundle_name={name}, bundle_version={bundle_version}."
                           f"Total duration: {duration:.2f} seconds", duration=duration)
@@ -354,7 +365,7 @@ class BundleService:
         return data_bundle
 
     async def load_bundle(self, bundle_name: str, bundle_version: str | None,
-                          symbols: list[str] | None = None,
+                          assets: list[ExchangeAsset] | None = None,
                           start_date: datetime.datetime | None = None,
                           end_date: datetime.datetime | None = None,
                           frequency: datetime.timedelta | Period | None = None,
@@ -370,7 +381,7 @@ class BundleService:
         Args:
             bundle_name (str): Name of the data bundle to load.
             bundle_version (str | None): Version of the bundle to load. Optional if not version-specific.
-            symbols (list[str] | None):
+            assets (list[ExchangeAsset] | None):
               Filter data bundle to include only specific symbols. Defaults to None (includes all symbols).
             start_date (datetime.datetime | None):
               Filter data bundle to include only data starting with specific date. Defaults to None.
@@ -423,12 +434,9 @@ class BundleService:
 
         bundle_storage = await bundle_storage_class.from_json(bundle_metadata["bundle_storage_data"])
 
-        bundle_start_date = datetime.datetime.strptime(bundle_metadata["start_date"], "%Y-%m-%dT%H:%M:%SZ")
         trading_calendar = get_calendar(bundle_metadata["trading_calendar_name"],
-                                        start=bundle_start_date - datetime.timedelta(days=30))
-        bundle_start_date = bundle_start_date.replace(tzinfo=trading_calendar.tz)
-        bundle_end_date = datetime.datetime.strptime(bundle_metadata["end_date"], "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=trading_calendar.tz)
+                                        start=start_date.date() - datetime.timedelta(days=30))
+
         frequency_timedelta = datetime.timedelta(seconds=int(bundle_metadata["frequency_seconds"])) if bundle_metadata[
                                                                                                            "frequency_seconds"] is not None else None
         frequency_text = bundle_metadata.get("frequency_text", None)
@@ -437,10 +445,6 @@ class BundleService:
         data_type = DataType(bundle_metadata["data_type"])
         bundle_frequency = frequency_timedelta or frequency_text
 
-        if start_date is not None and start_date < bundle_start_date:
-            raise ValueError(f"Start date {start_date} is before bundle start date {bundle_start_date}")
-        if end_date is not None and end_date > bundle_end_date:
-            raise ValueError(f"End date {end_date} is after bundle end date {bundle_end_date}")
         if frequency is not None and period_to_timedelta(frequency) < period_to_timedelta(bundle_frequency):
             raise ValueError(f"Requested frequency {frequency} is less than bundle frequency {bundle_frequency}")
 
@@ -455,8 +459,8 @@ class BundleService:
                 f"Requested end auction delta frequency {frequency} is less than bundle frequency {bundle_frequency}")
 
         data_bundle = DataBundle(name=bundle_name,
-                                 start_date=start_date or bundle_start_date,
-                                 end_date=end_date or bundle_end_date,
+                                 start_date=start_date,
+                                 end_date=end_date,
                                  trading_calendar=trading_calendar,
                                  frequency=frequency or bundle_frequency,
                                  original_frequency=bundle_frequency,
@@ -466,15 +470,23 @@ class BundleService:
                                  )
         bundle_data_load_start = time.time()
 
+
         data = await bundle_storage.load_data_bundle(data_bundle=data_bundle,
-                                                     symbols=symbols,
+                                                     assets=assets,
                                                      start_date=start_date,
-                                                     end_date=end_date,
+                                                     end_date=end_date + datetime.timedelta(days=1),
                                                      frequency=frequency,
                                                      start_auction_delta=start_auction_delta,
                                                      end_auction_delta=end_auction_delta,
                                                      aggregations=aggregations
                                                      )
+
+        await self.check_for_missing_data(data=data,
+                                          assets=assets,
+                                          frequency=frequency,
+                                          trading_calendar=trading_calendar,
+                                          start_date=start_date, end_date=end_date)
+
         load_duration = time.time() - bundle_data_load_start
 
         sid_indexes = data.with_row_index().group_by("sid", maintain_order=True).agg([
@@ -494,6 +506,37 @@ class BundleService:
         # }
 
         return data_bundle
+
+
+    async def check_for_missing_data(self,
+                                     data: pl.DataFrame,
+                                     trading_calendar: ExchangeCalendar,
+                                     frequency:datetime.timedelta | Period,
+                                     start_date: datetime.datetime,
+                                     end_date: datetime.datetime,
+                                     assets: list[ExchangeAsset],
+                                     ):
+
+        all_bars = [
+            s for s in pl.from_pandas(
+                trading_calendar.sessions_minutes(start=start_date.replace(tzinfo=None).date(),
+                                                  end=end_date.replace(tzinfo=None).date()).tz_convert(trading_calendar.tz)
+            ) if s >= start_date and s <= end_date
+        ]
+        required_sessions = pl.DataFrame({"date": all_bars, "close": 0.00}).group_by_dynamic(
+            index_column="date", every=frequency
+        ).agg()
+        missing_data_per_symbol = {}
+        for asset in assets:
+                symbol_data = data.filter(sid=asset.sid).with_columns(pl.col("date"))
+                missing_sessions = sorted(set(required_sessions["date"]) - set(symbol_data["date"]))
+                if len(missing_sessions) > 0:
+                    self._logger.warning(
+                        f"Data for symbol {asset.symbol}@{asset.mic} is missing on ticks ({len(missing_sessions)}): {[missing_session.isoformat() for missing_session in missing_sessions]}")
+        missing_sids = set([asset.sid for asset in assets]) - set(data["sid"].unique())
+        if missing_sids:
+            missing_symbols = [f'{asset.symbol}@{asset.mic}' for asset in assets if asset.sid in missing_sids]
+            raise ValueError(f"Symbols are missing in asset database: {missing_symbols}")
 
     async def clean(self, bundle_name: str, before: datetime.datetime = None, after: datetime.datetime = None,
                     keep_last: bool = None):

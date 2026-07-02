@@ -10,6 +10,8 @@ from ziplime.gens.domain.single_execution_clock import SingleExecutionClock
 from ziplime.utils.bundle_utils import get_bundle_service
 from ziplime.utils.calendar_utils import get_calendar
 from ziplime.utils.logging_utils import configure_logging
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.entities.asset_symbol import AssetSymbol
 
 from pathlib import Path
 
@@ -41,13 +43,18 @@ async def _run_simulation():
         pl.col("volume").sum(),
         pl.col("symbol").last()
     ]
+    symbols = ["META", "AAPL", "AMZN", "NFLX", "GOOGL"]
+
+    exchange_assets = await asset_service.get_exchange_assets_by_symbols(symbols=[AssetSymbol(
+        symbol=symbol, mic=None
+    ) for symbol in symbols], asset_type=AssetType.EQUITY)
+
     market_data_bundle = await bundle_service.load_bundle(bundle_name="limex_us_minute_data",
                                                           bundle_version=None,
                                                           frequency=datetime.timedelta(days=1),
                                                           start_date=start_date,
                                                           end_date=end_date,
-                                                          symbols=["META", "AAPL", "AMZN", "NFLX", "GOOGL",
-                                                                   ],
+                                                          assets=exchange_assets,
                                                           start_auction_delta=datetime.timedelta(minutes=15),
                                                           end_auction_delta=datetime.timedelta(minutes=15),
                                                           aggregations=aggregations,

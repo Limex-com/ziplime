@@ -7,8 +7,10 @@ from zoneinfo import ZoneInfo
 import polars as pl
 import structlog
 
+from ziplime.assets.domain.asset_type import AssetType
 from ziplime.utils.bundle_utils import get_bundle_service
 from ziplime.utils.logging_utils import configure_logging
+from ziplime.assets.entities.asset_symbol import AssetSymbol
 
 from pathlib import Path
 
@@ -25,8 +27,8 @@ logger = structlog.get_logger(__name__)
 
 async def _run_simulation():
     tz = ZoneInfo("America/New_York")
-    start_date = datetime.datetime(year=2025, month=2, day=3, tzinfo=tz)
-    end_date = datetime.datetime(year=2025, month=4, day=1, hour=23, minute=59 , second=59, tzinfo=tz)
+    start_date = datetime.datetime(year=2025, month=6, day=3, tzinfo=tz)
+    end_date = datetime.datetime(year=2025, month=6, day=9, hour=23, minute=59 , second=59, tzinfo=tz)
     start_auction_delta = datetime.timedelta(minutes=15)
     end_auction_delta = datetime.timedelta(minutes=15)
     # Backtest completed in 3 seconds
@@ -36,6 +38,7 @@ async def _run_simulation():
         clear_asset_db=False,
         db_path=str(pathlib.Path(__file__).parent.parent.resolve().joinpath("data", "assets.sqlite"))
     )
+
     # Use aggregations if you ingested data of frequnecy less than 1 day
     aggregations = [
         pl.col("open").first(),
@@ -45,12 +48,18 @@ async def _run_simulation():
         pl.col("volume").sum(),
         pl.col("symbol").last()
     ]
+    symbols = ["META", "AAPL", "AMZN", "NFLX", "GOOGL", "ETSY", "NVDA", "MSFT"]
+
+    exchange_assets = await asset_service.get_exchange_assets_by_symbols(symbols=[AssetSymbol(
+        symbol=symbol, mic=None
+    ) for symbol in symbols], asset_type=AssetType.EQUITY)
+
     market_data_bundle = await bundle_service.load_bundle(bundle_name="limex_us_minute_data",
                                                           bundle_version=None,
                                                           frequency=datetime.timedelta(days=1),
                                                           start_date=start_date,
                                                           end_date=end_date,
-                                                          symbols=["META", "AAPL", "AMZN", "NFLX", "GOOGL", "ETSY", "NVDA"],
+                                                          assets=exchange_assets,
                                                           start_auction_delta=start_auction_delta,
                                                           end_auction_delta=end_auction_delta,
                                                           aggregations=aggregations,

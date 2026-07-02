@@ -7,6 +7,13 @@ import structlog
 import polars as pl
 from ziplime.data.services.data_bundle_source import DataBundleSource
 
+YAHOO_EXCHANGE_CODE_TO_MIC = {
+    "NMS": "XNMS", "NGS": "XNGS", "NYQ": "XNYS", "ASE": "XASE",
+    "PCX": "ARCX", "TOR": "XTSE", "VAN": "XTSX", "PAR": "XPAR",
+    "LSE": "XLON", "AMS": "XAMS", "FRA": "XFRA", "GER": "XFRA",
+    "ASX": "XASX", "TYO": "XJPX", "HKG": "XHKG", "BOM": "XBOM",
+    "NSE": "XNSE"
+}
 
 class YahooFinanceDataSource(DataBundleSource):
     def __init__(self, maximum_threads: int | None = None):
@@ -45,7 +52,6 @@ class YahooFinanceDataSource(DataBundleSource):
                        date_to: datetime.datetime,
                        **kwargs
                        ) -> pl.DataFrame:
-
         yfinance_data_raw = yf.download(tickers=symbols, threads=1,
                                         interval=self._get_frequency(frequency=frequency),
                                         start=date_from, end=date_to, group_by="Ticker", progress=True,
@@ -54,7 +60,12 @@ class YahooFinanceDataSource(DataBundleSource):
         final = pl.DataFrame()
         for symbol in symbols:
             df_symbol = yfinance_data_raw[symbol]
-
+            info = yf.Ticker(symbol).info
+            exchange_yahoo = info.get('exchange', None)
+            if exchange_yahoo is None:
+                mic = "XNGS"
+            else:
+                mic = YAHOO_EXCHANGE_CODE_TO_MIC.get(exchange_yahoo, f"X{exchange_yahoo}")
             df = pl.from_pandas(df_symbol, include_index=True,
                                 schema_overrides={"Open": pl.Float64(), "High": pl.Float64(),
                                                   "Low": pl.Float64(), "Close": pl.Float64(),
@@ -78,8 +89,7 @@ class YahooFinanceDataSource(DataBundleSource):
                 )
                 df = df.with_columns(
                     pl.lit(symbol).alias("symbol"),
-                    pl.lit("LIME").alias("exchange"),
-                    pl.lit("US").alias("exchange_country"),
+                    pl.lit(mic).alias("mic"),
                     pl.col("close").alias("price"),
                 )
                 if date_column == "Datetime":

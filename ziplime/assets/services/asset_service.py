@@ -73,6 +73,13 @@ class AssetService:
             asset_type=asset_type
         )
 
+    async def get_exchange_assets_by_symbols(self, symbols: list[AssetSymbol], asset_type: AssetType) -> list[
+        ExchangeAsset | None]:
+        return [await self.get_exchange_asset_by_symbol(
+            symbol=symbol,
+            asset_type=asset_type
+        ) for symbol in symbols]
+
     async def get_futures_contract_by_symbol(self, symbol: str, mic: str) -> FuturesContract | None:
         return await self._asset_repository.get_futures_contract_by_symbol(symbol=symbol,
                                                                            mic=mic)

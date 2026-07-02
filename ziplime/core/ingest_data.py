@@ -23,7 +23,7 @@ from ziplime.data.data_sources.asset_data_source import AssetDataSource
 from ziplime.data.services.bundle_service import BundleService
 from ziplime.data.services.data_bundle_source import DataBundleSource
 from ziplime.data.services.file_system_bundle_registry import FileSystemBundleRegistry
-from ziplime.data.services.file_system_parquet_bundle_storage import FileSystemParquetBundleStorage
+from ziplime.data.services.file_system_delta_lake_bundle_storage import FileSystemDeltaLakeBundleStorage
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 def get_asset_service(db_path: str = str(Path(Path.home(), ".ziplime", "assets.sqlite").absolute()),
@@ -175,6 +175,7 @@ async def ingest_market_data(
         data_frequency: datetime.timedelta,
         data_bundle_source: DataBundleSource,
         asset_service: AssetService,
+        merge: bool = False,
         forward_fill_missing_ohlcv_data: bool = True,
         bundle_storage_path: str = str(Path(Path.home(), ".ziplime", "data")),
 ):
@@ -207,10 +208,17 @@ async def ingest_market_data(
 
     bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
     bundle_service = BundleService(bundle_registry=bundle_registry)
-    bundle_storage = FileSystemParquetBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
+    bundle_storage = FileSystemDeltaLakeBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
 
-    bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
-
+    if merge:
+        existing_bundle_metadata = await bundle_registry.load_bundle_metadata(bundle_name=bundle_name,
+                                                                              bundle_version=None)
+        if not existing_bundle_metadata:
+            bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
+        else:
+            bundle_version = existing_bundle_metadata["version"]
+    else:
+        bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
     await bundle_service.ingest_market_data_bundle(
         date_start=start_date.replace(tzinfo=calendar.tz),
         date_end=end_date.replace(tzinfo=calendar.tz),
@@ -222,6 +230,7 @@ async def ingest_market_data(
         bundle_version=bundle_version,
         trading_calendar=calendar,
         asset_service=asset_service,
+        merge=merge,
         forward_fill_missing_ohlcv_data=forward_fill_missing_ohlcv_data,
     )
 
@@ -236,6 +245,7 @@ async def ingest_custom_data(
         data_frequency_use_window_end: bool,
         data_bundle_source: DataBundleSource,
         asset_service: AssetService,
+        merge: bool = False,
         bundle_storage_path: str = str(Path(Path.home(), ".ziplime", "data")),
 ):
     """
@@ -268,7 +278,7 @@ async def ingest_custom_data(
 
     bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
     bundle_service = BundleService(bundle_registry=bundle_registry)
-    bundle_storage = FileSystemParquetBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
+    bundle_storage = FileSystemDeltaLakeBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
     bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
 
     await bundle_service.ingest_custom_data_bundle(
@@ -283,4 +293,5 @@ async def ingest_custom_data(
         bundle_version=bundle_version,
         trading_calendar=calendar,
         asset_service=asset_service,
+        merge=merge
     )

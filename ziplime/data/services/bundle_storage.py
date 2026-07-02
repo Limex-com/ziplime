@@ -4,6 +4,7 @@ import polars as pl
 from abc import abstractmethod
 from typing import Any, Self
 
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.constants.period import Period
 from ziplime.data.domain.data_bundle import DataBundle
 
@@ -11,18 +12,20 @@ from ziplime.data.domain.data_bundle import DataBundle
 class BundleStorage:
 
     @abstractmethod
-    async def store_bundle(self, data_bundle: DataBundle):
+    async def store_bundle(self, data_bundle: DataBundle, merge: bool, merge_columns: list[str] | None = None):
         """
         Method for storing a data bundle asynchronously.
 
         Args:
             data_bundle (DataBundle): The data bundle to be stored.
+            merge: If True data will be merged with existing bundle data
+            merge_columns:  List of columns which are identifier which we should use to merge data
         """
         ...
 
     @abstractmethod
     async def load_data_bundle(self, data_bundle: DataBundle,
-                               symbols: list[str] | None = None,
+                               assets: list[ExchangeAsset | None] = None,
                                start_date: datetime.datetime | None = None,
                                end_date: datetime.datetime | None = None,
                                frequency: datetime.timedelta | Period | None = None,
@@ -36,7 +39,7 @@ class BundleStorage:
 
         Args:
             data_bundle (DataBundle): The source bundle containing the data to be loaded.
-            symbols (list[str] | None, optional): A list of symbols to filter and load data for. If not
+            assets (list[ExchangeAsset] | None, optional): A list of symbols to filter and load data for. If not
                 provided, data for all available symbols is loaded.
             start_date (datetime.datetime | None, optional): The starting date-time for the data to be loaded.
                 If not specified, it loads data from the earliest available date-time.

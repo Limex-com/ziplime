@@ -13,7 +13,7 @@ from ziplime.constants.fundamental_data import FUNDAMENTAL_DATA_COLUMNS
 from ziplime.data.services.bundle_service import BundleService
 from ziplime.data.services.file_system_bundle_registry import FileSystemBundleRegistry
 from ziplime.data.services.limex_hub_data_source import LimexHubDataSource
-from ziplime.data.services.file_system_parquet_bundle_storage import FileSystemParquetBundleStorage
+from ziplime.data.services.file_system_delta_lake_bundle_storage import FileSystemDeltaLakeBundleStorage
 from ziplime.domain.benchmark_spec import BenchmarkSpec
 from ziplime.domain.data_frequency import DataFrequency
 from ziplime.finance.commission import DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE, DEFAULT_PER_CONTRACT_COST, PerContract, \
@@ -163,7 +163,7 @@ async def ingest(ctx, bundle, start_date, end_date, frequency, symbols, fundamen
     )
     bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
     bundle_service = BundleService(bundle_registry=bundle_registry)
-    bundle_storage = FileSystemParquetBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
+    bundle_storage = FileSystemDeltaLakeBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
     data_bundle_source = LimexHubDataSource.from_env()
 
     calendar = ec_get_calendar(trading_calendar, start=start_date - datetime.timedelta(days=30))

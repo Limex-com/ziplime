@@ -90,7 +90,7 @@ class BundleRegistry(abc.ABC):
         ...
 
     @abstractmethod
-    async def get_bundle_metadata(self, data_bundle: DataBundle, bundle_storage: BundleStorage) -> dict[str, Any]:
+    async def get_bundle_metadata(self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool) -> dict[str, Any]:
         """
         Method for retrieving metadata about a data bundle.
 
@@ -99,13 +99,14 @@ class BundleRegistry(abc.ABC):
                 to be fetched.
             bundle_storage (BundleStorage): The storage mechanism handling the bundle,
                 used to retrieve associated data or configurations.
+            merge (bool): Whether to merge bundle data
 
         Returns:
             dict[str, Any]: A dictionary containing metadata about the data bundle.
         """
         ...
 
-    async def register_bundle(self, data_bundle: DataBundle, bundle_storage: BundleStorage):
+    async def register_bundle(self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool):
         """
         Registers a data bundle and persists its associated metadata.
 
@@ -115,9 +116,10 @@ class BundleRegistry(abc.ABC):
         Args:
             data_bundle (DataBundle): The data bundle to register.
             bundle_storage (BundleStorage): Storage reference related to the data bundle.
+            merge (bool): Whether to merge bundle data
 
         Returns:
             None
         """
-        metadata = await self.get_bundle_metadata(data_bundle=data_bundle, bundle_storage=bundle_storage)
+        metadata = await self.get_bundle_metadata(data_bundle=data_bundle, bundle_storage=bundle_storage, merge=merge)
         await self.persist_metadata(data_bundle=data_bundle, metadata=metadata)
