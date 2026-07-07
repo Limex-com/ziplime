@@ -154,7 +154,7 @@ class BacktestExecutor:
         if config.benchmark and config.benchmark not in bundle_symbols:
             bundle_symbols.append(config.benchmark)
 
-        market_data = await bundle_service.load_bundle(
+        market_data, missing_data = await bundle_service.load_bundle(
             bundle_name=self.data_manager.get_bundle_name(),
             bundle_version=None,
             frequency=datetime.timedelta(days=1),

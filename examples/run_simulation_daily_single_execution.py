@@ -49,20 +49,23 @@ async def _run_simulation():
         symbol=symbol, mic=None
     ) for symbol in symbols], asset_type=AssetType.EQUITY)
 
-    market_data_bundle = await bundle_service.load_bundle(bundle_name="limex_us_minute_data",
-                                                          bundle_version=None,
-                                                          frequency=datetime.timedelta(days=1),
-                                                          start_date=start_date,
-                                                          end_date=end_date,
-                                                          assets=exchange_assets,
-                                                          start_auction_delta=datetime.timedelta(minutes=15),
-                                                          end_auction_delta=datetime.timedelta(minutes=15),
-                                                          aggregations=aggregations,
-                                                          )
+    market_data_bundle, missing_data = await bundle_service.load_bundle(bundle_name="limex_us_minute_data",
+                                                                        bundle_version=None,
+                                                                        frequency=datetime.timedelta(days=1),
+                                                                        start_date=start_date,
+                                                                        end_date=end_date,
+                                                                        assets=exchange_assets,
+                                                                        start_auction_delta=datetime.timedelta(
+                                                                            minutes=15),
+                                                                        end_auction_delta=datetime.timedelta(
+                                                                            minutes=15),
+                                                                        aggregations=aggregations,
+                                                                        )
 
     custom_data_sources = []
-    custom_data_sources.append(
-        await bundle_service.load_bundle(bundle_name="limex_us_fundamental_data", bundle_version=None))
+    custom_data, missing_data = await bundle_service.load_bundle(bundle_name="limex_us_fundamental_data",
+                                                                 bundle_version=None)
+    custom_data_sources.append(custom_data)
 
     equity_commission = PerShare(
         cost=DEFAULT_PER_SHARE_COST,

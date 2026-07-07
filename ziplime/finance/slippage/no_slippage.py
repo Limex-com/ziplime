@@ -28,7 +28,7 @@ class NoSlippage(SlippageModel):
         current_val = await exchange.get_spot_value(assets=frozenset({asset}), fields=frozenset({"close", "volume", }),
                                                     dt=dt)
         price = current_val["close"][0]
-        target_cash = available_cash * percentage
+        target_cash = available_cash
         max_quantity = target_cash / price
         shares_to_fill = abs(max_quantity)
         return price, shares_to_fill

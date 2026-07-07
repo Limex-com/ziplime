@@ -26,6 +26,7 @@ from ziplime.data.services.file_system_bundle_registry import FileSystemBundleRe
 from ziplime.data.services.file_system_delta_lake_bundle_storage import FileSystemDeltaLakeBundleStorage
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
+
 def get_asset_service(db_path: str = str(Path(Path.home(), ".ziplime", "assets.sqlite").absolute()),
                       clear_asset_db: bool = False) -> AssetService:
     """
@@ -246,6 +247,7 @@ async def ingest_custom_data(
         data_bundle_source: DataBundleSource,
         asset_service: AssetService,
         merge: bool = False,
+        merge_columns: list[str] = ["sid", "date"],
         bundle_storage_path: str = str(Path(Path.home(), ".ziplime", "data")),
 ):
     """
@@ -279,7 +281,18 @@ async def ingest_custom_data(
     bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
     bundle_service = BundleService(bundle_registry=bundle_registry)
     bundle_storage = FileSystemDeltaLakeBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
-    bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
+
+    if merge:
+        existing_bundle_metadata = await bundle_registry.load_bundle_metadata(bundle_name=bundle_name,
+                                                                              bundle_version=None)
+        if not existing_bundle_metadata:
+            bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
+        else:
+            bundle_version = existing_bundle_metadata["version"]
+    else:
+        bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
+
+    # bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
 
     await bundle_service.ingest_custom_data_bundle(
         date_start=start_date.replace(tzinfo=calendar.tz),
@@ -293,5 +306,6 @@ async def ingest_custom_data(
         bundle_version=bundle_version,
         trading_calendar=calendar,
         asset_service=asset_service,
-        merge=merge
+        merge=merge,
+        merge_columns=merge_columns
     )

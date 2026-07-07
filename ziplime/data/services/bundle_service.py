@@ -60,7 +60,8 @@ class BundleService:
                                         data_frequency_use_window_end: bool,
                                         bundle_storage: BundleStorage,
                                         asset_service: AssetService,
-                                        merge: bool
+                                        merge: bool,
+                                        merge_columns: list[str]
                                         ):
         """Ingests a custom data bundle into the specified storage. This function processes and validates the provided data,
         ensures it aligns with the given trading calendar and frequency, and stores it using the provided storage system.
@@ -197,7 +198,7 @@ class BundleService:
         await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage,
                                                     merge=merge)
         await bundle_storage.store_bundle(data_bundle=data_bundle, merge=merge,
-                                          merge_columns=None)
+                                          merge_columns=merge_columns)
 
         self._logger.info(f"Finished ingesting custom bundle_name={name}, bundle_version={bundle_version}")
 
@@ -372,7 +373,7 @@ class BundleService:
                           start_auction_delta: datetime.timedelta = None,
                           end_auction_delta: datetime.timedelta = None,
                           aggregations: list[pl.Expr] = None
-                          ) -> DataBundle:
+                          ) -> tuple[DataBundle, dict[ExchangeAsset, tuple[datetime.datetime, datetime.datetime]]]:
         """
         Asynchronously loads a data bundle based on specified parameters and validates the configuration
         including time ranges, frequencies, and auction deltas. Retrieves necessary metadata, dependencies,
@@ -470,7 +471,6 @@ class BundleService:
                                  )
         bundle_data_load_start = time.time()
 
-
         data = await bundle_storage.load_data_bundle(data_bundle=data_bundle,
                                                      assets=assets,
                                                      start_date=start_date,
@@ -481,11 +481,11 @@ class BundleService:
                                                      aggregations=aggregations
                                                      )
 
-        await self.check_for_missing_data(data=data,
-                                          assets=assets,
-                                          frequency=frequency,
-                                          trading_calendar=trading_calendar,
-                                          start_date=start_date, end_date=end_date)
+        missing_data = await self.check_for_missing_data(data=data,
+                                                         assets=assets,
+                                                         frequency=frequency,
+                                                         trading_calendar=trading_calendar,
+                                                         start_date=start_date, end_date=end_date)
 
         load_duration = time.time() - bundle_data_load_start
 
@@ -505,22 +505,22 @@ class BundleService:
         #     for row in data.with_row_index().iter_rows(named=True)
         # }
 
-        return data_bundle
-
+        return data_bundle, missing_data
 
     async def check_for_missing_data(self,
                                      data: pl.DataFrame,
                                      trading_calendar: ExchangeCalendar,
-                                     frequency:datetime.timedelta | Period,
+                                     frequency: datetime.timedelta | Period,
                                      start_date: datetime.datetime,
                                      end_date: datetime.datetime,
                                      assets: list[ExchangeAsset],
-                                     ):
+                                     ) -> dict[ExchangeAsset, tuple[datetime.datetime, datetime.datetime]]:
 
         all_bars = [
             s for s in pl.from_pandas(
                 trading_calendar.sessions_minutes(start=start_date.replace(tzinfo=None).date(),
-                                                  end=end_date.replace(tzinfo=None).date()).tz_convert(trading_calendar.tz)
+                                                  end=end_date.replace(tzinfo=None).date()).tz_convert(
+                    trading_calendar.tz)
             ) if s >= start_date and s <= end_date
         ]
         required_sessions = pl.DataFrame({"date": all_bars, "close": 0.00}).group_by_dynamic(
@@ -528,15 +528,20 @@ class BundleService:
         ).agg()
         missing_data_per_symbol = {}
         for asset in assets:
-                symbol_data = data.filter(sid=asset.sid).with_columns(pl.col("date"))
-                missing_sessions = sorted(set(required_sessions["date"]) - set(symbol_data["date"]))
-                if len(missing_sessions) > 0:
-                    self._logger.warning(
-                        f"Data for symbol {asset.symbol}@{asset.mic} is missing on ticks ({len(missing_sessions)}): {[missing_session.isoformat() for missing_session in missing_sessions]}")
+            symbol_data = data.filter(sid=asset.sid).with_columns(pl.col("date"))
+            missing_sessions = sorted(set(required_sessions["date"]) - set(symbol_data["date"]))
+            if len(missing_sessions) > 0:
+                missing_data_per_symbol[asset] = (missing_sessions[0], missing_sessions[-1])
+                self._logger.warning(
+                    f"Data for symbol {asset.symbol}@{asset.mic} is missing on ticks ({len(missing_sessions)}): {[missing_session.isoformat() for missing_session in missing_sessions]}")
         missing_sids = set([asset.sid for asset in assets]) - set(data["sid"].unique())
         if missing_sids:
-            missing_symbols = [f'{asset.symbol}@{asset.mic}' for asset in assets if asset.sid in missing_sids]
-            raise ValueError(f"Symbols are missing in asset database: {missing_symbols}")
+            missing_assets = [asset for asset in assets if asset.sid in missing_sids]
+            missing_symbols = [f'{asset.symbol}@{asset.mic}' for asset in missing_assets]
+            for asset in missing_assets:
+                missing_data_per_symbol[asset] = (start_date, end_date)
+
+        return missing_data_per_symbol
 
     async def clean(self, bundle_name: str, before: datetime.datetime = None, after: datetime.datetime = None,
                     keep_last: bool = None):

@@ -531,8 +531,8 @@ class Ledger:
         else:
             gross_leverage = position_stats.gross_exposure / portfolio_value
             net_leverage = position_stats.net_exposure / portfolio_value
-        if gross_leverage > 5:
-            print("a")
+        # if gross_leverage > 5:
+        #     print("a")
         return portfolio_value, gross_leverage, net_leverage
 
     def update_account(self):

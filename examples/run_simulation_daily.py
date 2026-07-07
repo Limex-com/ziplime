@@ -54,7 +54,7 @@ async def _run_simulation():
         symbol=symbol, mic=None
     ) for symbol in symbols], asset_type=AssetType.EQUITY)
 
-    market_data_bundle = await bundle_service.load_bundle(bundle_name="limex_us_minute_data",
+    market_data_bundle, missing_data = await bundle_service.load_bundle(bundle_name="limex_us_minute_data",
                                                           bundle_version=None,
                                                           frequency=datetime.timedelta(days=1),
                                                           start_date=start_date,
@@ -64,6 +64,8 @@ async def _run_simulation():
                                                           end_auction_delta=end_auction_delta,
                                                           aggregations=aggregations,
                                                           )
+
+
 
     custom_data_sources = []
     # custom_data_sources.append(

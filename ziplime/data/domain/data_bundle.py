@@ -177,11 +177,12 @@ class DataBundle(DataSource):
                                 limit: int,
                                 end_date: datetime.datetime,
                                 frequency: datetime.timedelta | Period,
-                                assets: frozenset[Asset],
+                                assets: frozenset[ExchangeAsset],
                                 include_end_date: bool,
                                 ) -> pl.DataFrame:
         frequency_td = period_to_timedelta(frequency)
-        asset_sid = [asset.sid for asset in assets][0]
+        assets_list = [asset for asset in assets]
+        asset_sid = assets_list[0].sid
 
         total_bar_count = limit
         if end_date > self.end_date:
@@ -208,7 +209,7 @@ class DataBundle(DataSource):
                 try:
                     sid_index = self.sid_indexes[asset_sid]
                 except KeyError:
-                    raise ValueError(f"No data for asset sid={asset_sid}")
+                    raise ValueError(f"Data for asset sid={asset_sid}, symbol={assets_list[0].symbol}, mic={assets_list[0].mic} requested but it is not found in the loaded bundle.")
                 df_raw = self.get_dataframe()[sid_index[0]:sid_index[1]].select(pl.col(col) for col in cols).filter(
                     pl.col("date") <= end_date,
                 ).tail(total_bar_count)
