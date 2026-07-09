@@ -249,15 +249,17 @@ class Ledger:
             self._buy_lots_by_asset[asset].append(
                 Lot(quantity=transaction.amount, price=transaction.price, commission=transaction.commission or 0.00)
             )
+            transaction.average_entry_price = transaction.price
         else:
             sell_qty = -transaction.amount
             sell_comm = transaction.commission or 0.00
-
+            total_match_price = 0
             while sell_qty > 0 and self._buy_lots_by_asset[asset]:
                 lot = self._buy_lots_by_asset[asset][0]
                 match_qty = min(sell_qty, lot.quantity)
 
                 pnl = (transaction.price - lot.price) * match_qty
+                total_match_price += lot.price * match_qty
                 realized += pnl
 
                 lot.quantity -= match_qty
@@ -266,9 +268,10 @@ class Ledger:
                 # Drop empty lot
                 if lot.quantity == 0:
                     self._buy_lots_by_asset[asset].popleft()
-
+            transaction.average_entry_price = total_match_price/-transaction.amount
             realized -= sell_comm
         transaction.realized_pnl = realized
+
 
     def process_splits(self, splits):
         """Processes a list of splits by modifying any positions as needed.

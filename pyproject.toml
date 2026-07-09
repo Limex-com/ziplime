@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ziplime"
-version = "1.19.16"
+version = "1.20.9"
 description = ""
 authors = ["Ziplime"]
 readme = "README.md"
