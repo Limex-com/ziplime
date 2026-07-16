@@ -244,6 +244,7 @@ class Ledger:
         if asset not in self._buy_lots_by_asset:
             self._buy_lots_by_asset[asset] = deque()
         realized = 0.0
+        realized_pnl_percentage = 0.00
 
         if transaction.amount > 0:
             self._buy_lots_by_asset[asset].append(
@@ -270,8 +271,10 @@ class Ledger:
                     self._buy_lots_by_asset[asset].popleft()
             transaction.average_entry_price = total_match_price/-transaction.amount
             realized -= sell_comm
+            if total_match_price > 0:
+                realized_pnl_percentage = (realized / total_match_price) * 100
         transaction.realized_pnl = realized
-
+        transaction.realized_pnl_percentage = realized_pnl_percentage
 
     def process_splits(self, splits):
         """Processes a list of splits by modifying any positions as needed.

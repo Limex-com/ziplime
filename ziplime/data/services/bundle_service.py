@@ -325,7 +325,7 @@ class BundleService:
                     data = pl.concat([data, new_rows_df], how="diagonal")
             missing_symbols = set(symbols) - set(symbol_to_sid)
             if missing_symbols:
-                raise ValueError(f"Symbols are missing in asset database: {missing_symbols}")
+                raise ValueError(f"Symbols are missing in asset database: {missing_symbols}@{exchange_mic}")
 
             data = data.with_columns(
                 pl.when(
