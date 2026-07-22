@@ -53,7 +53,7 @@ async def run_algorithm(
         exchange_repository: ExchangeRepository,
         stop_on_error: bool = False,
         benchmark_asset_symbol: str | None = None,
-        benchmark_asset_mic: str | None = "XNGS",
+        benchmark_asset_mic: str | None = None,
         benchmark_returns: pl.Series | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,

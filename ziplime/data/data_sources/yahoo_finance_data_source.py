@@ -5,15 +5,10 @@ import yfinance as yf
 import structlog
 
 import polars as pl
+
+from ziplime.data.data_sources.yahoo_finance_constants import YAHOO_EXCHANGE_MAP
 from ziplime.data.services.data_bundle_source import DataBundleSource
 
-YAHOO_EXCHANGE_CODE_TO_MIC = {
-    "NMS": "XNMS", "NGS": "XNGS", "NYQ": "XNYS", "ASE": "XASE",
-    "PCX": "ARCX", "TOR": "XTSE", "VAN": "XTSX", "PAR": "XPAR",
-    "LSE": "XLON", "AMS": "XAMS", "FRA": "XFRA", "GER": "XFRA",
-    "ASX": "XASX", "TYO": "XJPX", "HKG": "XHKG", "BOM": "XBOM",
-    "NSE": "XNSE"
-}
 
 class YahooFinanceDataSource(DataBundleSource):
     def __init__(self, maximum_threads: int | None = None):
@@ -63,9 +58,9 @@ class YahooFinanceDataSource(DataBundleSource):
             info = yf.Ticker(symbol).info
             exchange_yahoo = info.get('exchange', None)
             if exchange_yahoo is None:
-                mic = "XNGS"
+                mic = "XNMS"
             else:
-                mic = YAHOO_EXCHANGE_CODE_TO_MIC.get(exchange_yahoo, f"X{exchange_yahoo}")
+                mic = YAHOO_EXCHANGE_MAP.get(exchange_yahoo, f"X{exchange_yahoo}")["mic"]
             df = pl.from_pandas(df_symbol, include_index=True,
                                 schema_overrides={"Open": pl.Float64(), "High": pl.Float64(),
                                                   "Low": pl.Float64(), "Close": pl.Float64(),
