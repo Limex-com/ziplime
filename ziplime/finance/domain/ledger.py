@@ -334,7 +334,7 @@ class Ledger:
         if txn is not None:
             self.process_transaction(transaction=txn)
 
-    async def process_dividends(self, next_session, adjustment_reader):
+    async def process_dividends(self, next_session, asset_service):
         """Process dividends for the next session.
 
         This will earn us any dividends whose ex-date is the next session as
@@ -346,13 +346,15 @@ class Ledger:
         # check if we own any of these stocks so we know to pay them out when
         # the pay date comes.
         held_sids = set(position_tracker.positions)
+        held_assets = [pos.asset.asset for pos in self.position_tracker.get_position_list()]
         if held_sids:
-            cash_dividends = adjustment_reader.get_dividends_with_ex_date(
-                assets=held_sids, date=next_session  # self.data_bundle.asset_repository
+            cash_dividends = await asset_service.get_cash_dividends_with_ex_date(
+                assets=held_assets, date=next_session  # self.data_bundle.asset_repository
             )
-            stock_dividends = await adjustment_reader.get_stock_dividends_with_ex_date(
-                assets=held_sids, date=next_session  # self.data_bundle.asset_repository
-            )
+            # stock_dividends = await asset_service.get_stock_dividends_with_ex_date(
+            #     assets=held_assets, date=next_session  # self.data_bundle.asset_repository
+            # )
+            stock_dividends = []
 
             # Earning a dividend just marks that we need to get paid out on
             # the dividend's pay-date. This does not affect our cash yet.

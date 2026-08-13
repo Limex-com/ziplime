@@ -77,8 +77,8 @@ async def ingest_assets(asset_service: AssetService, asset_data_source: AssetDat
     exchanges = await asset_data_source.get_exchanges()
     if len(exchanges) > 0:
         await asset_service.save_exchanges(exchanges=exchanges)
-    exchange_assets = await asset_data_source.get_assets(exchanges=exchanges)
-    await asset_service.save_exchange_assets(exchange_assets=exchange_assets)
+    assets_import = await asset_data_source.get_assets(exchanges=exchanges)
+    await asset_service.import_assets(assets_import=assets_import)
     # await asset_service.save_equities(equities=assets)
 
 

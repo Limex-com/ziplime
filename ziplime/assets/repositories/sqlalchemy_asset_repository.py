@@ -22,8 +22,10 @@ from toolz import (
 from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
+from ziplime.assets.entities.split import Split
 from ziplime.assets.entities.symbol_universe import SymbolsUniverse
 from ziplime.assets.entities.symbols_universe_asset import SymbolsUniverseAsset
 from ziplime.assets.models.asset_router import AssetRouter
@@ -31,9 +33,11 @@ from ziplime.assets.entities.commodity import Commodity
 from ziplime.assets.entities.currency import Currency
 from ziplime.assets.models.commodity_model import CommodityModel
 from ziplime.assets.models.currency_model import CurrencyModel
+from ziplime.assets.models.divident_payout_model import DividendPayoutModel
 from ziplime.assets.models.equity_model import EquityModel
 from ziplime.assets.models.exchange_asset_model import ExchangeAssetModel
 from ziplime.assets.models.futures_contract_model import FuturesContractModel
+from ziplime.assets.models.split_model import SplitModel
 from ziplime.assets.models.symbols_universe import SymbolsUniverseModel
 from ziplime.assets.models.symbols_universe_asset import SymbolsUniverseAssetModel
 from ziplime.trading.models.trading_pair import TradingPair
@@ -107,7 +111,6 @@ class SqlAlchemyAssetRepository(AssetRepository):
         self.session_maker = async_sessionmaker(autocommit=False, autoflush=True, bind=self.engine, class_=AsyncSession,
                                                 expire_on_commit=False)
 
-
     async def add_all_and_commit(self, models: list[BaseModel]):
         async with self.session_maker() as session:
             session.add_all(models)
@@ -119,10 +122,31 @@ class SqlAlchemyAssetRepository(AssetRepository):
     async def save_asset_routers(self, asset_routers: list[AssetRouter]) -> None:
         await self.add_all_and_commit(asset_routers)
 
-    async def save_currencies(self, currencies: list[Currency]) -> list[CurrencyModel]:
+    def _currency_model_to_currency(self, currency_model: CurrencyModel) -> Currency:
+        return Currency(
+            id=currency_model.id,
+            asset_name=currency_model.asset_name,
+            start_date=currency_model.start_date,
+            first_traded=currency_model.first_traded,
+            end_date=currency_model.end_date,
+            auto_close_date=currency_model.auto_close_date,
+            isin=currency_model.isin
+        )
+
+    def _equity_model_to_equity(self, equity_model: EquityModel) -> Equity:
+        return Equity(
+            id=equity_model.id,
+            asset_name=equity_model.asset_name,
+            start_date=equity_model.start_date,
+            first_traded=equity_model.first_traded,
+            end_date=equity_model.end_date,
+            auto_close_date=equity_model.auto_close_date,
+            isin=equity_model.isin
+        )
+
+    async def save_currencies(self, currencies: list[Currency]) -> list[Currency]:
         assets_db = []
         asset_routers = []
-        # symbol_mappings = []
         async with self.session_maker() as session:
             for currency in currencies:
                 asset_router = AssetRouter(
@@ -142,38 +166,9 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 )
                 session.add(asset_db)
                 await session.commit()
-                #
                 assets_db.append(asset_db)
-                # for symbol_mapping in currency.symbol_mapping.values():
-                #     exchange = await self.get_exchange_by_mic(exchange_name=symbol_mapping.exchange_name)
-                #     if exchange is None:
-                #         raise ValueError(f"Exchange {symbol_mapping.exchange_name} not found. Please register it.")
-                #     symbol_mapping_model = CurrencySymbolMappingModel(
-                #         sid=asset_db.sid,
-                #         symbol=symbol_mapping.symbol,
-                #         start_date=symbol_mapping.start_date,
-                #         end_date=symbol_mapping.end_date,
-                #         exchange=exchange.mic,
-                #     )
-                #     symbol_mappings.append(symbol_mapping_model)
-                #     session.add(symbol_mapping_model)
-                #     await session.commit()
 
-            # trading_pair = TradingPair(
-            #     id=uuid.uuid4(),
-            #     base_asset_sid=asset_router.sid,
-            #     quote_asset_sid=asset_db.sid,
-            #     exchange=asset["exchange"],
-            # )
-            # trading_pairs.append(trading_pair)
-
-        # do this in one transaction
-        #     session.add_all(asset_routers)
-        #     await session.commit()
-        #     session.add_all(assets_db)
-        #     session.add_all(symbol_mappings)
-        #     await session.commit()
-        return assets_db
+        return [self._currency_model_to_currency(currency_model=c) for c in assets_db]
 
     async def save_symbol_universe(self, symbol_universe: SymbolsUniverse):
         async with self.session_maker() as session:
@@ -222,7 +217,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
             name=exchange.name
         ) for exchange in exchanges]
 
-    async def save_equities(self, equities: list[Equity]) -> list[EquityModel]:
+    async def save_equities(self, equities: list[Equity]) -> list[Equity]:
         assets_db = []
         asset_routers = []
         # symbol_mappings = []
@@ -247,34 +242,11 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 isin=equity.isin
             )
             assets_db.append(asset_db)
-            # for symbol_mapping in equity.symbol_mapping.values():
-            #     exchange = await self.get_exchange_by_mic(exchange_name=symbol_mapping.exchange_name)
-            #     if exchange is None:
-            #         raise ValueError(f"Exchange {symbol_mapping.exchange_name} not found. Please register it.")
-            # equity_symbol_mapping = EquitySymbolMappingModel(
-            #     sid=asset_routers[i].sid,
-            #     company_symbol=symbol_mapping.company_symbol,
-            #     symbol=symbol_mapping.symbol,
-            #     share_class_symbol=symbol_mapping.share_class_symbol,
-            #     start_date=symbol_mapping.start_date,
-            #     end_date=symbol_mapping.end_date,
-            # )
-            # symbol_mappings.append(equity_symbol_mapping)
-
-            # trading_pair = TradingPair(
-            #     id=uuid.uuid4(),
-            #     base_asset_sid=asset_router.sid,
-            #     quote_asset_sid=asset_db.sid,
-            #     exchange=asset["exchange"],
-            # )
-            # trading_pairs.append(trading_pair)
-
-        # do this in one transaction
         async with self.session_maker() as session:
             session.add_all(assets_db)
-            # session.add_all(symbol_mappings)
             await session.commit()
-        return assets_db
+
+        return [self._equity_model_to_equity(equity_model=eq) for eq in assets_db]
 
     async def save_exchanges(self, exchanges: list[ExchangeInfo]) -> None:
         exchange_models = [
@@ -288,74 +260,60 @@ class SqlAlchemyAssetRepository(AssetRepository):
 
         await self.add_all_and_commit(exchange_models)
 
-    async def save_exchange_assets(self, exchange_assets: list[ExchangeAsset]) -> None:
-        new_equities = []
-        new_currencies = []
+    async def save_exchange_assets(self, exchange_assets: list[ExchangeAsset]) -> list[ExchangeAsset]:
+        all_assets = await self.get_all_assets()
 
-        exchange_asset_currencies = []
-        exchange_asset_equities = []
+        asset_keys = {
+            (type(asset), asset.isin, asset.asset_name): asset
+            for asset in all_assets.values()
+        }
 
-        equities_by_new_ids = {}
-        currencies_by_new_ids = {}
-
-        exchange_asset_equities_mapping = []
-        exchange_asset_currencies_mapping = []
-
-        for exchange_asset in exchange_assets:
-            asset_id = (exchange_asset.asset.isin, exchange_asset.asset.asset_name, exchange_asset.asset.id)
-            if type(exchange_asset.asset) is Equity:
-                if exchange_asset.asset.id is None and asset_id not in equities_by_new_ids:
-                    new_equities.append(exchange_asset.asset)
-                    equities_by_new_ids[asset_id] = exchange_asset.asset
-                exchange_asset_equities_mapping.append(exchange_asset.asset)
-                exchange_asset_equities.append(exchange_asset)
-            elif type(exchange_asset.asset) is Currency:
-                if exchange_asset.asset.id is None and asset_id not in currencies_by_new_ids:
-                    new_currencies.append(exchange_asset.asset)
-                    currencies_by_new_ids[asset_id] = exchange_asset.asset
-                exchange_asset_currencies_mapping.append(exchange_asset.asset)
-                exchange_asset_currencies.append(exchange_asset)
-        equities = await self.save_equities(equities=new_equities)
-        currencies = await self.save_currencies(currencies=new_currencies)
-        equities_by_asset_ids = {(equity.isin, equity.asset_name): equity for equity in equities}
-        currencies_by_asset_ids = {(currency.isin, currency.asset_name): currency for currency in currencies}
-
-        exchange_assets_equities_db = [
+        exchange_assets_db = [
             ExchangeAssetModel(
                 # exchange="",
                 external_id=exchange_asset.external_id,
                 start_date=exchange_asset.start_date,
                 end_date=exchange_asset.end_date,
                 symbol=exchange_asset.symbol,
-                asset_id=equities_by_asset_ids[(exchange_asset.asset.isin, exchange_asset.asset.asset_name)].id,
+                asset_id=asset_keys[
+                    (type(exchange_asset.asset), exchange_asset.asset.isin, exchange_asset.asset.asset_name)].id,
+                quote_id=asset_keys[
+                    (type(exchange_asset.quote), exchange_asset.quote.isin, exchange_asset.quote.asset_name)].id,
                 mic=exchange_asset.mic,
                 first_traded=exchange_asset.first_traded,
                 sid=None,
                 auto_close_date=exchange_asset.auto_close_date,
             )
-            for exchange_asset in exchange_asset_equities
+            for exchange_asset in exchange_assets
         ]
-        exchange_assets_currencies_db = [
-            ExchangeAssetModel(
-                external_id=exchange_asset.external_id,
-                start_date=exchange_asset.start_date,
-                end_date=exchange_asset.end_date,
-                symbol=exchange_asset.symbol,
-                asset_id=currencies_by_asset_ids[(exchange_asset.asset.isin, exchange_asset.asset.asset_name)].id,
-                mic=exchange_asset.mic,
-                first_traded=exchange_asset.first_traded,
-                sid=None,
-                auto_close_date=exchange_asset.auto_close_date,
-            )
-            for exchange_asset in exchange_asset_currencies
-        ]
-        await self.add_all_and_commit(exchange_assets_equities_db)
-        await self.add_all_and_commit(exchange_assets_currencies_db)
+        await self.add_all_and_commit(exchange_assets_db)
+
+    async def save_dividends(self, dividends: list[DividendPayout]) -> list[DividendPayout]:
+        all_assets = await self.get_all_assets()
+        dividends_db = [DividendPayoutModel(
+            asset_id=d.asset.id,
+            ex_date=d.pay_date,
+            declared_date=d.declared_date,
+            record_date=d.record_date,
+            pay_date=d.pay_date,
+            amount=d.amount
+        ) for d in dividends]
+
+        await self.add_all_and_commit(dividends_db)
+
+    async def save_splits(self, splits: list[Split]) -> list[Split]:
+        splits_db = [SplitModel(
+            asset_id=s.asset.id,
+            effective_date=s.effective_date,
+            ratio=s.ratio
+        ) for s in splits]
+
+        await self.add_all_and_commit(splits_db)
 
     # async def save_equity_symbol_mappings(self, equity_symbol_mappings: list[EquitySymbolMappingModel]) -> None:
     #     await self.add_all_and_commit(equity_symbol_mappings)
 
-    # @cached(cache=Cache.MEMORY)
+    @cached(cache=Cache.MEMORY)
     async def get_all_assets(self) -> dict[int, Asset]:
         if self._cached_assets:
             return self._cached_assets
@@ -374,29 +332,13 @@ class SqlAlchemyAssetRepository(AssetRepository):
             commodities = list((await session.execute(q_commodities)).scalars().all())
         res = {}
         for asset in equities:
-            res[asset.id] = Equity(
-                id=asset.id,
-                asset_name=asset.asset_name,
-                start_date=asset.start_date,
-                first_traded=asset.first_traded,
-                end_date=asset.end_date,
-                auto_close_date=asset.auto_close_date,
-                isin=asset.isin
-            )
+            res[asset.id] = self._equity_model_to_equity(equity_model=asset)
         for asset in futures_contracts:
             # Map to your pure FuturesContract domain entity...
             pass
         for asset in currencies:
             # Map to your pure Currency domain entity...
-            res[asset.id] = Currency(
-                id=asset.id,
-                asset_name=asset.asset_name,
-                start_date=asset.start_date,
-                first_traded=asset.first_traded,
-                end_date=asset.end_date,
-                auto_close_date=asset.auto_close_date,
-                isin=asset.isin
-            )
+            res[asset.id] = self._currency_model_to_currency(currency_model=asset)
         for asset in commodities:
             # Map to your pure Commodity domain entity...
             pass
@@ -470,45 +412,29 @@ class SqlAlchemyAssetRepository(AssetRepository):
         )
 
     @aiocache.cached(cache=Cache.MEMORY)
-    async def get_currency_by_symbol(self, symbol: str, exchange_name: str) -> Currency | None:
-        currencies = await self.get_currencies_by_symbols(symbols=[symbol], exchange_name=exchange_name)
-        if currencies:
-            return currencies[0]
-        return None
-
-    @aiocache.cached(cache=Cache.MEMORY)
-    async def get_currencies_by_symbols(self, symbols: list[str], exchange_name: str) -> list[Currency]:
+    async def get_currencies_by_symbols(self, symbols: list[str]) -> list[Currency]:
         async with self.session_maker() as session:
-            q_currency_symbol_mapping = select(CurrencySymbolMappingModel).where(
-                CurrencySymbolMappingModel.exchange == exchange_name,
-                CurrencySymbolMappingModel.symbol.in_(symbols))
-
-            currency_mappings = (await session.execute(q_currency_symbol_mapping)).scalars()
-
             q_currencies = select(CurrencyModel).where(
-                CurrencyModel.sid.in_([currency_mapping.sid for currency_mapping in currency_mappings])).options(
-                selectinload(CurrencyModel.asset_router)).options(selectinload(CurrencyModel.currency_symbol_mappings))
+                CurrencyModel.asset_name.in_(symbols)).options(
+                selectinload(CurrencyModel.asset_router))
             assets: list[CurrencyModel] = list((await session.execute(q_currencies)).scalars())
 
             return [Currency(
-                sid=asset.sid,
+                id=asset.id,
                 asset_name=asset.asset_name,
                 start_date=asset.start_date,
                 first_traded=asset.first_traded,
                 end_date=asset.end_date,
                 auto_close_date=asset.auto_close_date,
-                symbol_mapping={
-                    currency_mapping.exchange: CurrencySymbolMapping(
-                        symbol=currency_mapping.symbol,
-                        exchange_name=currency_mapping.exchange,
-                        end_date=currency_mapping.end_date,
-                        start_date=currency_mapping.start_date
-                    )
-                    for currency_mapping in asset.currency_symbol_mappings
-                },
-                mic=asset.mic,
                 isin=asset.isin
             ) for asset in assets]
+
+    @aiocache.cached(cache=Cache.MEMORY)
+    async def get_currency_by_symbol(self, symbol: str) -> Currency | None:
+        currencies = await self.get_currencies_by_symbols(symbols=[symbol])
+        if currencies:
+            return currencies[0]
+        return None
 
     async def get_commodity_by_symbol(self, symbol: str) -> Commodity | None:
         raise NotImplementedError("Not implemented")
@@ -585,6 +511,50 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 isin=asset.isin
             ) for asset in assets]
 
+    async def get_exchange_currencies_by_symbols(self, symbols: list[AssetSymbol]) -> list[ExchangeAsset]:
+
+        filter_mic = tuple_(ExchangeAssetModel.symbol, ExchangeAssetModel.mic).in_(
+            [(s.symbol, s.mic) for s in symbols if s.mic is not None]
+        )
+        filter_non_mic = ExchangeAssetModel.symbol.in_([s.symbol for s in symbols if s.mic is None])
+        async with self.session_maker() as session:
+            q = (
+                select(ExchangeAssetModel)
+                .where(
+                    filter_mic | filter_non_mic
+                )
+                .options(selectinload(ExchangeAssetModel.asset_router))
+            ).distinct(ExchangeAssetModel.mic, ExchangeAssetModel.symbol).order_by(
+                ExchangeAssetModel.mic, ExchangeAssetModel.symbol, "sid")
+            results: list[ExchangeAssetModel] = list((await session.execute(q)).scalars())
+
+            q_currencies = select(CurrencyModel).where(
+                CurrencyModel.id.in_([currency_exchange.asset_id for currency_exchange in results])).options(
+                selectinload(CurrencyModel.asset_router))
+            assets: list[CurrencyModel] = list((await session.execute(q_currencies)).scalars())
+            assets_by_id = {asset.id: asset for asset in assets}
+            all_assets = await self.get_all_assets()
+        return [ExchangeAsset(
+            sid=asset.sid,
+            start_date=asset.start_date,
+            first_traded=asset.first_traded,
+            end_date=asset.end_date,
+            auto_close_date=asset.auto_close_date,
+            symbol=asset.symbol,
+            exchange=await self.get_exchange_by_mic(mic=asset.mic),
+            asset=Currency(
+                first_traded=assets_by_id[asset.asset_id].first_traded,
+                auto_close_date=assets_by_id[asset.asset_id].auto_close_date,
+                end_date=assets_by_id[asset.asset_id].end_date,
+                start_date=assets_by_id[asset.asset_id].start_date,
+                isin=assets_by_id[asset.asset_id].isin,
+                asset_name=assets_by_id[asset.asset_id].asset_name,
+                id=assets_by_id[asset.asset_id].id,
+            ),
+            quote=all_assets[asset.quote_id],
+            external_id=asset.external_id,
+        ) for asset in results]
+
     async def get_exchange_equities_by_symbols(self, symbols: list[AssetSymbol]) -> list[ExchangeAsset]:
 
         filter_mic = tuple_(ExchangeAssetModel.symbol, ExchangeAssetModel.mic).in_(
@@ -607,6 +577,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 selectinload(EquityModel.asset_router))
             assets: list[EquityModel] = list((await session.execute(q_equities)).scalars())
             assets_by_id = {asset.id: asset for asset in assets}
+            all_assets = await self.get_all_assets()
         return [ExchangeAsset(
             sid=asset.sid,
             start_date=asset.start_date,
@@ -624,6 +595,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 asset_name=assets_by_id[asset.asset_id].asset_name,
                 id=assets_by_id[asset.asset_id].id,
             ),
+            quote=all_assets[asset.quote_id],
             external_id=asset.external_id,
         ) for asset in results]
 
@@ -662,6 +634,35 @@ class SqlAlchemyAssetRepository(AssetRepository):
         if equities:
             return equities[0]
         return None
+
+    async def get_exchange_currency_by_symbol(self, symbol: AssetSymbol) -> ExchangeAsset | None:
+        currencies = await self.get_exchange_currencies_by_symbols(symbols=[symbol])
+        if currencies:
+            return currencies[0]
+        return None
+
+    async def get_cash_dividends_with_ex_date(self, assets: list[Asset], date: datetime.date) -> list[DividendPayout]:
+        async with self.session_maker() as session:
+            all_assets = await self.get_all_assets()
+            q_dividends = select(
+                DividendPayoutModel
+            ).where(
+                DividendPayoutModel.asset_id.in_([asset.id for asset in assets])
+            )
+            dividends_r: list[DividendPayoutModel] = list((await session.execute(q_dividends)).scalars())
+
+        return [
+            DividendPayout(
+                asset=all_assets[d.asset_id],
+                amount=d.amount,
+                pay_date=d.pay_date,
+                declared_date=d.declared_date,
+                record_date=d.record_date,
+                ex_date=d.ex_date,
+                currency=None
+                # currency
+            )
+            for d in dividends_r]
 
     def migrate(self) -> None:
         alembic_dir_path = Path(pathlib.Path(__file__).parent.parent.parent, "alembic")

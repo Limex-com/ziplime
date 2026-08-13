@@ -13,9 +13,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ziplime.assets.entities.asset import Asset
-from ziplime.assets.models.dividend import Dividend
-from ziplime.assets.models.merger import Merger
-from ziplime.assets.models.split import Split
+from ziplime.assets.models.divident_payout_model import DividendPayoutModel
+from ziplime.assets.models.merger_model import MergerModel
+from ziplime.assets.models.split_model import SplitModel
+from ziplime.assets.models.stock_dividend_payout_model import StockDividendPayoutModel
 from ziplime.lib.adjustment import Float64Multiply
 from ziplime.utils.functional import keysorted
 from ziplime.utils.numpy_utils import (
@@ -530,7 +531,7 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
 
         return divs
 
-    async def get_stock_dividends(self, sid: int, trading_days: pl.Series) -> list[Dividend]:
+    async def get_stock_dividends(self, sid: int, trading_days: pl.Series) -> list[StockDividendPayoutModel]:
         return []
 
     async def get_stock_dividends_with_ex_date(self, assets, date):

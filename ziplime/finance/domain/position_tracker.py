@@ -10,7 +10,7 @@ import structlog
 
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
-from ziplime.assets.models.dividend import Dividend
+from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.domain.position import Position
@@ -46,6 +46,7 @@ class PositionTracker:
         self._dirty_stats = True
         self._stats = PositionStats.new()
         self._logger = structlog.get_logger(__name__)
+        self.position_trades = {}
 
     def update_position(
             self,
@@ -60,8 +61,11 @@ class PositionTracker:
         self._dirty_stats = True
         if exchange_name not in self.positions:
             self.positions[exchange_name] = {}
+            self.position_trades[exchange_name] = {}
         if trading_account_id not in self.positions[exchange_name]:
             self.positions[exchange_name][trading_account_id] = {}
+            self.position_trades[exchange_name][trading_account_id] = []
+
 
         if asset not in self.positions[exchange_name][trading_account_id]:
             position = Position(
@@ -116,6 +120,7 @@ class PositionTracker:
             last_sale_date=None,
             cost_basis=None
         )
+
         self._update_position(position=position, txn=txn)
         if position.amount == 0:
 
@@ -232,7 +237,7 @@ class PositionTracker:
 
         return total_leftover_cash
 
-    def earn_dividend(self, position: Position, dividend: Dividend) -> dict[str, float]:
+    def earn_dividend(self, position: Position, dividend: DividendPayout) -> dict[str, float]:
         """
         Register the number of shares we held at this dividend's ex date so
         that we can pay out the correct amount on the dividend's pay date.

@@ -1,5 +1,6 @@
 import polars as pl
 
+from ziplime.assets.domain.assets_import import AssetsImport
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
 from ziplime.assets.entities.symbol_universe import SymbolsUniverse
@@ -11,7 +12,7 @@ class AssetDataSource:
     def __init__(self):
         pass
 
-    async def get_assets(self, **kwargs) -> list[Asset]:
+    async def get_assets(self, exchanges: list[ExchangeInfo], **kwargs) -> AssetsImport:
         pass
 
     async def get_exchanges(self, **kwargs) -> list[ExchangeInfo]: ...

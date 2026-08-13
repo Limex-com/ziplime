@@ -10,6 +10,7 @@ import polars as pl
 import yfinance as yf
 from yfinance.exceptions import YFException
 
+from ziplime.assets.domain.assets_import import AssetsImport
 from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
@@ -27,7 +28,7 @@ class YahooFinanceAssetDataSource(AssetDataSource):
         else:
             self._maximum_threads = multiprocessing.cpu_count() * 2
 
-    async def get_assets(self, exchanges: list[ExchangeInfo], **kwargs) -> list[ExchangeAsset]:
+    async def get_assets(self, exchanges: list[ExchangeInfo], **kwargs) -> AssetsImport:
         exchanges_by_code = {exchange.mic: exchange for exchange in exchanges}
         lookup_letters = list(string.ascii_lowercase)
         result_df = None
@@ -39,7 +40,7 @@ class YahooFinanceAssetDataSource(AssetDataSource):
                 res = yf.Lookup(letter.upper()).get_stock(count=1000)
 
             yahoo_df = pl.from_pandas(res, include_index=True).select("symbol", "exchange").with_columns(
-                pl.col("exchange").replace({k: v["mic"]for k,v in  YAHOO_EXCHANGE_MAP.items()}).alias("mic")
+                pl.col("exchange").replace({k: v["mic"] for k, v in YAHOO_EXCHANGE_MAP.items()}).alias("mic")
             )
             if result_df is None:
                 result_df = yahoo_df
@@ -76,21 +77,10 @@ class YahooFinanceAssetDataSource(AssetDataSource):
             first_traded=asset_start_date,
             isin=None
         ) for currency in assets_df["currency"].unique()]
-        exchange_currencies = [
-            ExchangeAsset(
-                sid=None,
-                symbol=currency.asset_name,
-                exchange=exchange,
-                start_date=asset_start_date,
-                end_date=asset_end_date,
-                auto_close_date=asset_end_date,
-                first_traded=asset_start_date,
-                external_id=currency.asset_name,
-                asset=currency
-            )
-            for exchange in exchanges
-            for currency in currencies
-        ]
+
+        currency_by_name = {
+            c.asset_name: c for c in currencies
+        }
 
         exchange_assets = [
             ExchangeAsset(
@@ -104,13 +94,15 @@ class YahooFinanceAssetDataSource(AssetDataSource):
                 auto_close_date=asset_end_date,
                 first_traded=asset_start_date,
                 asset=asset,
+                quote=currency_by_name[asset_df["currency"]],
                 external_id=""
             )
             for asset, asset_df in zip(equities, assets_df.iter_rows(named=True))
         ]
 
-        exchange_assets.extend(exchange_currencies)
-        return exchange_assets
+        return AssetsImport(
+            currencies=currencies, equities=equities, exchange_assets=exchange_assets
+        )
 
     async def get_constituents(self, index: str) -> pl.DataFrame:
         assets = self._limex_client.constituents(index)

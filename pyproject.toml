@@ -39,6 +39,7 @@ python-dateutil = "^2.9.0.post0"
 yfinance = "^0.2.65"
 pandas-stubs = "~=2.3.3"
 deltalake = "^1.6.1"
+httpx = "^0.28.1"
 
 [tool.poetry.group.vectorbt]
 optional = true

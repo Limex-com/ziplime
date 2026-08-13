@@ -16,6 +16,7 @@ class ExchangeAsset:
     external_id: str
     exchange: ExchangeInfo
     asset: Asset
+    quote: Asset
 
     def __hash__(self):
         return hash(self.sid)

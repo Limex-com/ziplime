@@ -36,6 +36,7 @@ EquityFK = Annotated[int, mapped_column(ForeignKey("equities.id"), index=True)]
 AssetFK = Annotated[int, mapped_column(ForeignKey("assets.id"), index=True)]
 AssetRouterFK = Annotated[int, mapped_column(ForeignKey("asset_router.id"), index=True)]
 CurrencyFK = Annotated[int, mapped_column(ForeignKey("currencies.id"), index=True)]
+ExchangeAssetFK = Annotated[str, mapped_column(ForeignKey("exchange_assets.sid"), index=True)]
 
 AssetRouterFKPK = Annotated[int, mapped_column(ForeignKey("asset_router.id"), primary_key=True)]
 SymbolsUniverseFKPK = Annotated[str, mapped_column(ForeignKey("symbols_universe.name"), primary_key=True)]

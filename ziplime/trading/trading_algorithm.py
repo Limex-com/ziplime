@@ -2141,16 +2141,16 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         # move processing of ledger and dividends before metrics
         self._ledger.start_of_session(session_label=midnight_dt)
         # TODO: handle ajustments repository
-        adjustment_reader = self.asset_service._adjustments_repository
-        if adjustment_reader is not None:
+        # adjustment_reader = self.asset_service._adjustments_repository
+        # if adjustment_reader is not None:
             # this is None when running with a dataframe source
-            await self._ledger.process_dividends(
-                next_session=midnight_dt,
-                adjustment_reader=adjustment_reader,
-            )
-            # self._sync_last_sale_prices(dt=datetime.datetime.combine(midnight_dt, datetime.time())) # my
-            # self._ledger.update_portfolio()
-            # self._ledger.update_account()
+        await self._ledger.process_dividends(
+            next_session=midnight_dt,
+            asset_service=self.asset_service,
+        )
+        # self._sync_last_sale_prices(dt=datetime.datetime.combine(midnight_dt, datetime.time())) # my
+        # self._ledger.update_portfolio()
+        # self._ledger.update_account()
 
         await self.metrics_tracker.handle_market_open(session_label=midnight_dt)
 

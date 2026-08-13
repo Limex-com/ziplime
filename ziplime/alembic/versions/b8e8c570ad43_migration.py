@@ -1,8 +1,8 @@
 """migration
 
-Revision ID: 8c43877dec20
+Revision ID: b8e8c570ad43
 Revises: 
-Create Date: 2026-05-21 07:41:47.538839
+Create Date: 2026-08-13 10:57:47.926821
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '8c43877dec20'
+revision = 'b8e8c570ad43'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -23,27 +23,6 @@ def upgrade():
     sa.Column('asset_type', sa.String(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('dividend_payouts',
-    sa.Column('index', sa.String(), nullable=False),
-    sa.Column('sid', sa.Integer(), nullable=False),
-    sa.Column('ex_date', sa.Date(), nullable=False),
-    sa.Column('declared_date', sa.Date(), nullable=False),
-    sa.Column('record_date', sa.Date(), nullable=False),
-    sa.Column('pay_date', sa.Date(), nullable=False),
-    sa.Column('amount', sa.Integer(), nullable=False),
-    sa.PrimaryKeyConstraint('index')
-    )
-    op.create_index(op.f('ix_dividend_payouts_ex_date'), 'dividend_payouts', ['ex_date'], unique=False)
-    op.create_index(op.f('ix_dividend_payouts_sid'), 'dividend_payouts', ['sid'], unique=False)
-    op.create_table('dividends',
-    sa.Column('index', sa.String(), nullable=False),
-    sa.Column('sid', sa.Integer(), nullable=False),
-    sa.Column('effective_date', sa.Date(), nullable=False),
-    sa.Column('ratio', sa.Float(), nullable=False),
-    sa.PrimaryKeyConstraint('index')
-    )
-    op.create_index(op.f('ix_dividends_effective_date'), 'dividends', ['effective_date'], unique=False)
-    op.create_index(op.f('ix_dividends_sid'), 'dividends', ['sid'], unique=False)
     op.create_table('exchanges',
     sa.Column('mic', sa.String(), nullable=False),
     sa.Column('name', sa.String(), nullable=False),
@@ -51,37 +30,6 @@ def upgrade():
     sa.Column('country_code', sa.String(), nullable=False),
     sa.PrimaryKeyConstraint('mic')
     )
-    op.create_table('mergers',
-    sa.Column('index', sa.String(), nullable=False),
-    sa.Column('sid', sa.Integer(), nullable=False),
-    sa.Column('effective_date', sa.Date(), nullable=False),
-    sa.Column('ratio', sa.Float(), nullable=False),
-    sa.PrimaryKeyConstraint('index')
-    )
-    op.create_index(op.f('ix_mergers_effective_date'), 'mergers', ['effective_date'], unique=False)
-    op.create_index(op.f('ix_mergers_sid'), 'mergers', ['sid'], unique=False)
-    op.create_table('splits',
-    sa.Column('index', sa.String(), nullable=False),
-    sa.Column('sid', sa.Integer(), nullable=False),
-    sa.Column('effective_date', sa.Date(), nullable=False),
-    sa.Column('ratio', sa.Float(), nullable=False),
-    sa.PrimaryKeyConstraint('index')
-    )
-    op.create_index(op.f('ix_splits_effective_date'), 'splits', ['effective_date'], unique=False)
-    op.create_index(op.f('ix_splits_sid'), 'splits', ['sid'], unique=False)
-    op.create_table('stock_dividend_payouts',
-    sa.Column('index', sa.String(), nullable=False),
-    sa.Column('sid', sa.Integer(), nullable=False),
-    sa.Column('ex_date', sa.Date(), nullable=False),
-    sa.Column('declared_date', sa.Date(), nullable=False),
-    sa.Column('record_date', sa.Date(), nullable=False),
-    sa.Column('pay_date', sa.Date(), nullable=False),
-    sa.Column('payment_sid', sa.String(), nullable=False),
-    sa.Column('ration', sa.Float(), nullable=False),
-    sa.PrimaryKeyConstraint('index')
-    )
-    op.create_index(op.f('ix_stock_dividend_payouts_ex_date'), 'stock_dividend_payouts', ['ex_date'], unique=False)
-    op.create_index(op.f('ix_stock_dividend_payouts_sid'), 'stock_dividend_payouts', ['sid'], unique=False)
     op.create_table('symbols_universe',
     sa.Column('name', sa.String(), nullable=False),
     sa.Column('symbol', sa.String(), nullable=False),
@@ -110,6 +58,19 @@ def upgrade():
     sa.ForeignKeyConstraint(['id'], ['asset_router.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_table('dividend_payouts',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('asset_id', sa.Integer(), nullable=False),
+    sa.Column('ex_date', sa.Date(), nullable=False),
+    sa.Column('declared_date', sa.Date(), nullable=False),
+    sa.Column('record_date', sa.Date(), nullable=False),
+    sa.Column('pay_date', sa.Date(), nullable=False),
+    sa.Column('amount', sa.Float(), nullable=False),
+    sa.ForeignKeyConstraint(['asset_id'], ['asset_router.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_dividend_payouts_asset_id'), 'dividend_payouts', ['asset_id'], unique=False)
+    op.create_index(op.f('ix_dividend_payouts_ex_date'), 'dividend_payouts', ['ex_date'], unique=False)
     op.create_table('equities',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('isin', sa.String(), nullable=True),
@@ -124,6 +85,7 @@ def upgrade():
     op.create_table('exchange_assets',
     sa.Column('sid', sa.Integer(), nullable=False),
     sa.Column('asset_id', sa.Integer(), nullable=False),
+    sa.Column('quote_id', sa.Integer(), nullable=False),
     sa.Column('mic', sa.String(), nullable=False),
     sa.Column('symbol', sa.String(), nullable=True),
     sa.Column('start_date', sa.Date(), nullable=False),
@@ -133,20 +95,46 @@ def upgrade():
     sa.Column('external_id', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['asset_id'], ['asset_router.id'], ),
     sa.ForeignKeyConstraint(['mic'], ['exchanges.mic'], ),
+    sa.ForeignKeyConstraint(['quote_id'], ['asset_router.id'], ),
     sa.PrimaryKeyConstraint('sid')
     )
     op.create_index(op.f('ix_exchange_assets_asset_id'), 'exchange_assets', ['asset_id'], unique=False)
     op.create_index(op.f('ix_exchange_assets_mic'), 'exchange_assets', ['mic'], unique=False)
-    op.create_table('futures_root_symbols',
-    sa.Column('root_symbol', sa.String(), nullable=False),
-    sa.Column('root_symbol_id', sa.Integer(), nullable=False),
-    sa.Column('sector', sa.String(), nullable=False),
-    sa.Column('description', sa.String(), nullable=False),
-    sa.Column('exchange_mic', sa.String(), nullable=False),
-    sa.ForeignKeyConstraint(['exchange_mic'], ['exchanges.mic'], ),
-    sa.PrimaryKeyConstraint('root_symbol')
+    op.create_index(op.f('ix_exchange_assets_quote_id'), 'exchange_assets', ['quote_id'], unique=False)
+    op.create_table('mergers',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('asset_id', sa.Integer(), nullable=False),
+    sa.Column('effective_date', sa.Date(), nullable=False),
+    sa.Column('ratio', sa.Float(), nullable=False),
+    sa.ForeignKeyConstraint(['asset_id'], ['asset_router.id'], ),
+    sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_futures_root_symbols_exchange_mic'), 'futures_root_symbols', ['exchange_mic'], unique=False)
+    op.create_index(op.f('ix_mergers_asset_id'), 'mergers', ['asset_id'], unique=False)
+    op.create_index(op.f('ix_mergers_effective_date'), 'mergers', ['effective_date'], unique=False)
+    op.create_table('splits',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('asset_id', sa.Integer(), nullable=False),
+    sa.Column('effective_date', sa.Date(), nullable=False),
+    sa.Column('ratio', sa.Float(), nullable=False),
+    sa.ForeignKeyConstraint(['asset_id'], ['asset_router.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_splits_asset_id'), 'splits', ['asset_id'], unique=False)
+    op.create_index(op.f('ix_splits_effective_date'), 'splits', ['effective_date'], unique=False)
+    op.create_table('stock_dividend_payouts',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('asset_id', sa.Integer(), nullable=False),
+    sa.Column('ex_date', sa.Date(), nullable=False),
+    sa.Column('declared_date', sa.Date(), nullable=False),
+    sa.Column('record_date', sa.Date(), nullable=False),
+    sa.Column('pay_date', sa.Date(), nullable=False),
+    sa.Column('payment_sid', sa.String(), nullable=False),
+    sa.Column('ration', sa.Float(), nullable=False),
+    sa.ForeignKeyConstraint(['asset_id'], ['asset_router.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_stock_dividend_payouts_asset_id'), 'stock_dividend_payouts', ['asset_id'], unique=False)
+    op.create_index(op.f('ix_stock_dividend_payouts_ex_date'), 'stock_dividend_payouts', ['ex_date'], unique=False)
     op.create_table('symbols_universe_assets',
     sa.Column('symbol_universe_name', sa.String(), nullable=False),
     sa.Column('start_date', sa.Date(), nullable=False),
@@ -158,13 +146,12 @@ def upgrade():
     sa.PrimaryKeyConstraint('symbol_universe_name', 'start_date', 'asset_id')
     )
     op.create_table('futures_contracts',
-    sa.Column('symbol', sa.String(), nullable=False),
-    sa.Column('root_symbol', sa.String(), nullable=False),
+    sa.Column('root_asset_id', sa.Integer(), nullable=False),
+    sa.Column('root_exchange_asset_sid', sa.Integer(), nullable=True),
     sa.Column('notice_date', sa.Date(), nullable=False),
     sa.Column('expiration_date', sa.Date(), nullable=False),
     sa.Column('multiplier', sa.Float(), nullable=False),
     sa.Column('tick_size', sa.Float(), nullable=False),
-    sa.Column('exchange_mic', sa.String(), nullable=False),
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('isin', sa.String(), nullable=True),
     sa.Column('asset_name', sa.String(), nullable=False),
@@ -172,47 +159,40 @@ def upgrade():
     sa.Column('end_date', sa.Date(), nullable=False),
     sa.Column('first_traded', sa.Date(), nullable=False),
     sa.Column('auto_close_date', sa.Date(), nullable=False),
-    sa.ForeignKeyConstraint(['exchange_mic'], ['exchanges.mic'], ),
     sa.ForeignKeyConstraint(['id'], ['asset_router.id'], ),
-    sa.ForeignKeyConstraint(['root_symbol'], ['futures_root_symbols.root_symbol'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('symbol')
+    sa.ForeignKeyConstraint(['root_asset_id'], ['asset_router.id'], ),
+    sa.ForeignKeyConstraint(['root_exchange_asset_sid'], ['exchange_assets.sid'], ),
+    sa.PrimaryKeyConstraint('root_asset_id', 'id')
     )
-    op.create_index(op.f('ix_futures_contracts_exchange_mic'), 'futures_contracts', ['exchange_mic'], unique=False)
-    op.create_index(op.f('ix_futures_contracts_root_symbol'), 'futures_contracts', ['root_symbol'], unique=False)
+    op.create_index(op.f('ix_futures_contracts_root_exchange_asset_sid'), 'futures_contracts', ['root_exchange_asset_sid'], unique=False)
     # ### end Alembic commands ###
 
 
 def downgrade():
     # ### commands auto generated by Alembic - please adjust! ###
-    op.drop_index(op.f('ix_futures_contracts_root_symbol'), table_name='futures_contracts')
-    op.drop_index(op.f('ix_futures_contracts_exchange_mic'), table_name='futures_contracts')
+    op.drop_index(op.f('ix_futures_contracts_root_exchange_asset_sid'), table_name='futures_contracts')
     op.drop_table('futures_contracts')
     op.drop_table('symbols_universe_assets')
-    op.drop_index(op.f('ix_futures_root_symbols_exchange_mic'), table_name='futures_root_symbols')
-    op.drop_table('futures_root_symbols')
+    op.drop_index(op.f('ix_stock_dividend_payouts_ex_date'), table_name='stock_dividend_payouts')
+    op.drop_index(op.f('ix_stock_dividend_payouts_asset_id'), table_name='stock_dividend_payouts')
+    op.drop_table('stock_dividend_payouts')
+    op.drop_index(op.f('ix_splits_effective_date'), table_name='splits')
+    op.drop_index(op.f('ix_splits_asset_id'), table_name='splits')
+    op.drop_table('splits')
+    op.drop_index(op.f('ix_mergers_effective_date'), table_name='mergers')
+    op.drop_index(op.f('ix_mergers_asset_id'), table_name='mergers')
+    op.drop_table('mergers')
+    op.drop_index(op.f('ix_exchange_assets_quote_id'), table_name='exchange_assets')
     op.drop_index(op.f('ix_exchange_assets_mic'), table_name='exchange_assets')
     op.drop_index(op.f('ix_exchange_assets_asset_id'), table_name='exchange_assets')
     op.drop_table('exchange_assets')
     op.drop_table('equities')
+    op.drop_index(op.f('ix_dividend_payouts_ex_date'), table_name='dividend_payouts')
+    op.drop_index(op.f('ix_dividend_payouts_asset_id'), table_name='dividend_payouts')
+    op.drop_table('dividend_payouts')
     op.drop_table('currencies')
     op.drop_table('commodities')
     op.drop_table('symbols_universe')
-    op.drop_index(op.f('ix_stock_dividend_payouts_sid'), table_name='stock_dividend_payouts')
-    op.drop_index(op.f('ix_stock_dividend_payouts_ex_date'), table_name='stock_dividend_payouts')
-    op.drop_table('stock_dividend_payouts')
-    op.drop_index(op.f('ix_splits_sid'), table_name='splits')
-    op.drop_index(op.f('ix_splits_effective_date'), table_name='splits')
-    op.drop_table('splits')
-    op.drop_index(op.f('ix_mergers_sid'), table_name='mergers')
-    op.drop_index(op.f('ix_mergers_effective_date'), table_name='mergers')
-    op.drop_table('mergers')
     op.drop_table('exchanges')
-    op.drop_index(op.f('ix_dividends_sid'), table_name='dividends')
-    op.drop_index(op.f('ix_dividends_effective_date'), table_name='dividends')
-    op.drop_table('dividends')
-    op.drop_index(op.f('ix_dividend_payouts_sid'), table_name='dividend_payouts')
-    op.drop_index(op.f('ix_dividend_payouts_ex_date'), table_name='dividend_payouts')
-    op.drop_table('dividend_payouts')
     op.drop_table('asset_router')
     # ### end Alembic commands ###
