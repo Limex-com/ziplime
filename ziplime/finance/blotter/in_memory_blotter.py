@@ -154,13 +154,21 @@ class InMemoryBlotter(Blotter):
         -------
         None
         """
-        for asset, ratio in splits:
-            if asset not in self.open_orders:
-                continue
 
-            orders_to_modify = self.open_orders[asset]
-            for order in orders_to_modify:
-                order.handle_split(ratio)
+        for split in splits:
+            for exchange, asset_positions in self.open_orders.items():
+                for asset, orders in asset_positions.items():
+                    for order_id, order in orders.items():
+                        if order.asset.asset.id == split.asset.id:
+                            order.handle_split(split.ratio)
+
+
+            # if split.asset not in self.open_orders:
+            #     continue
+            #
+            # orders_to_modify = self.open_orders[split.asset]
+            # for order in orders_to_modify:
+            #     order.handle_split(split.ratio)
 
     # def get_transactions(self, bar_data: BarData):
     #     """
@@ -242,7 +250,7 @@ class InMemoryBlotter(Blotter):
         for order in closed_orders:
             asset = order.asset
             asset_orders = self.open_orders[order.exchange_name][asset]
-            asset_orders.pop(order, None)
+            asset_orders.pop(order.id, None)
 
         # now clear out the assets from our open_orders dict that have
         # zero open orders

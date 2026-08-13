@@ -647,7 +647,8 @@ class SqlAlchemyAssetRepository(AssetRepository):
             q_dividends = select(
                 DividendPayoutModel
             ).where(
-                DividendPayoutModel.asset_id.in_([asset.id for asset in assets])
+                DividendPayoutModel.asset_id.in_([asset.id for asset in assets]),
+                DividendPayoutModel.ex_date == date
             )
             dividends_r: list[DividendPayoutModel] = list((await session.execute(q_dividends)).scalars())
 
@@ -663,6 +664,26 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 # currency
             )
             for d in dividends_r]
+
+    async def get_splits(self, assets: list[Asset], date: datetime.date) -> list[Split]:
+        async with self.session_maker() as session:
+            all_assets = await self.get_all_assets()
+            q_splits = select(
+                SplitModel
+            ).where(
+                SplitModel.asset_id.in_([asset.id for asset in assets]),
+                SplitModel.effective_date == date
+            )
+            splits_r: list[SplitModel] = list((await session.execute(q_splits)).scalars())
+
+        return [
+            Split(
+                asset=all_assets[s.asset_id],
+                effective_date=s.effective_date,
+                ratio=s.ratio,
+                id=s.id
+            )
+            for s in splits_r]
 
     def migrate(self) -> None:
         alembic_dir_path = Path(pathlib.Path(__file__).parent.parent.parent, "alembic")

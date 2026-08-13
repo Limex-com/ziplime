@@ -2143,7 +2143,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         # TODO: handle ajustments repository
         # adjustment_reader = self.asset_service._adjustments_repository
         # if adjustment_reader is not None:
-            # this is None when running with a dataframe source
+        # this is None when running with a dataframe source
         await self._ledger.process_dividends(
             next_session=midnight_dt,
             asset_service=self.asset_service,
@@ -2155,9 +2155,12 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         await self.metrics_tracker.handle_market_open(session_label=midnight_dt)
 
         # handle any splits that impact any positions or any open orders.
-        assets_we_care_about = (
-                self._ledger.position_tracker.positions.keys() | self.blotter.get_all_assets_in_open_orders()
-        )
+        # assets_we_care_about = (
+        #         self._ledger.position_tracker.positions.keys() | self.blotter.get_all_assets_in_open_orders()
+        # )
+        assets_we_care_about = set([pos.asset.asset for pos in self._ledger.position_tracker.get_position_list()] + [exchange_asset.asset for
+                                                                                                exchange_asset in
+                                                                                                self.blotter.get_all_assets_in_open_orders()])
 
         if assets_we_care_about:
             splits = await asset_service.get_splits(assets_we_care_about, midnight_dt)

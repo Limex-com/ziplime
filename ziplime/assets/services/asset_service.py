@@ -23,7 +23,7 @@ from ziplime.assets.entities.symbol_universe import SymbolsUniverse
 from ziplime.assets.repositories.adjustments_repository import AdjustmentRepository
 from ziplime.assets.repositories.asset_repository import AssetRepository
 from ziplime.trading.entities.trading_pair import TradingPair
-
+from ziplime.assets.entities.asset import Asset
 
 class AssetService:
 
@@ -122,8 +122,8 @@ class AssetService:
         return await self._adjustments_repository.get_stock_dividends(sid=sid,
                                                                       trading_days=trading_days)
 
-    async def get_splits(self, assets: frozenset[ExchangeAsset], dt: datetime.date):
-        return await self._adjustments_repository.get_splits(assets=assets, dt=dt)
+    async def get_splits(self, assets: list[Asset], date):
+        return await self._asset_repository.get_splits(date=date, assets=assets)
 
     async def get_symbols_universe(self, name: str, dt: datetime.date) -> SymbolsUniverse | None:
         return await self._asset_repository.get_symbols_universe(name=name, dt=dt)
@@ -162,25 +162,3 @@ class AssetService:
 
     async def get_cash_dividends_with_ex_date(self, assets, date):
         return await self._asset_repository.get_cash_dividends_with_ex_date(date=date, assets=assets)
-
-        # seconds = date.value / int(1e9)
-        c = self.conn.cursor()
-
-        divs = []
-        for chunk in group_into_chunks(assets):
-            query = UNPAID_QUERY_TEMPLATE.format(",".join(["?" for _ in chunk]))
-            t = (date,) + tuple(map(lambda x: int(x), chunk))
-
-            c.execute(query, t)
-
-            rows = c.fetchall()
-            for row in rows:
-                div = Dividend(
-                    asset_finder.retrieve_asset(row[0]),
-                    row[1],
-                    pd.Timestamp(row[2], unit="s", tz="UTC"),
-                )
-                divs.append(div)
-        c.close()
-
-        return divs

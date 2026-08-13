@@ -225,15 +225,23 @@ class PositionTracker:
         """
         total_leftover_cash = 0
 
-        for asset, ratio in splits:
-            if asset in self.positions:
-                self._dirty_stats = True
+        for split in splits:
+            for exchange, accounts_dict in self.positions.items():
+                for account, positions_dict in accounts_dict.items():
+                    for exchange_asset, position in  positions_dict.items():
+                        if position.asset.asset.id == split.asset.id:
+                            leftover_cash = self.handle_split(position=position, asset=split.asset, ratio=split.ratio)
+                            total_leftover_cash += leftover_cash
 
-                # Make the position object handle the split. It returns the
-                # leftover cash from a fractional share, if there is any.
-                position = self.positions[asset]
-                leftover_cash = self.handle_split(position=position, asset=asset, ratio=ratio)
-                total_leftover_cash += leftover_cash
+        # for split in splits:
+        #     if split.asset in self.positions:
+        #         self._dirty_stats = True
+        #
+        #         # Make the position object handle the split. It returns the
+        #         # leftover cash from a fractional share, if there is any.
+        #         position = self.positions[split.asset]
+        #         leftover_cash = self.handle_split(position=position, asset=split.asset, ratio=split.ratio)
+        #         total_leftover_cash += leftover_cash
 
         return total_leftover_cash
 
@@ -254,14 +262,14 @@ class PositionTracker:
             "share_count": np.floor(position.amount * float(stock_dividend.ratio)),
         }
 
-    def handle_split(self, position: Position, asset: ExchangeAsset, ratio: float):
+    def handle_split(self, position: Position, asset: Asset, ratio: float):
         """
         Update the position by the split ratio, and return the resulting
         fractional share that will be converted into cash.
 
         Returns the unused cash.
         """
-        if position.asset != asset:
+        if position.asset.asset != asset:
             raise Exception("updating split with the wrong asset!")
 
         # adjust the # of shares by the ratio
@@ -311,7 +319,11 @@ class PositionTracker:
 
             # Store the earned dividends so that they can be paid on the
             # dividends' pay_dates.
-            div_owed = self.earn_dividend(position=self.positions[cash_dividend.asset], dividend=cash_dividend)
+            for exchange, accounts_dict in self.positions.items():
+                for account, positions_dict in accounts_dict.items():
+                    for exchange_asset, position in  positions_dict.items():
+                        if position.asset.asset.id == cash_dividend.asset.id:
+                            div_owed = self.earn_dividend(position=position, dividend=cash_dividend)
             try:
                 self._unpaid_dividends[cash_dividend.pay_date].append(div_owed)
             except KeyError:
