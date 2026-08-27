@@ -70,6 +70,7 @@ nav:
           - Yahoo Finance: data-ingestion/data-sources/market-data/yahoo-finance.md
 - Backtesting:
   - Backtesting: backtesting/index.md
+  - Trading bonds: backtesting/bonds.md
 
 - AI Assistant (No-Code):
   - ai-assistant/index.md
