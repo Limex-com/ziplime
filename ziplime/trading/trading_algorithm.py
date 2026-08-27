@@ -67,7 +67,7 @@ from ziplime.errors import (
     ZeroCapitalError, SymbolNotFound, BarSimulationError,
 )
 
-from ziplime.finance.execution import ExecutionStyle
+from ziplime.finance.execution import ExecutionStyle, make_execution_style
 from ziplime.finance.asset_restrictions import Restrictions
 from ziplime.finance.cancel_policy import CancelPolicy
 from ziplime.finance.asset_restrictions import (
@@ -1056,9 +1056,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return await self.order(
             asset,
             amount,
-            limit_price=limit_price,
-            stop_price=stop_price,
-            style=style,
+            # `order` takes an execution style, not loose prices: passing limit_price/stop_price
+            # through raised a TypeError, so order_value only ever worked by accident when the
+            # caller supplied a style of its own.
+            style=make_execution_style(limit_price=limit_price, stop_price=stop_price,
+                                       style=style),
             exchange_name=exchange_name
         )
 
@@ -1612,17 +1614,26 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             If an asset is passed then this will return a list of the open
             orders for this asset.
         """
+        # `blotter.open_orders` is keyed by exchange name first and by listing second. Indexing it
+        # with a listing therefore matched nothing -- an asset is never an exchange name -- so this
+        # returned [] for every asset that had orders working, and the no-asset form returned
+        # exchange names mapped to listings rather than orders. A strategy topping an order up
+        # relies on this to see what is already working; without it, it stacks order on order.
         if asset is None:
-            return {
-                key: list(orders.values())  # [order.to_api_obj() for order in orders]
-                for key, orders in self.blotter.open_orders.items()
-                if orders
-            }
-        if asset in self.blotter.open_orders:
-            orders = self.blotter.open_orders[asset]
-            return list(orders.values())
-            # return [order.to_api_obj() for order in orders]
-        return []
+            merged: dict[ExchangeAsset, list[Order]] = {}
+            for exchange_orders in self.blotter.open_orders.values():
+                for listing, orders in exchange_orders.items():
+                    if orders:
+                        merged.setdefault(listing, []).extend(orders.values())
+            return merged
+
+        open_orders: list[Order] = []
+        for exchange_name in self.blotter.open_orders:
+            orders = self.blotter.get_open_orders_by_asset(asset=asset,
+                                                           exchange_name=exchange_name)
+            if orders:
+                open_orders.extend(orders.values())
+        return open_orders
 
     @api_method
     def get_order(self, order_id: str, exchange_name: str) -> Order | None:

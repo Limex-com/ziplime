@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 import math
 from collections import OrderedDict, deque
@@ -424,7 +425,14 @@ class Ledger:
 
     @property
     def positions(self):
-        return self.position_tracker.get_position_list()
+        """Snapshots of the currently open positions.
+
+        Copies, not the live objects: performance packets keep whatever this returns, and handing
+        out live positions made already-recorded sessions change as the simulation went on -- a
+        position closed in September silently showed as flat in June's record.
+        """
+        return [dataclasses.replace(position)
+                for position in self.position_tracker.get_position_list()]
 
     def _get_payout_total(self, positions):
 

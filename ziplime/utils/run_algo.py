@@ -218,7 +218,10 @@ async def _prepare_algorithm(
         benchmark_fields=frozenset({"close"}),
         precalculated_series=benchmark_precalculated_series
     )
-    await benchmark_source.validate_benchmark(benchmark_asset=benchmark_asset)
+    if benchmark_asset is not None:
+        # Running without a benchmark is supported -- the zero-returns series above is built for
+        # exactly that case -- but validation used to run anyway and fail on the missing asset.
+        await benchmark_source.validate_benchmark(benchmark_asset=benchmark_asset)
 
     for exchange in reversed(await exchange_repository.get_all_exchanges()):
         custom_data_sources.insert(0, exchange)
