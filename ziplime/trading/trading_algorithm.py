@@ -67,7 +67,7 @@ from ziplime.errors import (
     ZeroCapitalError, SymbolNotFound, BarSimulationError,
 )
 
-from ziplime.finance.execution import ExecutionStyle
+from ziplime.finance.execution import ExecutionStyle, make_execution_style
 from ziplime.finance.asset_restrictions import Restrictions
 from ziplime.finance.cancel_policy import CancelPolicy
 from ziplime.finance.asset_restrictions import (
@@ -1056,9 +1056,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return await self.order(
             asset,
             amount,
-            limit_price=limit_price,
-            stop_price=stop_price,
-            style=style,
+            # `order` takes an execution style, not loose prices: passing limit_price/stop_price
+            # through raised a TypeError, so order_value only ever worked by accident when the
+            # caller supplied a style of its own.
+            style=make_execution_style(limit_price=limit_price, stop_price=stop_price,
+                                       style=style),
             exchange_name=exchange_name
         )
 

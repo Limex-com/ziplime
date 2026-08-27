@@ -123,11 +123,12 @@ async def run_simulation(
             country_code="US",
             trading_calendar=calendar,
             data_source=market_data_source,
-            equity_slippage=FixedBasisPointsSlippage(),
+            # The models the caller passed, not fresh hardcoded ones. run_simulation used to
+            # compute equity_slippage/future_slippage above and then ignore both, so the
+            # parameters did nothing. run_simulation_iter already did this correctly.
+            equity_slippage=equity_slippage,
             equity_commission=equity_commission,
-            future_slippage=VolatilityVolumeShare(
-                volume_limit=DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT,
-            ),
+            future_slippage=future_slippage,
             future_commission=future_commission,
             cash_balance=total_cash,
             clock=clock,

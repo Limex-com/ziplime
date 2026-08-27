@@ -165,11 +165,31 @@ class PositionTracker:
 
         position.amount = total_shares
 
+    def get_position(self, asset: ExchangeAsset) -> Position | None:
+        """Return the open position in ``asset``, or ``None``.
+
+        ``positions`` is nested ``{exchange: {account: {asset: Position}}}``, so callers that hold
+        only an asset cannot index it directly.
+        """
+        for trading_accounts in self.positions.values():
+            for positions_by_asset in trading_accounts.values():
+                position = positions_by_asset.get(asset)
+                if position is not None:
+                    return position
+        return None
+
     def handle_commission(self, asset: ExchangeAsset, cost: float) -> None:
-        # Adjust the cost basis of the stock if we own it
-        if asset in self.positions:
+        """Fold a commission into the position's cost basis, if the position is open.
+
+        ``positions`` is nested by exchange and account, so the old membership test
+        (``asset in self.positions``) compared an asset against exchange-name keys and never
+        matched. Commission was charged to cash correctly but never reached a cost basis for any
+        asset class, equities included.
+        """
+        position = self.get_position(asset=asset)
+        if position is not None:
             self._dirty_stats = True
-            self.adjust_commission_cost_basis(position=self.positions[asset], cost=cost)
+            self.adjust_commission_cost_basis(position=position, cost=cost)
 
     def adjust_commission_cost_basis(self, position: Position, cost: float):
         """
@@ -391,27 +411,39 @@ class PositionTracker:
 
         return net_cash_payment
 
-    def maybe_create_close_position_transaction(self, asset: ExchangeAsset, dt: datetime.datetime):
-        if not self.positions.get(asset):
+    def maybe_create_close_position_transaction(self, asset: ExchangeAsset,
+                                                dt: datetime.datetime) -> Transaction | None:
+        """Build the trade that liquidates ``asset`` at its last mark, or ``None`` if not held.
+
+        Used when a listing reaches its auto-close date and the position has to leave the book.
+
+        Two bugs lived here. The position was looked up as ``self.positions.get(asset)``, but
+        ``positions`` is nested ``{exchange: {account: {asset: Position}}}``, so an asset key never
+        matched and this always returned ``None`` -- nothing was ever closed, and an expired
+        listing stayed on the books at a stale mark for the rest of the run. And the price came
+        from ``self.data_bundle``, which this object does not have, so the lookup would have raised
+        had it ever been reached.
+        """
+        position = self.get_position(asset=asset)
+        if position is None or position.amount == 0:
             return None
 
-        amount = self.positions.get(asset).amount
-        # TODO: check this
-        price = self.data_bundle.get_spot_value(assets=asset, field="price", dt=dt,
-                                                data_frequency=self._data_frequency)
-
-        # Get the last traded price if price is no longer available
-        if isnan(price):
-            price = self.positions.get(asset).last_sale_price
+        price = position.last_sale_price
+        if price is None or isnan(price):
+            self._logger.warning(
+                "Cannot close an expired position: it has never been marked",
+                symbol=asset.symbol, dt=str(dt))
+            return None
 
         return Transaction(
             id=uuid.uuid4().hex,
             asset=asset,
-            amount=-amount,
+            amount=-position.amount,
             dt=dt,
             price=price,
             order_id=None,
-            exchange_name=None
+            exchange_name=position.exchange_name,
+            trading_account_id=position.trading_account_id,
         )
 
     def get_positions(self):
