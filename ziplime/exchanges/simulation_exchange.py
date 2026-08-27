@@ -10,6 +10,7 @@ from aiocache import Cache
 from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.entities.asset import Asset
+from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
@@ -19,7 +20,10 @@ from ziplime.data.services.data_source import DataSource
 from ziplime.domain.position import Position
 from ziplime.domain.portfolio import Portfolio
 from ziplime.domain.account import Account
-from ziplime.finance.commission import EquityCommissionModel, FutureCommissionModel, CommissionModel
+from ziplime.finance.commission import (
+    BondCommissionModel, CommissionModel, EquityCommissionModel, FutureCommissionModel,
+)
+from ziplime.finance.commission.no_commission import NoCommission
 from ziplime.finance.domain.commission import Commission
 from ziplime.finance.domain.order import Order
 from ziplime.finance.slippage.slippage_model import SlippageModel
@@ -41,6 +45,8 @@ class SimulationExchange(Exchange):
                  future_commission: FutureCommissionModel,
                  account_id:str,
                  is_default: bool,
+                 bond_slippage: SlippageModel = None,
+                 bond_commission: BondCommissionModel = None,
                  data_source: DataSource = None,
                  price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
                  ):
@@ -53,10 +59,12 @@ class SimulationExchange(Exchange):
                          account_id=account_id, is_default=is_default)
         self.slippage_models = {
             Equity: equity_slippage,
+            Bond: bond_slippage if bond_slippage is not None else equity_slippage,
             FuturesContract: future_slippage,
         }
         self.commission_models = {
             Equity: equity_commission,
+            Bond: bond_commission if bond_commission is not None else NoCommission(),
             FuturesContract: future_commission,
         }
         self.cash_balance = cash_balance
@@ -69,10 +77,26 @@ class SimulationExchange(Exchange):
         return self.cash_balance
 
     def get_commission_model(self, asset: ExchangeAsset) -> CommissionModel:
-        return self.commission_models[type(asset.asset)]
+        return self._model_for(self.commission_models, asset, "commission")
 
     def get_slippage_model(self, asset: ExchangeAsset) -> SlippageModel:
-        return self.slippage_models[type(asset.asset)]
+        return self._model_for(self.slippage_models, asset, "slippage")
+
+    @staticmethod
+    def _model_for(models: dict, asset: ExchangeAsset, kind: str):
+        """Look up the model for an asset's instrument type, with a legible failure.
+
+        A bare ``KeyError`` on the type object told nobody which asset class was missing a model,
+        which is exactly the question being asked when a new one is added.
+        """
+        try:
+            return models[type(asset.asset)]
+        except KeyError:
+            raise KeyError(
+                f"No {kind} model configured for {type(asset.asset).__name__} "
+                f"({asset.symbol}@{asset.mic}). Configured: "
+                f"{', '.join(sorted(t.__name__ for t in models))}."
+            ) from None
 
     async def submit_order(self, order: Order):
         order.id = uuid.uuid4().hex

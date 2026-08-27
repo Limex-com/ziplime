@@ -184,8 +184,27 @@ class BarData:
 
         return pd.DataFrame(data=data)
 
-    def current_chain(self, continuous_future: ContinuousFuture):
-        return self.data_bundle.get_current_future_chain(
+    async def current_chain(self, continuous_future: ContinuousFuture,
+                            data_source: str | None = None):
+        """Return the active contracts of a chain, front contract first.
+
+        ``self.data_bundle`` never existed on this object; the bundle is reached through
+        ``data_sources``.
+        """
+        source = self.data_sources[data_source] if data_source else self.default_data_source
+        return await source.get_current_future_chain(
+            continuous_future=continuous_future,
+            dt=self.simulation_dt_func()
+        )
+
+    async def current_contract(self, continuous_future: ContinuousFuture,
+                               data_source: str | None = None):
+        """Return the contract a continuous future holds right now.
+
+        This is what you order: a continuous future itself is a data specifier, not tradeable.
+        """
+        source = self.data_sources[data_source] if data_source else self.default_data_source
+        return await source.current_contract(
             continuous_future=continuous_future,
             dt=self.simulation_dt_func()
         )

@@ -323,6 +323,21 @@ Symbol '{symbol}' was not found.
 """.strip()
 
 
+class AmbiguousSymbol(ZiplineError):
+    """Raised when a ticker resolves to more than one asset class and nothing says which is meant.
+
+    A ticker is only unique within an asset class. ``SiH5@RTSX`` is both a futures contract and --
+    because an equity vendor listed it that way -- an equity, and 168 such pairs exist in a
+    database carrying both. Picking one silently would tag a bundle's bars with another
+    instrument's sid, which surfaces much later as a strategy that mysteriously trades nothing.
+    """
+
+    msg = """
+Symbol '{symbol}' resolves to more than one asset class: {asset_types}.
+Pass a single asset_type to say which is meant, or resolve the listing yourself and pass it in.
+""".strip()
+
+
 class RootSymbolNotFound(ZiplineError):
     """Raised when a lookup_future_chain() call contains a non-existant symbol."""
 

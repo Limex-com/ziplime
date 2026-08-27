@@ -173,3 +173,48 @@ ROOT_SYMBOL_TO_ETA = {
     "YM": DEFAULT_ETA,  # Dow Jones e-mini
     "YS": DEFAULT_ETA,  # Silver e-mini
 }
+
+
+#: Exchange fee charged per contract on MOEX FORTS, in roubles. FORTS fees are a small flat
+#: per-contract charge that varies by instrument group; these are order-of-magnitude defaults for
+#: the liquid roots, meant to be overridden with your broker's published schedule.
+DEFAULT_MOEX_EXCHANGE_FEE = 1.0
+MOEX_FUTURE_EXCHANGE_FEES_BY_SYMBOL = {
+    "Si": 0.5,        # USD/RUB
+    "Eu": 0.5,        # EUR/RUB
+    "CR": 0.5,        # CNY/RUB
+    "RI": 2.0,        # RTS index
+    "MX": 2.0,        # MOEX index
+    "MM": 0.5,        # MOEX index mini
+    "BR": 1.0,        # Brent
+    "NG": 1.0,        # Natural gas
+    "GD": 1.0,        # Gold
+    "SV": 1.0,        # Silver
+    "GL": 1.0,        # Gold in roubles
+    "SR": 0.5,        # Sberbank
+    "GZ": 0.5,        # Gazprom
+    "LK": 0.5,        # Lukoil
+    "RN": 0.5,        # Rosneft
+    "VB": 0.5,        # VTB
+    "USDRUBF": 0.5,
+    "CNYRUBF": 0.5,
+    "EURRUBF": 0.5,
+    "GLDRUBF": 1.0,
+    "IMOEXF": 0.5,
+    "SBERF": 0.5,
+    "GAZPF": 0.5,
+}
+
+FUTURE_EXCHANGE_FEES_BY_SYMBOL = {
+    **FUTURE_EXCHANGE_FEES_BY_SYMBOL,
+    **MOEX_FUTURE_EXCHANGE_FEES_BY_SYMBOL,
+}
+ROOT_SYMBOL_TO_ETA = {
+    **ROOT_SYMBOL_TO_ETA,
+    **{root_symbol: DEFAULT_ETA for root_symbol in MOEX_FUTURE_EXCHANGE_FEES_BY_SYMBOL},
+}
+
+
+#: Default bond commission, as a fraction of the money transacted. Three basis points is a
+#: realistic retail rate on MOEX bonds; brokers bill bonds on turnover rather than per unit.
+DEFAULT_BOND_COMMISSION_RATE = 0.0003

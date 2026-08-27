@@ -8,6 +8,7 @@ import structlog
 from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.domain.continuous_future import ContinuousFuture
+from ziplime.assets.domain.roll_finder import ROLL_FINDERS, VolumeRollFinder
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
@@ -29,7 +30,9 @@ class DataBundle(DataSource):
                  data_type: DataType,
                  timestamp: datetime.datetime,
                  data: pl.DataFrame = None,
-                 sid_indexes: dict[int, tuple[int, int]] = None):
+                 sid_indexes: dict[int, tuple[int, int]] = None,
+                 asset_service=None,
+                 roll_finder_settings: dict[str, dict] | None = None):
         super().__init__(name=name,
                          start_date=start_date,
                          end_date=end_date,
@@ -46,7 +49,42 @@ class DataBundle(DataSource):
         self.timestamp = timestamp
         self.data = data
         self.sid_indexes = sid_indexes
+        self.asset_service = asset_service
+        # Both roll styles move a session before auto close by default, so the strategy closes the
+        # outgoing leg itself. Rolling exactly on auto close means the engine has already
+        # liquidated the position, and that liquidation pays neither commission nor slippage.
+        self._roll_finder_settings = {
+            "calendar": {"roll_offset_days": 1},
+            "volume": {"grace_period_days": 1},
+            **(roll_finder_settings or {}),
+        }
+        self._roll_finders = {}
         self._logger = structlog.get_logger(__name__)
+
+    def get_roll_finder(self, roll_style: str):
+        """Return (and memoise) the roll finder for ``roll_style``.
+
+        ``_roll_finders`` used to be read but never populated, which made every continuous-future
+        lookup fail with ``AttributeError``.
+        """
+        if self.asset_service is None:
+            raise ValueError(
+                "This data bundle was loaded without an asset service, so continuous futures "
+                "cannot be resolved to a contract. Pass asset_service when loading the bundle."
+            )
+        if roll_style not in self._roll_finders:
+            finder_class = ROLL_FINDERS.get(roll_style)
+            if finder_class is None:
+                raise ValueError(f"Unknown roll style {roll_style!r}. "
+                                 f"Allowed roll styles are {sorted(ROLL_FINDERS)}.")
+            settings = self._roll_finder_settings.get(roll_style, {})
+            if finder_class is VolumeRollFinder:
+                self._roll_finders[roll_style] = finder_class(asset_service=self.asset_service,
+                                                              data_source=self, **settings)
+            else:
+                self._roll_finders[roll_style] = finder_class(asset_service=self.asset_service,
+                                                              **settings)
+        return self._roll_finders[roll_style]
 
     def get_dataframe(self) -> pl.DataFrame:
         return self.data
@@ -177,9 +215,46 @@ class DataBundle(DataSource):
                                 limit: int,
                                 end_date: datetime.datetime,
                                 frequency: datetime.timedelta | Period,
-                                assets: frozenset[ExchangeAsset],
+                                assets: frozenset[ExchangeAsset | ContinuousFuture],
                                 include_end_date: bool,
                                 ) -> pl.DataFrame:
+        """Return up to ``limit`` bars per asset ending at ``end_date``.
+
+        Any :class:`ContinuousFuture` in ``assets`` is resolved to the contracts it held over the
+        window and returned as one spliced, back-adjusted series carried under the continuous
+        future's own sid.
+        """
+        continuous_futures = [a for a in assets if isinstance(a, ContinuousFuture)]
+        concrete = frozenset(a for a in assets if not isinstance(a, ContinuousFuture))
+
+        if not continuous_futures:
+            return await self._get_data_by_limit_for_assets(
+                fields=fields, limit=limit, end_date=end_date, frequency=frequency,
+                assets=concrete, include_end_date=include_end_date)
+
+        frames = []
+        if concrete:
+            frames.append(await self._get_data_by_limit_for_assets(
+                fields=fields, limit=limit, end_date=end_date, frequency=frequency,
+                assets=concrete, include_end_date=include_end_date))
+        for continuous_future in continuous_futures:
+            frame = await self._get_continuous_future_data(
+                continuous_future=continuous_future, fields=fields, limit=limit,
+                end_date=end_date, frequency=frequency, include_end_date=include_end_date)
+            if not frame.is_empty():
+                frames.append(frame)
+        frames = [frame for frame in frames if not frame.is_empty()]
+        if not frames:
+            return pl.DataFrame()
+        return pl.concat(frames, how="diagonal").sort(by="date")
+
+    async def _get_data_by_limit_for_assets(self, fields: frozenset[str] | None,
+                                            limit: int,
+                                            end_date: datetime.datetime,
+                                            frequency: datetime.timedelta | Period,
+                                            assets: frozenset[ExchangeAsset],
+                                            include_end_date: bool,
+                                            ) -> pl.DataFrame:
         frequency_td = period_to_timedelta(frequency)
         assets_list = [asset for asset in assets]
         asset_sid = assets_list[0].sid
@@ -238,6 +313,163 @@ class DataBundle(DataSource):
                 limit)
             return df
         return df_raw
+
+    #: Price columns spliced across a roll. ``volume`` is left untouched -- adjusting it would
+    #: misreport how much actually traded in the contract that was held.
+    PRICE_FIELDS = ("open", "high", "low", "close", "price")
+
+    #: Minimum window to look back over when working out which contracts a continuous future held.
+    MIN_ROLL_LOOKBACK = datetime.timedelta(days=400)
+
+    async def current_contract(self, continuous_future: ContinuousFuture,
+                               dt: datetime.datetime) -> ExchangeAsset | None:
+        """Return the contract ``continuous_future`` holds at ``dt``."""
+        roll_finder = self.get_roll_finder(continuous_future.roll_style)
+        return await roll_finder.get_contract_center(
+            root_symbol=continuous_future.root_symbol, dt=dt, offset=continuous_future.offset)
+
+    async def _get_continuous_future_data(self, continuous_future: ContinuousFuture,
+                                          fields: frozenset[str] | None,
+                                          limit: int,
+                                          end_date: datetime.datetime,
+                                          frequency: datetime.timedelta | Period,
+                                          include_end_date: bool) -> pl.DataFrame:
+        """Splice the contracts a continuous future held into one adjusted series.
+
+        Each roll segment is read from the contract that was actually held, then the older segments
+        are shifted onto the newest one's price level so that returns across a roll reflect the
+        position rather than the gap between two contracts.
+        """
+        lookback = max(period_to_timedelta(frequency) * limit * 3, self.MIN_ROLL_LOOKBACK)
+        window_start = max(end_date - lookback, self._as_datetime(self.start_date))
+
+        roll_finder = self.get_roll_finder(continuous_future.roll_style)
+        rolls = await roll_finder.get_rolls(root_symbol=continuous_future.root_symbol,
+                                            start=window_start, end=end_date,
+                                            offset=continuous_future.offset)
+        if not rolls:
+            self._logger.warning("No contracts found for continuous future",
+                                 continuous_future=str(continuous_future),
+                                 start=window_start, end=end_date)
+            return pl.DataFrame()
+
+        segments = []
+        segment_start = window_start
+        for contract, roll_date in rolls:
+            # A segment runs from the previous roll up to (but not including) its own roll date;
+            # bounding both ends matters, because a contract has bars well outside the window it
+            # is actually held for and they would otherwise be spliced in twice.
+            segment_end = self._as_datetime(roll_date) if roll_date is not None else None
+            fetch_end = min(segment_end, end_date) if segment_end is not None else end_date
+
+            if contract.sid not in (self.sid_indexes or {}) and not self._has_sid(contract.sid):
+                self._logger.warning("Contract missing from bundle, skipping roll segment",
+                                     symbol=contract.symbol, sid=contract.sid,
+                                     continuous_future=str(continuous_future))
+                segment_start = segment_end or segment_start
+                continue
+
+            frame = await self._get_data_by_limit_for_assets(
+                fields=fields, limit=limit, end_date=fetch_end,
+                frequency=frequency, assets=frozenset({contract}),
+                include_end_date=include_end_date or segment_end is not None)
+            if not frame.is_empty():
+                frame = frame.filter(pl.col("date") >= segment_start)
+                if segment_end is not None:
+                    frame = frame.filter(pl.col("date") < segment_end)
+                if not frame.is_empty():
+                    segments.append((contract, frame))
+            segment_start = segment_end or segment_start
+
+        if not segments:
+            return pl.DataFrame()
+
+        segments = self._adjust_roll_segments(segments, adjustment=continuous_future.adjustment,
+                                              continuous_future=continuous_future)
+        combined = pl.concat([frame for _, frame in segments], how="diagonal").sort(by="date")
+        combined = combined.with_columns(pl.lit(continuous_future.sid).cast(pl.Int64).alias("sid"))
+        return combined.tail(limit)
+
+    def _adjust_roll_segments(self, segments: list[tuple[ExchangeAsset, pl.DataFrame]],
+                              adjustment: str | None,
+                              continuous_future: ContinuousFuture,
+                              ) -> list[tuple[ExchangeAsset, pl.DataFrame]]:
+        """Shift each segment onto the price level of the newest one.
+
+        Walking backwards from the most recent segment, the ratio (``mul``) or difference (``add``)
+        between the incoming and outgoing contract on the last shared session is accumulated and
+        applied to everything older.
+        """
+        if adjustment is None or len(segments) < 2:
+            return segments
+
+        price_columns = [c for c in self.PRICE_FIELDS if c in segments[0][1].columns]
+        if not price_columns:
+            return segments
+
+        adjusted = [segments[-1]]
+        factor = 1.0 if adjustment == "mul" else 0.0
+        for index in range(len(segments) - 2, -1, -1):
+            older_contract, older_frame = segments[index]
+            newer_contract, _ = segments[index + 1]
+            roll_dt = older_frame["date"][-1]
+
+            older_price = self._price_at(older_contract.sid, roll_dt)
+            newer_price = self._price_at(newer_contract.sid, roll_dt)
+            if older_price is None or newer_price is None:
+                self._logger.warning(
+                    "No overlapping price at roll; leaving segment unadjusted",
+                    continuous_future=str(continuous_future), roll_date=roll_dt,
+                    outgoing=older_contract.symbol, incoming=newer_contract.symbol)
+            elif adjustment == "mul" and older_price == 0:
+                # A futures price can legitimately be zero or negative (CL, April 2020). A ratio
+                # through zero is undefined, so the ratio method declines rather than emitting
+                # inf; use adjustment="add", which stays well defined.
+                self._logger.warning(
+                    "Multiplicative adjustment is undefined across a zero price; leaving segment "
+                    "unadjusted. Use adjustment='add' for a series that crosses zero.",
+                    continuous_future=str(continuous_future), roll_date=roll_dt,
+                    outgoing=older_contract.symbol, incoming=newer_contract.symbol)
+            elif adjustment == "mul":
+                factor *= newer_price / older_price
+            else:
+                factor += newer_price - older_price
+
+            if adjustment == "mul":
+                older_frame = older_frame.with_columns(
+                    [(pl.col(c) * factor).alias(c) for c in price_columns])
+            else:
+                older_frame = older_frame.with_columns(
+                    [(pl.col(c) + factor).alias(c) for c in price_columns])
+            adjusted.insert(0, (older_contract, older_frame))
+        return adjusted
+
+    def _price_at(self, sid: int, dt: datetime.datetime) -> float | None:
+        """Return the close of ``sid`` at ``dt``, or ``None`` if it did not trade then."""
+        df = self.get_dataframe()
+        if df is None or df.is_empty():
+            return None
+        column = "close" if "close" in df.columns else "price"
+        if column not in df.columns:
+            return None
+        match = df.filter(pl.col("sid") == sid, pl.col("date") == dt).select(column)
+        if match.is_empty():
+            return None
+        value = match[column][0]
+        return float(value) if value is not None else None
+
+    def _has_sid(self, sid: int) -> bool:
+        df = self.get_dataframe()
+        if df is None or df.is_empty():
+            return False
+        return not df.filter(pl.col("sid") == sid).limit(1).is_empty()
+
+    def _as_datetime(self, value) -> datetime.datetime:
+        """Normalise a date or datetime to a tz-aware datetime in the calendar's timezone."""
+        if isinstance(value, datetime.datetime):
+            return value if value.tzinfo else value.replace(tzinfo=self.trading_calendar.tz)
+        return datetime.datetime.combine(value, datetime.time.min,
+                                         tzinfo=self.trading_calendar.tz)
 
     def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str], dt: datetime.datetime,
                        frequency: datetime.timedelta):
@@ -355,35 +587,25 @@ class DataBundle(DataSource):
 
         return adjustments
 
-    async def get_current_future_chain(self, continuous_future: ContinuousFuture, dt: datetime.datetime):
-        """Retrieves the future chain for the contract at the given `dt` according
-        the `continuous_future` specification.
+    async def get_current_future_chain(self, continuous_future: ContinuousFuture,
+                                       dt: datetime.datetime) -> list[ExchangeAsset]:
+        """Return the active contracts of the chain at ``dt``, front contract first.
 
-        Returns
-        -------
-
-        future_chain : list[Future]
-            A list of active futures, where the first index is the current
-            contract specified by the continuous future definition, the second
-            is the next upcoming contract and so on.
+        Previously this read ``self._roll_finders`` and ``self.asset_repository``, neither of which
+        was ever assigned.
         """
-        rf = self._roll_finders[continuous_future.roll_style]
-        session = self.trading_calendar.minute_to_session(dt)
-        contract_center = rf.get_contract_center(
-            continuous_future.root_symbol, session, continuous_future.offset
-        )
-        oc = self.asset_repository.get_ordered_contracts(continuous_future.root_symbol)
-        chain = oc.active_chain(contract_center, session.value)
-        return self.asset_repository.retrieve_all(sids=chain)
+        roll_finder = self.get_roll_finder(continuous_future.roll_style)
+        contract = await roll_finder.get_contract_center(
+            root_symbol=continuous_future.root_symbol, dt=dt, offset=continuous_future.offset)
+        if contract is None:
+            return []
+        ordered_contracts = await roll_finder.get_ordered_contracts(continuous_future.root_symbol)
+        session = dt.date() if isinstance(dt, datetime.datetime) else dt
+        return ordered_contracts.active_chain(starting_sid=contract.sid, dt=session)
 
-    async def _get_current_contract(self, continuous_future: ContinuousFuture, dt: datetime.datetime):
-        rf = self._roll_finders[continuous_future.roll_style]
-        contract_sid = rf.get_contract_center(
-            continuous_future.root_symbol, dt, continuous_future.offset
-        )
-        if contract_sid is None:
-            return None
-        return self.asset_repository.retrieve_asset(sid=contract_sid)
+    async def _get_current_contract(self, continuous_future: ContinuousFuture,
+                                    dt: datetime.datetime) -> ExchangeAsset | None:
+        return await self.current_contract(continuous_future=continuous_future, dt=dt)
 
     async def get_adjustments(self, assets: frozenset[Asset], field: str, dt: datetime.datetime,
                               perspective_dt: datetime.datetime):

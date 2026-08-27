@@ -73,6 +73,9 @@ from ziplime.finance.cancel_policy import CancelPolicy
 from ziplime.finance.asset_restrictions import (
     NoRestrictions,
 )
+from ziplime.assets.domain.continuous_future import ContinuousFuture
+from ziplime.finance.margin import FuturesMarginModel
+from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.equity import Equity
 from ziplime.finance.domain.simulation_paremeters import SimulationParameters
@@ -200,6 +203,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             create_event_context=None,
             stop_on_error: bool = False,
             same_bar_execution: bool = True,
+            futures_margin_model: FuturesMarginModel | None = None,
 
     ):
         self.algorithm = algorithm
@@ -259,7 +263,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
         self._handle_data = None
 
-        self._ledger = Ledger(trading_sessions=clock.sessions,
+        self._ledger = Ledger(futures_margin_model=futures_margin_model,
+                              trading_sessions=clock.sessions,
                               data_frequency=clock.emission_rate)
 
         self._initialize = algorithm.initialize
@@ -311,7 +316,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self._session_count = 0
         if self.same_bar_execution:
             self._logger.warning(
-                "You are running same day execution. Submitted orders in handle_data will be executed in the SAME bar where handle_data is running.")
+                "LOOK-AHEAD: same-bar execution is on. Orders submitted from handle_data fill in "
+                "the SAME bar, so a decision taken on that bar's close is filled at that same "
+                "close -- a price the market had not printed when the decision was made. Results "
+                "are optimistic by roughly one bar of edge. Pass same_bar_execution=False to fill "
+                "on the next bar instead.")
         else:
             self._logger.warning(
                 "You are NOT running same day execution. Submitted orders in handle_data will be executed in the NEXT bar after handle_data is finished.")
@@ -576,7 +585,68 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             self._recorded_vars[name] = value
 
     @api_method
-    def continuous_future(
+    def futures_margin_requirement(self, maintenance: bool = False,
+                                   currency: str | None = None) -> float:
+        """Margin the open futures positions tie up, in one currency.
+
+        Pass ``currency`` when the book spans venues that collect different ones -- MOEX collects
+        roubles even for its dollar-quoted contracts, CME collects dollars. Returns 0.0 when
+        margin is not being modelled; check :meth:`models_futures_margin` to tell that apart from
+        a book that genuinely needs no margin.
+        """
+        return self._ledger.futures_margin_requirement(maintenance=maintenance, currency=currency)
+
+    @api_method
+    def futures_margin_by_currency(self, maintenance: bool = False) -> dict:
+        """Margin posted per currency, e.g. ``{"RUB": 41_000.0, "USD": 10_500.0}``."""
+        return self._ledger.futures_margin_by_currency(maintenance=maintenance)
+
+    @api_method
+    def models_futures_margin(self) -> bool:
+        """Whether this simulation models futures margin at all."""
+        return self._ledger.futures_margin_model.models_margin
+
+    @api_method
+    def realism_warnings(self) -> list:
+        """Effects this simulation does not reproduce, given how it was configured.
+
+        See :mod:`ziplime.finance.realism`.
+        """
+        from ziplime.finance.realism import realism_warnings
+        return realism_warnings(
+            futures_margin_model=self._ledger.futures_margin_model,
+            same_bar_execution=self.same_bar_execution,
+            trades_futures=any(
+                isinstance(position.asset.asset, FuturesContract)
+                for position in self._ledger.position_tracker.get_position_list()
+            ) or True,
+            trades_bonds=any(
+                isinstance(position.asset.asset, Bond)
+                for position in self._ledger.position_tracker.get_position_list()
+            ),
+        )
+
+    @api_method
+    def notional_exposure(self, asset: ExchangeAsset, amount: float, price: float) -> float:
+        """Notional of ``amount`` contracts at ``price``: ``amount * price * multiplier``.
+
+        Futures sizing is a notional calculation, so this is the number to size against rather
+        than ``amount * price``.
+        """
+        multiplier = getattr(asset.asset, "multiplier", 1.0)
+        return amount * price * multiplier
+
+    @api_method
+    def contracts_for_notional(self, asset: ExchangeAsset, notional: float,
+                               price: float) -> int:
+        """Whole contracts closest to ``notional`` of exposure, rounded toward zero."""
+        multiplier = getattr(asset.asset, "multiplier", 1.0)
+        if price == 0 or multiplier == 0:
+            return 0
+        return int(notional / (price * multiplier))
+
+    @api_method
+    async def continuous_future(
             self, root_symbol_str: str, offset: int = 0, roll: str = "volume", adjustment: str = "mul"
     ):
         """Create a specifier for a continuous contract.
@@ -601,11 +671,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         continuous_future : ziplime.assets.ContinuousFuture
             The continuous future specifier.
         """
-        return self.data_portal._data_bundle.asset_repository.create_continuous_future(
-            root_symbol_str,
-            offset,
-            roll,
-            adjustment,
+        return await self.asset_service.create_continuous_future(
+            root_symbol=root_symbol_str,
+            offset=offset,
+            roll_style=roll,
+            adjustment=adjustment,
         )
 
     @api_method
@@ -745,7 +815,77 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return await self.asset_service.get_asset_by_sid(sid=sid)
 
     @api_method
-    async def future_symbol(self, symbol: str, exchange_name: str = None) -> FuturesContract | None:
+    async def bond_symbol(self, symbol: str, mic: str = None) -> ExchangeAsset | None:
+        """Look up a bond listing by ticker, in ``TICKER`` or ``TICKER@MIC`` form.
+
+        A shorthand for ``symbol(..., asset_type=AssetType.BOND)``. Worth having its own name:
+        the same ticker can be an equity on one venue and a bond on another, and asking for the
+        wrong type is the kind of mistake that shows up as a strange price rather than an error.
+        """
+        return await self.symbol(symbol=symbol, mic=mic, asset_type=AssetType.BOND)
+
+    @api_method
+    async def bond_schedule(self, asset: ExchangeAsset) -> list:
+        """Every stored coupon, amortization, maturity and offer event of ``asset``, by date."""
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return self._ledger.bond_book.events(bond)
+
+    @api_method
+    async def accrued_interest(self, asset: ExchangeAsset, dt: datetime.date = None) -> float:
+        """Coupon accrued on one bond (НКД) -- what a buyer owes the seller on top of the quote."""
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return self._ledger.bond_book.accrued_interest(bond, dt or self.simulation_dt)
+
+    @api_method
+    async def bond_face_value(self, asset: ExchangeAsset, dt: datetime.date = None) -> float:
+        """Principal outstanding on one bond, after every amortization instalment paid so far."""
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return self._ledger.bond_book.face_value(bond, dt or self.simulation_dt)
+
+    @api_method
+    async def bond_dirty_price(self, asset: ExchangeAsset, quoted_price: float,
+                               dt: datetime.date = None) -> float:
+        """Money one bond changes hands for at ``quoted_price``: clean value plus accrued interest."""
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return self._ledger.bond_book.dirty_value(bond, quoted_price, dt or self.simulation_dt)
+
+    @api_method
+    async def bond_current_yield(self, asset: ExchangeAsset, quoted_price: float,
+                                 dt: datetime.date = None) -> float:
+        """Annual coupon income as a fraction of what the bond costs to buy today."""
+        from ziplime.finance.bonds import current_yield
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return current_yield(bond, self._ledger.bond_book, quoted_price,
+                             dt or self.simulation_dt)
+
+    @api_method
+    async def bond_yield_to_maturity(self, asset: ExchangeAsset, quoted_price: float,
+                                     dt: datetime.date = None) -> float:
+        """Simple (non-compounded) annualised return of holding to maturity from ``quoted_price``."""
+        from ziplime.finance.bonds import simple_yield_to_maturity
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return simple_yield_to_maturity(bond, self._ledger.bond_book, quoted_price,
+                                        dt or self.simulation_dt)
+
+    @staticmethod
+    def _require_bond(asset: ExchangeAsset) -> Bond:
+        """Unwrap the bond behind a listing, with a message that names what was passed instead."""
+        instrument = getattr(asset, "asset", asset)
+        if not isinstance(instrument, Bond):
+            raise TypeError(
+                f"Expected a bond listing, got {type(instrument).__name__}. Look the instrument "
+                f"up with `await context.bond_symbol(...)`."
+            )
+        return instrument
+
+    @api_method
+    async def future_symbol(self, symbol: str, mic: str = None) -> FuturesContract | None:
         """Lookup a futures contract with a given symbol.
 
         Parameters
@@ -763,10 +903,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         SymbolNotFound
             Raised when no contract named 'symbol' is found.
         """
-        return await self.asset_service.get_futures_contract_by_symbol(
-            symbol=symbol,
-            exchange_name=exchange_name or (await self.exchange_repository.get_default_exchange()).name
-        )
+        return await self.asset_service.get_futures_contract_by_symbol(symbol=symbol, mic=mic)
 
     async def _calculate_order_value_amount(self, asset: ExchangeAsset, value: float, exchange: Exchange):
         """Calculates how many shares/contracts to order based on the type of
@@ -807,7 +944,16 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             # Don't place any order
             return 0
         if type(asset.asset) is FuturesContract:
-            return value / (last_price * asset.multiplier)
+            return value / (last_price * asset.asset.multiplier)
+        elif type(asset.asset) is Bond:
+            # A bond quote is a percentage of face value, and the buyer also pays accrued
+            # interest, so the money one bond costs is neither of those numbers on its own.
+            await self._ledger.bond_book.load(self.asset_service, [asset.asset])
+            per_bond = self._ledger.bond_price_in_money(asset=asset, quoted_price=last_price,
+                                                        dt=self.simulation_dt)
+            if per_bond == 0:
+                return 0
+            return value / per_bond
         else:
             return value / last_price
 
@@ -903,8 +1049,18 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         :func:`ziplime.api.order_value`
         :func:`ziplime.api.order_percent`
         """
+        if isinstance(asset, ContinuousFuture):
+            raise ValueError(
+                f"Cannot place an order for {asset}: a continuous future is a data specifier, "
+                f"not a tradeable contract. Order the contract it currently resolves to, which "
+                f"`await data.current_contract(continuous_future)` returns."
+            )
         if not self._can_order_asset(asset=asset):
             return None
+        if isinstance(asset.asset, Bond):
+            # The ledger settles the fill synchronously and needs the coupon schedule to price it
+            # dirty, so it is fetched here, while we are still on an async path.
+            await self._ledger.bond_book.load(self.asset_service, [asset.asset])
         # TODO: implement dynamic risk control
 
         self.validate_order_params(asset=asset, amount=amount)
@@ -1158,7 +1314,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         # return dt
 
     @api_method
-    def set_slippage(self, us_equities=None, us_futures=None):
+    def set_slippage(self, us_equities=None, us_futures=None, bonds=None):
         """Set the slippage models for the simulation.
 
         Parameters
@@ -1198,8 +1354,17 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                 )
             self.blotter.slippage_models[FuturesContract] = us_futures
 
+        if bonds is not None:
+            if Bond not in bonds.allowed_asset_types:
+                raise IncompatibleSlippageModel(
+                    asset_type="bonds",
+                    given_model=bonds,
+                    supported_asset_types=bonds.allowed_asset_types,
+                )
+            self.blotter.slippage_models[Bond] = bonds
+
     @api_method
-    def set_commission(self, us_equities=None, us_futures=None):
+    def set_commission(self, us_equities=None, us_futures=None, bonds=None):
         """Sets the commission models for the simulation.
 
         Parameters
@@ -1240,6 +1405,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     supported_asset_types=us_futures.allowed_asset_types,
                 )
             self.blotter.commission_models[FuturesContract] = us_futures
+
+        if bonds is not None:
+            if Bond not in bonds.allowed_asset_types:
+                raise IncompatibleCommissionModel(
+                    asset_type="bonds",
+                    given_model=bonds,
+                    supported_asset_types=bonds.allowed_asset_types,
+                )
+            self.blotter.commission_models[Bond] = bonds
 
     @api_method
     def set_cancel_policy(self, cancel_policy):
@@ -2148,6 +2322,16 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         # this is None when running with a dataframe source
         await self._ledger.process_dividends(
             next_session=midnight_dt,
+            asset_service=self.asset_service,
+        )
+        # Coupons and amortization instalments first, then redemption: the final coupon of a bond
+        # maturing today is earned while the position still exists.
+        await self._ledger.process_bond_events(
+            next_session=midnight_dt,
+            asset_service=self.asset_service,
+        )
+        await self._ledger.redeem_matured_bonds(
+            session=midnight_dt,
             asset_service=self.asset_service,
         )
         # self._sync_last_sale_prices(dt=datetime.datetime.combine(midnight_dt, datetime.time())) # my

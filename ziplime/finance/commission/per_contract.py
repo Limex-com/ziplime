@@ -1,9 +1,9 @@
 from collections import defaultdict
 
-from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.finance.commission import DEFAULT_PER_CONTRACT_COST, calculate_per_unit_commission
 from ziplime.finance.commission.future_commission_model import FutureCommissionModel
-from ziplime.finance.constants import FUTURE_EXCHANGE_FEES_BY_SYMBOL
+from ziplime.finance.constants import FUTURE_EXCHANGE_FEES_BY_SYMBOL, DEFAULT_MOEX_EXCHANGE_FEE
 from ziplime.utils.dummy import DummyMapping
 from toolz import merge
 
@@ -56,9 +56,11 @@ class PerContract(FutureCommissionModel):
             # Exchange fee is a dictionary. If the user's dictionary does not
             # provide an exchange fee for a certain contract, fall back on the
             # pre-defined exchange fees per root symbol.
-            self._exchange_fee = merge(
-                FUTURE_EXCHANGE_FEES_BY_SYMBOL,
-                exchange_fee,
+            # defaultdict, not a plain merge: the pre-defined tables cover CME and MOEX roots, and
+            # a root missing from both used to raise KeyError in the middle of a simulation.
+            self._exchange_fee = defaultdict(
+                lambda: DEFAULT_MOEX_EXCHANGE_FEE,
+                merge(FUTURE_EXCHANGE_FEES_BY_SYMBOL, exchange_fee),
             )
 
         self.min_trade_cost = min_trade_cost or 0
@@ -87,7 +89,7 @@ class PerContract(FutureCommissionModel):
         )
 
     def calculate(self, order, transaction):
-        root_symbol = order.asset.root_symbol
+        root_symbol = order.asset.asset.root_symbol
         cost_per_contract = self._cost_per_contract[root_symbol]
         exchange_fee = self._exchange_fee[root_symbol]
 
@@ -98,8 +100,8 @@ class PerContract(FutureCommissionModel):
             initial_commission=exchange_fee,
             min_trade_cost=self.min_trade_cost,
         )
-    def calculate_for_asset(self, asset: FuturesContract, quantity: int, transaction_amount: float) -> float:
-        root_symbol = asset.root_symbol
+    def calculate_for_asset(self, asset: ExchangeAsset, quantity: int, transaction_amount: float) -> float:
+        root_symbol = asset.asset.root_symbol
         cost_per_contract = self._cost_per_contract[root_symbol]
         exchange_fee = self._exchange_fee[root_symbol]
 

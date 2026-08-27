@@ -8,8 +8,13 @@ import pandas as pd
 import structlog
 
 from ziplime.assets.entities.asset import Asset
+from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.finance.bonds import BondBook
+from ziplime.finance.margin import (
+    FuturesMarginModel, NoFuturesMarginModel, margin_currency_of,
+)
 from ziplime.domain.account import Account
 from ziplime.domain.portfolio import Portfolio
 from ziplime.exchanges.exchange import Exchange
@@ -49,6 +54,8 @@ class Ledger:
 
     def __init__(self, trading_sessions: pd.DatetimeIndex,
                  data_frequency: datetime.timedelta,
+                 futures_margin_model: FuturesMarginModel | None = None,
+                 bond_book: BondBook | None = None,
                  ):
         if len(trading_sessions):
             start = trading_sessions[0]
@@ -111,7 +118,12 @@ class Ledger:
         self._account_overrides = {}
         self._data_frequency = data_frequency
 
-        self.position_tracker = PositionTracker(data_frequency=data_frequency)
+        # Coupon and amortization schedules, shared with the position tracker so that a
+        # transaction, a mark and a coupon all read the same face value.
+        self.bond_book = bond_book if bond_book is not None else BondBook()
+
+        self.position_tracker = PositionTracker(data_frequency=data_frequency,
+                                                bond_book=self.bond_book)
 
         self._processed_transactions = {}
 
@@ -127,6 +139,16 @@ class Ledger:
         self._payout_last_sale_prices = {}
 
         self._buy_lots_by_asset: dict[Asset, deque[Lot]] = {}
+
+        #: Bonds already redeemed, so a matured position is never repaid twice.
+        self._redeemed_bonds: set[int] = set()
+
+        #: Last session bond events were processed for; the schedule is read for the interval
+        #: since it, so a record date on a non-trading day is not skipped over.
+        self._last_bond_event_session: datetime.date | None = None
+
+        # Always present, so "margin is not modelled" is a stated choice rather than an omission.
+        self.futures_margin_model = futures_margin_model or NoFuturesMarginModel()
 
     @property
     def todays_returns(self) -> float:
@@ -199,19 +221,22 @@ class Ledger:
             The transaction to execute.
         """
         asset = transaction.asset
-        if isinstance(asset, FuturesContract):
+        # `asset` is the exchange listing; the instrument itself hangs off `.asset`.
+        if isinstance(asset.asset, FuturesContract):
+            if not self.futures_margin_model.models_margin:
+                self.futures_margin_model.warn_once()
             try:
                 old_price = self._payout_last_sale_prices[asset]
             except KeyError:
                 self._payout_last_sale_prices[asset] = transaction.price
             else:
-                position = self.position_tracker.positions[asset]
-                amount = position.amount
+                position = self.position_tracker.get_position(asset=asset)
+                amount = position.amount if position is not None else 0
                 price = transaction.price
 
                 self._cash_flow(
                     self._calculate_payout(
-                        asset.price_multiplier,
+                        asset.asset.multiplier,
                         amount,
                         old_price,
                         price,
@@ -222,6 +247,13 @@ class Ledger:
                     del self._payout_last_sale_prices[asset]
                 else:
                     self._payout_last_sale_prices[asset] = price
+        elif isinstance(asset.asset, Bond):
+            # A bond settles at its dirty price: the quote is a percentage of face value, and the
+            # buyer additionally hands the seller the coupon accrued since the last payment. Both
+            # corrections are needed -- the first is a factor of ten on a 1000 nominal, the second
+            # averages half a coupon on every round trip.
+            self._cash_flow(-(self.bond_price_in_money(asset=asset, quoted_price=transaction.price,
+                                                       dt=transaction.dt) * transaction.amount))
         else:
             self._cash_flow(-(transaction.price * transaction.amount))
         # print("LEVERAGE: BEFORE EXCEUTION", self.account.leverage, self.account.net_leverage)
@@ -328,12 +360,119 @@ class Ledger:
         # print(f"Commission 3 for {asset.asset_name} is {cost}", tr.account.leverage, tr.account.net_leverage)
 
     def close_position(self, asset: ExchangeAsset, dt: datetime.datetime):
+        """Force-close a position whose contract has reached its auto close date.
+
+        For a physically delivered contract this is the step that keeps the backtest honest: the
+        position is being closed precisely so that it does not become a delivery obligation, and
+        that is worth saying rather than letting it look like ordinary housekeeping.
+        """
+        instrument = getattr(asset, "asset", None)
+        if getattr(instrument, "is_deliverable", False):
+            self.logger.warning(
+                "Closing a deliverable futures position to avoid delivery",
+                symbol=asset.symbol, notice_date=str(getattr(instrument, "notice_date", None)),
+                expiration_date=str(getattr(instrument, "expiration_date", None)), dt=str(dt))
         txn = self.position_tracker.maybe_create_close_position_transaction(
             asset=asset,
             dt=dt,
         )
         if txn is not None:
             self.process_transaction(transaction=txn)
+
+    def bond_price_in_money(self, asset: ExchangeAsset, quoted_price: float, dt) -> float:
+        """What one bond of ``asset`` changes hands for at ``quoted_price``: clean value plus НКД."""
+        return self.bond_book.dirty_value(asset.asset, quoted_price, dt)
+
+    def held_bonds(self) -> list[Bond]:
+        """Every distinct bond currently held, across exchanges and accounts."""
+        seen: dict[int, Bond] = {}
+        for position in self.position_tracker.get_position_list():
+            instrument = position.asset.asset
+            if isinstance(instrument, Bond):
+                seen.setdefault(instrument.id, instrument)
+        return list(seen.values())
+
+    async def process_bond_events(self, next_session, asset_service) -> None:
+        """Earn and pay the bond schedule for ``next_session``.
+
+        Mirrors :meth:`process_dividends`: a payment is *earned* when its record date arrives --
+        fixing the entitlement against the position held that day -- and *paid* on the payment
+        date. A coupon is therefore not lost by selling in between, which is what a record date
+        means, and a short position is charged for one.
+
+        Amortization instalments ride the same path: they are a payment per bond like a coupon,
+        and the face value they leave behind comes from the stored schedule, so the quote of an
+        amortizing issue is read against the right nominal from the next session on.
+        """
+        session_date = (next_session.date() if isinstance(next_session, datetime.datetime)
+                        else next_session)
+        # Everything since the previous session, so a record date that fell on a weekend or an
+        # exchange holiday is still picked up on the next session the simulation runs.
+        previous = self._last_bond_event_session
+        if previous is None or previous >= session_date:
+            previous = session_date - datetime.timedelta(days=1)
+        self._last_bond_event_session = session_date
+
+        held = self.held_bonds()
+        if held:
+            await self.bond_book.load(asset_service, held)
+            earned = [event for bond in held
+                      for event in self.bond_book.payments_entitled_between(
+                          bond, after=previous, through=session_date)]
+            if earned:
+                self.position_tracker.earn_bond_payments(earned)
+
+        payment = self.position_tracker.pay_bond_payments(session_date)
+        if payment != 0:
+            self._cash_flow(payment)
+
+    async def redeem_matured_bonds(self, session, asset_service=None) -> None:
+        """Repay the principal of every bond position that has reached maturity.
+
+        Redemption is booked as a closing trade at par rather than left to the auto-close path,
+        which would liquidate the position at whatever the last bar happened to print. A matured
+        bond does not trade -- the issuer repays the outstanding face value -- and a backtest that
+        marks it at a stale quote reports a loss or gain that never happened.
+        """
+        session_date = session.date() if isinstance(session, datetime.datetime) else session
+        positions = [position for position in self.position_tracker.get_position_list()
+                     if isinstance(position.asset.asset, Bond)]
+        if not positions:
+            return
+        if asset_service is not None:
+            await self.bond_book.load(asset_service,
+                                      [position.asset.asset for position in positions])
+
+        for position in positions:
+            bond = position.asset.asset
+            if bond.maturity_date is None or bond.maturity_date > session_date:
+                continue
+            if position.amount == 0 or bond.id in self._redeemed_bonds:
+                continue
+            # The principal outstanding on the maturity date itself: every amortization instalment
+            # already paid has reduced it.
+            face = self.bond_book.face_value(bond, bond.maturity_date)
+            # Redemption is par *against what is left*, so the quote is measured against the same
+            # outstanding nominal the settlement will convert it back with. Quoting it against the
+            # nominal at issue would apply the amortization twice and repay a fraction of a
+            # fraction.
+            quoted = bond.price_quotation.quoted_price(face, face)
+            self._redeemed_bonds.add(bond.id)
+            self.logger.info("Redeeming a matured bond at par", symbol=position.asset.symbol,
+                             maturity_date=str(bond.maturity_date), face_value=face,
+                             amount=position.amount)
+            self.process_transaction(Transaction(
+                id=f"redeem-{position.asset.sid}-{bond.maturity_date}",
+                asset=position.asset,
+                amount=-position.amount,
+                dt=session if isinstance(session, datetime.datetime) else
+                datetime.datetime.combine(session_date, datetime.time.min,
+                                          tzinfo=datetime.timezone.utc),
+                price=quoted,
+                order_id=None,
+                exchange_name=position.exchange_name,
+                trading_account_id=position.trading_account_id,
+            ))
 
     async def process_dividends(self, next_session, asset_service):
         """Process dividends for the next session.
@@ -429,20 +568,73 @@ class Ledger:
 
         Copies, not the live objects: performance packets keep whatever this returns, and handing
         out live positions made already-recorded sessions change as the simulation went on -- a
-        position closed in September silently showed as flat in June's record.
+        contract closed in September silently showed as flat in June's record.
         """
         return [dataclasses.replace(position)
                 for position in self.position_tracker.get_position_list()]
 
-    def _get_payout_total(self, positions):
+    def futures_margin_by_currency(self, maintenance: bool = False) -> dict[str, float]:
+        """Margin the open futures positions tie up, keyed by the currency it is posted in.
 
+        Margin currency is a property of the exchange, not of the quote: MOEX collects roubles even
+        for the contracts it quotes in dollars. Amounts in different currencies are reported
+        separately because adding them would need an FX rate the ledger does not carry.
+        """
+        model = self.futures_margin_model
+        totals: dict[str, float] = {}
+        for position in self.position_tracker.get_position_list():
+            if not isinstance(position.asset.asset, FuturesContract):
+                continue
+            margin = (model.maintenance_margin if maintenance else model.initial_margin)
+            amount = margin(position.asset, position.amount, position.last_sale_price)
+            currency = margin_currency_of(position.asset)
+            totals[currency] = totals.get(currency, 0.0) + amount
+        return totals
+
+    def futures_margin_requirement(self, maintenance: bool = False,
+                                   currency: str | None = None) -> float:
+        """Margin posted in a single currency.
+
+        Args:
+            maintenance: Report maintenance margin rather than initial.
+            currency: Which currency to report. Required when the book posts margin in more than
+                one; use :meth:`futures_margin_by_currency` to see them all.
+
+        Returns 0.0 under :class:`~ziplime.finance.margin.NoFuturesMarginModel`; check
+        ``futures_margin_model.models_margin`` to tell that from a genuinely unmargined book.
+
+        Raises:
+            ValueError: if the book spans several margin currencies and none was named.
+        """
+        totals = self.futures_margin_by_currency(maintenance=maintenance)
+        if currency is not None:
+            return totals.get(currency, 0.0)
+        if len(totals) > 1:
+            raise ValueError(
+                f"Futures margin is posted in more than one currency ({', '.join(sorted(totals))})"
+                f" and they cannot be added without an FX rate. Pass currency=..., or call "
+                f"futures_margin_by_currency()."
+            )
+        return next(iter(totals.values()), 0.0)
+
+    def _get_payout_total(self):
+        """Accrue variation margin on open futures positions since the last time this ran.
+
+        Futures settle daily rather than carrying a position value, so the ledger tracks the price
+        each position was last marked at and turns the change into cash.
+        """
         total = 0
-        for asset, old_price in self._payout_last_sale_prices.items():
-            position = positions[asset]
+        for asset, old_price in list(self._payout_last_sale_prices.items()):
+            position = self.position_tracker.get_position(asset=asset)
+            if position is None:
+                # The position was closed without going through process_transaction (an expired
+                # contract with no price to close at, say). There is nothing left to settle.
+                self._payout_last_sale_prices.pop(asset, None)
+                continue
             self._payout_last_sale_prices[asset] = price = position.last_sale_price
             amount = position.amount
             total += self._calculate_payout(
-                asset.price_multiplier,
+                asset.asset.multiplier,
                 amount,
                 old_price,
                 price,
@@ -472,8 +664,11 @@ class Ledger:
 
         self._portfolio.positions_value = position_value = position_stats.net_value
         self._portfolio.positions_exposure = position_stats.net_exposure
-        payout_total = self._get_payout_total(pt.positions)
-        if payout_total > 0:
+        payout_total = self._get_payout_total()
+        if payout_total != 0:
+            # Variation margin settles in both directions. Applying only gains -- while
+            # _get_payout_total has already advanced each position's mark to the new price --
+            # dropped every losing day on the floor, so a long futures position could not lose.
             self._cash_flow(payout_total)
 
         start_value = self._portfolio.portfolio_value
@@ -505,8 +700,11 @@ class Ledger:
 
         self._portfolio.positions_value = position_value = position_stats.net_value
         self._portfolio.positions_exposure = position_stats.net_exposure
-        payout_total = self._get_payout_total(pt.positions)
-        if payout_total > 0:
+        payout_total = self._get_payout_total()
+        if payout_total != 0:
+            # Variation margin settles in both directions. Applying only gains -- while
+            # _get_payout_total has already advanced each position's mark to the new price --
+            # dropped every losing day on the floor, so a long futures position could not lose.
             self._cash_flow(payout_total)
 
         start_value = self._portfolio.portfolio_value
