@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytz
 
+from providers_config import ASSET_DB_PATH
+
 from ziplime.core.ingest_data import get_asset_service
 from ziplime.core.run_simulation import run_simulation
 from ziplime.finance.commission import PerShare, DEFAULT_PER_SHARE_COST, DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE, \
@@ -31,9 +33,7 @@ async def _run_simulation():
     end_date = datetime.datetime(year=2025, month=5, day=9, hour=23, minute=59 , second=59, tzinfo=tz)
     bundle_service = get_bundle_service()
 
-    asset_service = get_asset_service(
-        clear_asset_db=False,
-    )
+    asset_service = get_asset_service(db_path=ASSET_DB_PATH, clear_asset_db=False)
 
     # Use aggregations if you ingested data of frequnecy less than 1 day
     aggregations = [
