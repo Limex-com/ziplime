@@ -331,3 +331,11 @@ envs/*.env
 static/
 .idea/
 dual_moving_average.py
+
+# Local asset-database backups taken before a migration
+data/*.sqlite.bak-*
+# Local poetry preference (virtualenvs.in-project); not a project setting
+poetry.toml
+
+# PR descriptions, kept out of the tree
+.pr/
