@@ -34,7 +34,8 @@ from exchange_calendars import get_calendar as ec_get_calendar
 from asyncclick import DateTime
 from ziplime.utils.cli import Timestamp
 
-from ziplime.utils.bundle_utils import get_fundamental_data_provider, get_data_source
+from ziplime.utils.bundle_utils import get_fundamental_data_provider, get_data_source, \
+    provider_names
 
 
 def validate_date_range(date_min: datetime.datetime, date_max: datetime.datetime):
@@ -106,9 +107,10 @@ async def main(ctx):
 )
 @click.option(
     "--historical-market-data-provider",
-    type=click.Choice(['limex-hub', 'lime-trader-sdk']),
-    default="limex-hub",
-    help="Market data provider for historical data",
+    # Choices come from the connector registry, so a build without a connector does not offer it.
+    type=click.Choice(provider_names()),
+    default="yahoo",
+    help="Data connector to read historical market data from",
     show_default=True,
 )
 @click.option(

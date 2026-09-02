@@ -23,12 +23,13 @@ class MarketImpactBase(SlippageModel):
         self._window_data_cache = ExpiringCache()
 
     @abstractmethod
-    def get_txn_volume(self, data, order):
-        """Return the number of shares we would like to order in this minute.
+    def get_txn_volume(self, volume: float, order):
+        """Return the number of shares/contracts we would like to fill in this bar.
 
         Parameters
         ----------
-        data : BarData
+        volume : float
+            Total volume traded in the current bar.
         order : Order
 
         Return
@@ -64,21 +65,41 @@ class MarketImpactBase(SlippageModel):
         """
         raise NotImplementedError("get_simulated_impact")
 
-    async def process_order(self, exchange: Exchange, dt:datetime.datetime, order):
+    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order,
+                            price: float = None):
+        """Fill an order at a price moved by this model's simulated market impact.
+
+        Rewritten against the async exchange API. The previous body was written for zipline's
+        synchronous ``BarData`` portal and referenced an undefined ``data`` name, so any futures
+        backtest using the default slippage model raised immediately.
+        """
         if order.open_amount == 0:
             return None, None
 
-        minute_data = data.current(order.asset, ["volume", "high", "low"])
-        mean_volume, volatility = self._get_window_data(data, order.asset, 20)
+        current = await exchange.get_spot_value(
+            assets=frozenset({order.asset}),
+            fields=frozenset({"volume", "high", "low"}),
+            dt=dt,
+        )
+        if len(current) == 0 or len(current["volume"]) == 0:
+            return None, None
 
-        # Price to use is the average of the minute bar's open and close.
-        price = np.mean([minute_data["high"], minute_data["low"]])
-
-        volume = minute_data["volume"]
+        volume = current["volume"][0]
         if not volume:
             return None, None
 
-        txn_volume = int(min(self.get_txn_volume(data, order), abs(order.open_amount)))
+        # Price to use is the midpoint of the bar's range.
+        bar_price = np.mean([current["high"][0], current["low"][0]])
+        if bar_price is None or np.isnan(bar_price):
+            bar_price = price
+        if bar_price is None or np.isnan(bar_price):
+            return None, None
+
+        mean_volume, volatility = await self._get_window_data(
+            exchange=exchange, asset=order.asset, dt=dt, window_length=20)
+
+        txn_volume = int(min(self.get_txn_volume(volume=volume, order=order),
+                             abs(order.open_amount)))
 
         # If the computed transaction volume is zero or a decimal value, 'int'
         # will round it down to zero. In that case just bail.
@@ -88,76 +109,60 @@ class MarketImpactBase(SlippageModel):
         if mean_volume == 0 or np.isnan(volatility):
             # If this is the first day the contract exists or there is no
             # volume history, default to a conservative estimate of impact.
-            simulated_impact = price * self.NO_DATA_VOLATILITY_SLIPPAGE_IMPACT
+            simulated_impact = bar_price * self.NO_DATA_VOLATILITY_SLIPPAGE_IMPACT
         else:
             simulated_impact = self.get_simulated_impact(
                 order=order,
-                current_price=price,
+                current_price=bar_price,
                 current_volume=volume,
                 txn_volume=txn_volume,
                 mean_volume=mean_volume,
                 volatility=volatility,
             )
 
-        impacted_price = price + math.copysign(simulated_impact, order.direction)
+        impacted_price = bar_price + math.copysign(simulated_impact, order.direction)
 
         if fill_price_worse_than_limit_price(impacted_price, order):
             return None, None
 
         return impacted_price, math.copysign(txn_volume, order.direction)
 
-    def _get_window_data(self, data, asset, window_length):
-        """Internal utility method to return the trailing mean volume over the
-        past 'window_length' days, and volatility of close prices for a
-        specific asset.
+    async def _get_window_data(self, exchange: Exchange, asset, dt: datetime.datetime,
+                               window_length: int):
+        """Return the trailing mean volume and annualised close-price volatility of ``asset``.
 
-        Parameters
-        ----------
-        data : The BarData from which to fetch the daily windows.
-        asset : The Asset whose data we are fetching.
-        window_length : Number of days of history used to calculate the mean
-            volume and close price volatility.
+        The window excludes the current bar, so that impact is estimated from history rather than
+        from the bar being filled.
 
-        Returns
-        -------
-        (mean volume, volatility)
+        Returns:
+            ``(mean volume, annualised volatility)``; ``(0, nan)`` when there is not enough history,
+            which callers treat as "assume a conservative fixed impact".
         """
+        cache_key = (asset.sid, dt)
         try:
-            values = self._window_data_cache.get(asset, data.current_session)
+            values = self._window_data_cache.get(asset, cache_key)
         except KeyError:
-            try:
-                # Add a day because we want 'window_length' complete days,
-                # excluding the current day.
-                volume_history = data.history(
-                    asset,
-                    "volume",
-                    window_length + 1,
-                    "1d",
-                )
-                close_history = data.history(
-                    asset,
-                    "close",
-                    window_length + 1,
-                    "1d",
-                )
-            except HistoryWindowStartsBeforeData:
-                # If there is not enough data to do a full history call, return
-                # values as if there was no data.
+            history = await exchange.get_data_by_limit(
+                fields=frozenset({"volume", "close"}),
+                limit=window_length + 1,
+                end_date=dt,
+                frequency=datetime.timedelta(days=1),
+                assets=frozenset({asset}),
+                include_end_date=False,
+            )
+            if len(history) < 2:
                 return 0, np.nan
 
-            # Exclude the first value of the percent change array because it is
-            # always just NaN.
-            close_volatility = (
-                close_history[:-1]
-                .pct_change()[1:]
-                .std(
-                    skipna=False,
-                )
-            )
+            volumes = np.asarray(history["volume"], dtype=float)
+            closes = np.asarray(history["close"], dtype=float)
+            returns = np.diff(closes) / closes[:-1]
+            with np.errstate(invalid="ignore"):
+                close_volatility = np.std(returns, ddof=1) if len(returns) > 1 else np.nan
             values = {
-                "volume": volume_history[:-1].mean(),
+                "volume": float(np.mean(volumes)),
                 "close": close_volatility * SQRT_252,
             }
-            self._window_data_cache.set(asset, values, data.current_session)
+            self._window_data_cache.set(asset, values, cache_key)
 
         return values["volume"], values["close"]
+

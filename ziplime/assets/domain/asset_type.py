@@ -3,6 +3,7 @@ import enum
 
 class AssetType(enum.Enum):
     EQUITY = "EQUITY"
+    BOND = "BOND"
     FUTURES_CONTRACT = "FUTURES_CONTRACT"
     OPTIONS_CONTRACT = "OPTIONS_CONTRACT"
     CURRENCY = "CURRENCY"

@@ -173,3 +173,14 @@ ROOT_SYMBOL_TO_ETA = {
     "YM": DEFAULT_ETA,  # Dow Jones e-mini
     "YS": DEFAULT_ETA,  # Silver e-mini
 }
+
+
+#: Exchange fee assumed for a root symbol the table above does not list. Venue-specific fee
+#: schedules live with their connector; the core only needs a value that keeps a simulation
+#: running, because ``PerContract`` used to index the table directly and raised ``KeyError``
+#: mid-simulation on any root it did not know.
+DEFAULT_FUTURE_EXCHANGE_FEE = 1.0
+
+#: Default bond commission, as a fraction of the money transacted. Three basis points is a
+#: realistic retail rate; brokers bill bonds on turnover rather than per unit.
+DEFAULT_BOND_COMMISSION_RATE = 0.0003

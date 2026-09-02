@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import structlog
 
+from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.futures_contract import FuturesContract
 
 logger = structlog.get_logger(__name__)
@@ -103,13 +104,35 @@ class PositionStats:
         return self
 
 
-def calculate_position_tracker_stats(positions, position_count: int, stats):
+def _bond_unit_value(bond_book, bond, position) -> float:
+    """Money one bond of ``position`` is worth at its current mark.
+
+    Falls back to the bare quote when no schedule is loaded and the bond quotes in money; for a
+    percent-quoted bond the face value alone is enough to get the magnitude right, so the
+    conversion still happens without a schedule.
+    """
+    as_of = position.last_sale_date
+    if bond_book is None:
+        from ziplime.finance.bonds import BondBook
+        bond_book = BondBook()
+    return bond_book.dirty_value(bond, position.last_sale_price, as_of)
+
+
+def calculate_position_tracker_stats(positions, position_count: int, stats, bond_book=None):
     """Calculate various stats about the current positions.
 
     Parameters
     ----------
     positions : OrderedDict
         The ordered dictionary of positions.
+    position_count : int
+        How many positions ``positions`` holds, in total, across exchanges and accounts.
+    stats : PositionStats
+        The object to write the results into, reusing its arrays where they already fit.
+    bond_book : ziplime.finance.bonds.BondBook, optional
+        Coupon and amortization schedules. Bonds are quoted as a percentage of face value and
+        settle at the dirty price, so without it a bond position is valued at its bare quote --
+        roughly a tenth of its worth for a standard 1000-unit nominal.
 
     Returns
     -------
@@ -188,12 +211,19 @@ def calculate_position_tracker_stats(positions, position_count: int, stats):
                 # except Exception as e:
                 #     print("exception multiplying a")
                 #     raise
-                if type(position.asset) is FuturesContract:
+                instrument = position.asset.asset
+                if type(instrument) is FuturesContract:
                     # Futures don't have an inherent position value.
                     value = 0
 
                     # unchecked cast, this is safe because we do a type check above
-                    exposure *= position.asset.price_multiplier
+                    exposure *= instrument.multiplier
+                elif type(instrument) is Bond:
+                    # A bond quote is a percentage of face value, and a holding is worth the
+                    # dirty price: what it would fetch is the clean value plus the coupon
+                    # accrued so far, which the buyer would have to hand over.
+                    per_bond = _bond_unit_value(bond_book, instrument, position)
+                    value = exposure = position.amount * per_bond
                 else:
                     value = exposure
 

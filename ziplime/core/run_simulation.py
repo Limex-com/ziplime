@@ -13,11 +13,15 @@ from ziplime.core.algorithm_file import AlgorithmFile
 from ziplime.data.services.data_source import DataSource
 from ziplime.finance.commission import PerShare, DEFAULT_PER_SHARE_COST, DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE, \
     PerContract, DEFAULT_PER_CONTRACT_COST, DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE, EquityCommissionModel, \
-    FutureCommissionModel
+    FutureCommissionModel, BondCommissionModel, PerBondTurnover
+from ziplime.finance.constants import DEFAULT_BOND_COMMISSION_RATE
 from ziplime.finance.constants import FUTURE_EXCHANGE_FEES_BY_SYMBOL
+from ziplime.finance.margin import FuturesMarginModel
 from ziplime.finance.metrics import default_metrics
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
-from ziplime.finance.slippage.slippage_model import DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT
+from ziplime.finance.slippage.slippage_model import (
+    DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT, SlippageModel,
+)
 from ziplime.finance.slippage.volatility_volume_share import VolatilityVolumeShare
 from ziplime.gens.domain.simulation_clock import SimulationClock
 from ziplime.exchanges.exchange import Exchange
@@ -51,9 +55,13 @@ async def run_simulation(
         future_commission: FutureCommissionModel | None = None,
         equity_slippage: EquitySlippageModel | None = None,
         future_slippage: FutureSlippageModel | None = None,
+        bond_commission: BondCommissionModel | None = None,
+        bond_slippage: SlippageModel | None = None,
         clock: TradingClock | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
+        futures_margin_model: FuturesMarginModel | None = None,
+        print_algo: bool = True,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
 ) -> TradingAlgorithmExecutionResult:
     """
@@ -111,6 +119,9 @@ async def run_simulation(
             exchange_fee=FUTURE_EXCHANGE_FEES_BY_SYMBOL,
             min_trade_cost=DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE
         )
+    if bond_commission is None:
+        # Bond desks bill a percentage of turnover, not a fee per unit; see PerBondTurnover.
+        bond_commission = PerBondTurnover(cost=DEFAULT_BOND_COMMISSION_RATE)
     if equity_slippage is None:
         equity_slippage = FixedBasisPointsSlippage()
     if future_slippage is None:
@@ -123,13 +134,12 @@ async def run_simulation(
             country_code="US",
             trading_calendar=calendar,
             data_source=market_data_source,
-            # The models the caller passed, not fresh hardcoded ones. run_simulation used to
-            # compute equity_slippage/future_slippage above and then ignore both, so the
-            # parameters did nothing. run_simulation_iter already did this correctly.
             equity_slippage=equity_slippage,
             equity_commission=equity_commission,
             future_slippage=future_slippage,
             future_commission=future_commission,
+            bond_slippage=bond_slippage,
+            bond_commission=bond_commission,
             cash_balance=total_cash,
             clock=clock,
             price_used_in_order_execution=price_used_in_order_execution,
@@ -142,7 +152,7 @@ async def run_simulation(
     return await run_algorithm(
         algorithm=algo,
         asset_service=asset_service,
-        print_algo=True,
+        print_algo=print_algo,
         metrics_set=default_metrics(),
         custom_loader=None,
         clock=clock,
@@ -152,6 +162,7 @@ async def run_simulation(
         custom_data_sources=custom_data_sources,
         max_leverage=max_leverage,
         same_bar_execution=same_bar_execution,
+        futures_margin_model=futures_margin_model,
         price_used_in_order_execution=price_used_in_order_execution,
         exchange_repository=exchange_repository
     )
@@ -177,9 +188,13 @@ async def run_simulation_iter(
         future_commission: FutureCommissionModel | None = None,
         equity_slippage: EquitySlippageModel | None = None,
         future_slippage: FutureSlippageModel | None = None,
+        bond_commission: BondCommissionModel | None = None,
+        bond_slippage: SlippageModel | None = None,
         clock: TradingClock | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
+        futures_margin_model: FuturesMarginModel | None = None,
+        print_algo: bool = True,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
 ) -> AsyncIterator[TradingAlgorithmExecutionStatus]:
     """
@@ -237,6 +252,9 @@ async def run_simulation_iter(
             exchange_fee=FUTURE_EXCHANGE_FEES_BY_SYMBOL,
             min_trade_cost=DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE
         )
+    if bond_commission is None:
+        # Bond desks bill a percentage of turnover, not a fee per unit; see PerBondTurnover.
+        bond_commission = PerBondTurnover(cost=DEFAULT_BOND_COMMISSION_RATE)
     if equity_slippage is None:
         equity_slippage = FixedBasisPointsSlippage()
     if future_slippage is None:
@@ -259,6 +277,8 @@ async def run_simulation_iter(
             equity_commission=equity_commission,
             future_slippage=future_slippage,
             future_commission=future_commission,
+            bond_slippage=bond_slippage,
+            bond_commission=bond_commission,
             cash_balance=total_cash,
             clock=clock,
             price_used_in_order_execution=price_used_in_order_execution,
@@ -271,7 +291,7 @@ async def run_simulation_iter(
     async for status in run_algorithm_iter(
             algorithm=algo,
             asset_service=asset_service,
-            print_algo=True,
+            print_algo=print_algo,
             metrics_set=default_metrics(),
             custom_loader=None,
             clock=clock,
@@ -281,6 +301,7 @@ async def run_simulation_iter(
             custom_data_sources=custom_data_sources,
             max_leverage=max_leverage,
             same_bar_execution=same_bar_execution,
+        futures_margin_model=futures_margin_model,
             price_used_in_order_execution=price_used_in_order_execution,
             exchange_repository=exchange_repository
     ):

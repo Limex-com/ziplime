@@ -10,8 +10,11 @@ import structlog
 
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.entities.bond import Bond
+from ziplime.assets.entities.bond_event import BondEvent
 from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.finance.bonds import BondBook
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.domain.position import Position
 from ziplime.finance.domain.transaction import Transaction
@@ -31,13 +34,17 @@ class PositionTracker:
         The data frequency of the simulation.
     """
 
-    def __init__(self, data_frequency: datetime.timedelta):
+    def __init__(self, data_frequency: datetime.timedelta, bond_book: BondBook | None = None):
 
         # (exchange_id, asset, trading_account_id)
         self.positions = OrderedDict()
 
         self._unpaid_dividends = {}
         self._unpaid_stock_dividends = {}
+        #: pay date -> money owed, from coupons and amortization instalments already earned.
+        self._unpaid_bond_payments: dict[datetime.date, float] = {}
+        #: Coupon and amortization schedules, shared with the ledger that owns this tracker.
+        self.bond_book = bond_book if bond_book is not None else BondBook()
         # self._positions_store = {}
 
         self.data_frequency = data_frequency
@@ -165,26 +172,11 @@ class PositionTracker:
 
         position.amount = total_shares
 
-    def get_position(self, asset: ExchangeAsset) -> Position | None:
-        """Return the open position in ``asset``, or ``None``.
-
-        ``positions`` is nested ``{exchange: {account: {asset: Position}}}``, so callers that hold
-        only an asset cannot index it directly.
-        """
-        for trading_accounts in self.positions.values():
-            for positions_by_asset in trading_accounts.values():
-                position = positions_by_asset.get(asset)
-                if position is not None:
-                    return position
-        return None
-
     def handle_commission(self, asset: ExchangeAsset, cost: float) -> None:
         """Fold a commission into the position's cost basis, if the position is open.
 
-        ``positions`` is nested by exchange and account, so the old membership test
-        (``asset in self.positions``) compared an asset against exchange-name keys and never
-        matched. Commission was charged to cash correctly but never reached a cost basis for any
-        asset class, equities included.
+        ``positions`` is nested by exchange and account, so the old membership test never matched
+        and commission never reached a cost basis for any asset class.
         """
         position = self.get_position(asset=asset)
         if position is not None:
@@ -223,8 +215,14 @@ class PositionTracker:
         # cost_basis positive, while subtracting the commission.
 
         prev_cost = position.cost_basis * position.amount
-        if isinstance(position.asset, FuturesContract):
-            cost_to_use = cost / position.asset.price_multiplier
+        instrument = position.asset.asset
+        if isinstance(instrument, FuturesContract):
+            cost_to_use = cost / instrument.multiplier
+        elif isinstance(instrument, Bond):
+            # A bond's cost basis is carried in quote units (percent of face), so a commission in
+            # money has to be converted before it can be folded in.
+            per_point = self.bond_book.money_per_quote_unit(instrument, position.last_sale_date)
+            cost_to_use = cost / per_point if per_point else cost
         else:
             cost_to_use = cost
         new_cost = prev_cost + cost_to_use
@@ -363,6 +361,43 @@ class PositionTracker:
                     div_owed,
                 ]
 
+    def earn_bond_payments(self, bond_events: list[BondEvent]) -> None:
+        """Record what the coupons and amortizations in ``bond_events`` will pay us.
+
+        Entitlement is settled on the record date and paid later, so this snapshots the position
+        size now and the money moves in :meth:`pay_bond_payments`. Selling in between does not
+        forfeit the payment, which is what a record date means; a short position owes it, and the
+        negative amount carries that through.
+
+        Holdings are summed across every exchange and account, so the same coupon is never earned
+        twice and a position split over two accounts is paid in full.
+        """
+        for event in bond_events:
+            held = sum(position.amount
+                       for accounts in self.positions.values()
+                       for positions in accounts.values()
+                       for position in positions.values()
+                       if isinstance(position.asset.asset, Bond)
+                       and position.asset.asset.id == event.asset.id)
+            if held == 0:
+                continue
+            self._dirty_stats = True
+            owed = held * event.value
+            self._unpaid_bond_payments[event.date] = (
+                self._unpaid_bond_payments.get(event.date, 0.0) + owed)
+
+    def pay_bond_payments(self, session: datetime.date) -> float:
+        """Cash from every coupon and amortization instalment due on or before ``session``.
+
+        On or *before*, not on: a payment dated to a weekend or an exchange holiday still has to
+        reach the account, and it reaches it on the next session rather than never.
+
+        Negative for a short position: a short bond seller owes the coupon to whoever lent them
+        the paper, exactly as a short equity owes the dividend.
+        """
+        due = [date for date in self._unpaid_bond_payments if date <= session]
+        return sum(self._unpaid_bond_payments.pop(date) for date in due)
+
     def pay_dividends(self, next_trading_day: datetime.datetime):
         """
         Returns a cash payment based on the dividends that should be paid out
@@ -415,14 +450,16 @@ class PositionTracker:
                                                 dt: datetime.datetime) -> Transaction | None:
         """Build the trade that liquidates ``asset`` at its last mark, or ``None`` if not held.
 
-        Used when a listing reaches its auto-close date and the position has to leave the book.
+        Used when a listing reaches its auto-close date: an expired futures contract has to leave
+        the book, and it settles against the exchange's final price -- for which the last mark is
+        the best proxy a bundle carries.
 
         Two bugs lived here. The position was looked up as ``self.positions.get(asset)``, but
         ``positions`` is nested ``{exchange: {account: {asset: Position}}}``, so an asset key never
-        matched and this always returned ``None`` -- nothing was ever closed, and an expired
-        listing stayed on the books at a stale mark for the rest of the run. And the price came
-        from ``self.data_bundle``, which this object does not have, so the lookup would have raised
-        had it ever been reached.
+        matched and this always returned ``None`` -- expired contracts were never closed and stayed
+        on the books at a stale mark for the rest of the run. And the price came from
+        ``self.data_bundle``, which this object does not have, so the lookup would have raised had
+        it ever been reached.
         """
         position = self.get_position(asset=asset)
         if position is None or position.amount == 0:
@@ -455,6 +492,19 @@ class PositionTracker:
         #     self._positions_store[asset] = pos
         #
         # return self._positions_store
+
+    def get_position(self, asset: ExchangeAsset) -> Position | None:
+        """Return the open position in ``asset``, or ``None``.
+
+        ``positions`` is nested ``{exchange: {account: {asset: Position}}}``, so callers that hold
+        only an asset cannot index it directly.
+        """
+        for trading_accounts in self.positions.values():
+            for positions_by_asset in trading_accounts.values():
+                position = positions_by_asset.get(asset)
+                if position is not None:
+                    return position
+        return None
 
     def get_position_list(self):
         return [
@@ -516,7 +566,7 @@ class PositionTracker:
         """
         if self._dirty_stats:
             calculate_position_tracker_stats(self.positions, position_count=len(self.get_position_list()),
-                                             stats=self._stats)
+                                             stats=self._stats, bond_book=self.bond_book)
             self._dirty_stats = False
 
         return self._stats
