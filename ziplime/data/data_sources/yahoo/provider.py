@@ -19,11 +19,12 @@ def _market_data_source(assets=None, **kwargs) -> YahooFinanceDataSource:
 
 YAHOO = register_provider(DataProvider(
     name="yahoo",
-    description="Global equities and ETFs from Yahoo Finance (no credentials required)",
+    description="Global equities, ETFs and continuous futures series from Yahoo Finance "
+                "(no credentials required)",
     asset_data_source_factory=YahooFinanceAssetDataSource,
     market_data_source_factory=_market_data_source,
     required_env=(),
     default_mic=None,          # Yahoo spans many exchanges; the MIC comes per instrument.
     default_calendar="XNYS",
-    asset_types=(AssetType.EQUITY.value,),
+    asset_types=(AssetType.EQUITY.value, AssetType.FUTURES_CONTRACT.value),
 ))

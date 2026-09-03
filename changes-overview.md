@@ -34,8 +34,10 @@ but a maintainer comparing against a stored result needs to know which.
 | Expired positions are now liquidated | Exposure, leverage and position counts change; **P&L does not** — a cash-settled contract closes at its last mark |
 | `perf["positions"]` holds snapshots, not live objects | The recorded past stops mutating as the run proceeds |
 | Bundle load window includes the first session east of UTC | Such backtests gain one session at the start |
+| `get_open_orders(asset)` reports the orders actually working | Was always `[]`. A strategy topping an order up re-sent the shortfall every session and bought a multiple of its target |
+| Cancelled and rejected orders leave the open-order book | The blotter wrote them under the listing and deleted them under the `sid`, so they stayed visible as open for the rest of the run |
 
-The last four are pre-existing bugs that affect equity-only runs. They are fixed in the companion
+The last six are pre-existing bugs that affect equity-only runs. They are fixed in the companion
 pull request, `fix/correctness-regressions`, which should be reviewed and merged first.
 
 ---
@@ -181,7 +183,9 @@ Plus small domain types: `SettlementType`, `BondEventType`, `DayCount`, `PriceQu
 ### 4.1 Algorithm API
 
 Futures: `futures_margin_requirement`, `futures_margin_by_currency`, `models_futures_margin`,
-`notional_exposure`, `contracts_for_notional`, `continuous_future`, `future_symbol`.
+`notional_exposure`, `contracts_for_notional`, `continuous_future`, `future_symbol`,
+`futures_symbol` (the listing, which is what `order` takes), `futures_chain` (the whole chain of a
+root, ordered by expiration — element 0 is the front contract, and the rest is the term structure).
 
 Bonds: `bond_symbol`, `bond_dirty_price` (what one bond actually costs), `accrued_interest`,
 `bond_face_value` (principal outstanding today), `bond_schedule`, `bond_current_yield`,
@@ -194,14 +198,38 @@ Both: `realism_warnings()` — effects this configuration does not reproduce.
 | Suite | Strategies | Needs |
 | --- | --- | --- |
 | `examples/bonds/` | 6 | nothing — a synthetic universe, seeded offline |
+| `examples/futures/` | 7 | Yahoo Finance, which needs no credentials |
 | `examples/cross_asset/` | 1 | Yahoo Finance, which needs no credentials |
 
 Each has a `run_all.py` that fails if a strategy errors, places no trades, or — for the cross-asset
 suite — declares an asset class and never trades it.
 
-Bonds are synthetic because no free source publishes a coupon schedule, and there is no futures
-example for the same reason: a futures example needs a chain with real expirations and volumes.
-The engine supports both, and the acceptance suite covers them.
+Bonds are synthetic because no free source publishes a coupon schedule. The futures examples are
+**not** synthetic: they run on real dated contracts from Yahoo Finance — `CLX26.NYM`, `ESZ26.CME` —
+with real expiration dates and a real term structure, ingested by `get_futures`.
+
+Yahoo has no endpoint that lists a chain, so `get_futures` **discovers** one: it generates candidate
+tickers from each root's listing cycle, probes them in a single batched request, and keeps the ones
+that answer with prices. Each contract's first bar comes from that same response rather than from
+arithmetic on the expiry — a listing whose `start_date` disagrees with its own bars is treated as
+not yet trading on the sessions in between. Expiration dates come from Yahoo's own metadata, with a
+logged fall back to the conventional date when it answers for a contract with none.
+
+Two properties of that data constrain what can be built on it, and both are documented in
+`examples/futures/README.md` because they are easy to get silently wrong:
+
+* **Expired contracts are removed**, so a chain runs forward from today rather than back through
+  history. Curve work is sound over the whole window; roll behaviour is only genuine near the end
+  of it, where the front of the stored chain is the market's real front month.
+* **Volume is thin or absent** — 0.4 % to 26 % of sessions for the S&P, 26 % to 99 % for WTI. Since
+  no order fills on a bar with no volume, an order has to be worked over several sessions, and a
+  volume-based roll finder is unusable: on WTI the reported volume does not even track the front
+  month, so it would roll to the wrong contract. Use `CalendarRollFinder` with this data.
+
+What Yahoo does not publish at all is the contract specification. Multipliers and tick sizes come
+from a table transcribed from the exchanges' published terms and checked against the notional and
+tick value each implies, because a wrong multiplier passes every type check and misstates every
+position by a factor of a hundred.
 
 ---
 
@@ -224,12 +252,14 @@ one with a put window, and one that matures inside the example window. Regenerat
 
 | Check | Result |
 | --- | --- |
-| Test suite | 261 passed, 4 xfailed |
-| Cross-asset accounting identity | `cash + positions_value == portfolio_value` on every session of a two-class run; cash never negative |
+| Test suite | 304 passed, 4 xfailed (308 collected) |
+| Accounting identity | `cash + positions_value == portfolio_value` holds exactly (0.0) on all 9 841 sessions across every example |
 | Adjustment independence of fills | byte-identical across `mul`/`add`/`None` |
-| Time travel (backtest to T vs T+1 year, 876 sessions) | everything identical |
-| Connector separability | a connector package deleted: 0 import failures |
-| Strategy examples | 7/7 run and trade |
+| Look-ahead | `tests/test_futures_lookahead_acceptance.py`: no bar informs a decision made before it closed |
+| Connector separability | `ConnectorIndependenceTests`: a connector package deleted, 0 import failures |
+| Bond and cross-asset examples | 7/7 run and trade |
+| Futures examples | 7/7 run and trade, on 64 real dated contracts |
+| A real calendar roll | WTI's October contract leaves the front on 2026-08-27: `CLV26 @ 83.53 → CLX26 @ 81.97` |
 
 ---
 

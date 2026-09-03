@@ -886,6 +886,32 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return instrument
 
     @api_method
+    async def futures_symbol(self, symbol: str, mic: str = None) -> ExchangeAsset | None:
+        """Look up a futures **listing** by ticker, in ``TICKER`` or ``TICKER@MIC`` form.
+
+        This is what you order. :meth:`future_symbol` returns the contract behind a listing, which
+        carries the specification but is not tradeable — passing it to :meth:`order` fails, because
+        an order needs the listing that owns the sid.
+        """
+        return await self.symbol(symbol=symbol, mic=mic,
+                                 asset_type=AssetType.FUTURES_CONTRACT)
+
+    @api_method
+    async def futures_chain(self, root_symbol: str, mic: str = None) -> list[ExchangeAsset]:
+        """The contract chain of ``root_symbol`` as **listings**, ordered by expiration.
+
+        This is the term structure: element 0 is the front contract, and each one after it is
+        further out on the curve. Ordering by expiration rather than by ticker matters -- an
+        alphabetical sort puts ``CLF27`` before ``CLX26``, which reverses the curve.
+
+        Returns the listings, so the result can be passed straight to :meth:`order` and to
+        ``data.current``; :attr:`ExchangeAsset.asset` on each one carries the multiplier and the
+        expiration date.
+        """
+        return await self.asset_service.get_exchange_futures_contracts_by_root(
+            root_symbol=root_symbol, mic=mic)
+
+    @api_method
     async def future_symbol(self, symbol: str, mic: str = None) -> FuturesContract | None:
         """Lookup a futures contract with a given symbol.
 
