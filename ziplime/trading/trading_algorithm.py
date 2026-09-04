@@ -302,7 +302,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             simulation_dt_func=self.get_datetime,
             trading_calendar=self.clock.trading_calendar,
             restrictions=self.restrictions,
-            data_sources=data_sources
+            data_sources=data_sources,
+            data_source_resolver=self._resolve_named_data_source,
         )
 
         # We don't have a datetime for the current snapshot until we
@@ -895,6 +896,73 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         """
         return await self.symbol(symbol=symbol, mic=mic,
                                  asset_type=AssetType.FUTURES_CONTRACT)
+
+    async def _resolve_named_data_source(self, name: str):
+        """Mount a data source a strategy named but never registered.
+
+        Today that means a Hugging Face dataset address. It is resolved here rather than in
+        :class:`~ziplime.domain.bar_data.BarData` because a mount needs the asset database, to
+        turn the dataset's tickers into sids, and the simulation window, to avoid downloading
+        years the run cannot reach -- and this object holds both.
+        """
+        from ziplime.data.data_sources.huggingface.huggingface_data_source import (
+            HuggingFaceDataSource, is_address,
+        )
+        if not is_address(name):
+            raise KeyError(
+                f"No data source named {name!r}. Register it with "
+                f"run_simulation(custom_data_sources=[...]), or name a Hugging Face dataset as "
+                f"hf://owner/name/config.")
+        return await HuggingFaceDataSource.mount(
+            name, asset_service=self.asset_service,
+            start_date=self.clock.start_session, end_date=self.clock.end_session,
+            session_timezone=str(self.clock.trading_calendar.tz))
+
+    @api_method
+    async def huggingface_dataset(self, repo_id: str, config: str | None = None,
+                                  revision: str | None = None,
+                                  fields: list[str] | None = None,
+                                  start_date: datetime.date | None = None,
+                                  end_date: datetime.date | None = None,
+                                  name: str | None = None):
+        """Mount a point-in-time dataset from the Hugging Face Hub.
+
+        The explicit form of ``data.history(data_source="hf://owner/name/config")``. Use it when
+        the defaults are not what you want -- above all to **pin a revision**, so a result can be
+        reproduced after the dataset has grown:
+
+            context.congress = await context.huggingface_dataset(
+                "ZipLime/congress-trading", config="features", revision="67c335f5")
+
+        Then read it like any other source::
+
+            df = await data.history(assets=[apple], bar_count=30,
+                                    data_source=context.congress)
+
+        Args:
+            repo_id: ``owner/name`` on the Hub, or a full ``hf://owner/name/config`` address.
+            config: Table to mount. Defaults to the dataset's ``features`` table if it has one.
+            revision: Branch, tag or commit. Defaults to the default branch, resolved to the
+                commit it points at now and reported, so the run can be repeated exactly.
+            fields: Columns to keep besides ``date`` and ``sid``. All of them by default.
+            start_date, end_date: Window to fetch. Defaults to the simulation's own, which is
+                what keeps a long dataset from being downloaded in full.
+            name: What to call the source. Defaults to its address.
+
+        Returns:
+            The mounted source. Nothing is downloaded until it is first read.
+        """
+        from ziplime.data.data_sources.huggingface.huggingface_data_source import (
+            HuggingFaceDataSource,
+        )
+        source = await HuggingFaceDataSource.mount(
+            repo_id, config=config, revision=revision, asset_service=self.asset_service,
+            start_date=start_date or self.clock.start_session,
+            end_date=end_date or self.clock.end_session,
+            fields=fields, name=name,
+            session_timezone=str(self.clock.trading_calendar.tz))
+        self.current_data.data_sources[source.name] = source
+        return source
 
     @api_method
     async def futures_chain(self, root_symbol: str, mic: str = None) -> list[ExchangeAsset]:

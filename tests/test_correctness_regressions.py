@@ -485,5 +485,85 @@ class GetOpenOrdersTests(unittest.TestCase):
         self.assertEqual(TradingAlgorithm.get_open_orders(algo, make_equity()), [])
 
 
+class CanTradeTests(unittest.TestCase):
+    """`BarData.can_trade` raised for every asset it was ever asked about.
+
+    `_can_trade_for_asset` was written against `Asset` but is called with `ExchangeAsset`, which is
+    not one. Four separate failures followed: `Restrictions.is_restricted` took its iterable branch
+    and returned a pandas Series, which was then tested for truth; `asset.is_alive_for_session` and
+    `asset.is_exchange_open` do not exist on a listing; and `self.data_portal` and
+    `self.data_frequency` do not exist on `BarData`.
+
+    The rewrite answers the two conditions available synchronously -- the listing is alive and the
+    venue is open -- and documents that the third, a known last price, needs an async read and is
+    left to the caller.
+    """
+
+    def make_bar_data(self, asset, session: datetime.date):
+        from unittest.mock import Mock
+        from ziplime.domain.bar_data import BarData
+        from ziplime.finance.asset_restrictions import NoRestrictions
+
+        calendar = Mock()
+        calendar.minute_to_session.return_value = pd.Timestamp(session)
+        calendar.is_open_on_minute.return_value = True
+        calendar.is_session.return_value = True
+        source = Mock()
+        source.name = "test"
+        return BarData(data_sources={"test": source},
+                       simulation_dt_func=lambda: SESSION,
+                       trading_calendar=calendar,
+                       restrictions=NoRestrictions())
+
+    def test_a_listed_asset_can_trade(self):
+        asset = make_equity()
+        bar_data = self.make_bar_data(asset, datetime.date(2024, 3, 1))
+
+        self.assertTrue(bool(bar_data.can_trade(assets=[asset]).iloc[0]))
+
+    def test_an_asset_that_has_not_listed_yet_cannot_trade(self):
+        asset = dataclasses.replace(make_equity(), start_date=datetime.date(2025, 1, 1))
+        bar_data = self.make_bar_data(asset, datetime.date(2024, 3, 1))
+
+        self.assertFalse(bool(bar_data.can_trade(assets=[asset]).iloc[0]))
+
+    def test_a_delisted_asset_cannot_trade(self):
+        asset = dataclasses.replace(make_equity(), end_date=datetime.date(2023, 1, 1))
+        bar_data = self.make_bar_data(asset, datetime.date(2024, 3, 1))
+
+        self.assertFalse(bool(bar_data.can_trade(assets=[asset]).iloc[0]))
+
+    def test_an_asset_past_its_auto_close_cannot_trade(self):
+        asset = dataclasses.replace(make_equity(), auto_close_date=datetime.date(2023, 6, 1))
+        bar_data = self.make_bar_data(asset, datetime.date(2024, 3, 1))
+
+        self.assertFalse(bool(bar_data.can_trade(assets=[asset]).iloc[0]))
+
+    def test_a_restricted_asset_cannot_trade(self):
+        from ziplime.domain.bar_data import BarData
+        from ziplime.finance.asset_restrictions import StaticRestrictions
+        from unittest.mock import Mock
+
+        asset = make_equity()
+        calendar = Mock()
+        calendar.minute_to_session.return_value = pd.Timestamp(datetime.date(2024, 3, 1))
+        calendar.is_open_on_minute.return_value = True
+        source = Mock()
+        source.name = "test"
+        bar_data = BarData(data_sources={"test": source}, simulation_dt_func=lambda: SESSION,
+                           trading_calendar=calendar,
+                           restrictions=StaticRestrictions([asset]))
+
+        self.assertFalse(bool(bar_data.can_trade(assets=[asset]).iloc[0]))
+
+    def test_several_assets_come_back_in_order(self):
+        listed, unlisted = make_equity(sid=1, symbol="SPY"), dataclasses.replace(
+            make_equity(sid=2, symbol="QQQ"), start_date=datetime.date(2025, 1, 1))
+        bar_data = self.make_bar_data(listed, datetime.date(2024, 3, 1))
+
+        answer = bar_data.can_trade(assets=[listed, unlisted])
+        self.assertEqual([bool(v) for v in answer.to_numpy()], [True, False])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

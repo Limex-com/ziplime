@@ -41,6 +41,14 @@ pandas-stubs = "~=2.3.3"
 deltalake = "^1.6.1"
 httpx = {extras = ["http2"], version = "^0.28.1"}
 
+[tool.poetry.group.huggingface]
+# Reading point-in-time datasets from the Hugging Face Hub. Optional, so an install that never
+# mounts one does not carry it -- see ziplime.data.data_sources.huggingface.
+optional = true
+
+[tool.poetry.group.huggingface.dependencies]
+huggingface-hub = "^1.0"
+
 [tool.poetry.group.vectorbt]
 optional = true
 
