@@ -36,11 +36,25 @@ from ziplime.data.data_sources.huggingface.huggingface_data_source import (
 
 DATASET = "ZipLime/congress-trading"
 
-#: Rows a strategy should see: a real transaction report, not superseded, tied to a ticker.
+#: Rows a strategy should see: a real transaction report, not superseded, tied to a ticker, and
+#: not flagged by the extractor as unreliable.
+#:
+#: The last two conditions are there because the dataset marks its own bad rows and it would be
+#: careless not to read the marks. ``date_quality`` is ``unparsed``, ``out_of_range`` or
+#: ``notify_before_tx`` on 961 rows; among them are eleven of Ro Khanna's whose year was misread as
+#: 2005 instead of 2025, twelve years before he entered Congress. Left in, they are visible from
+#: the first bar of any backtest that starts after 2005. ``amount_quality == "invalid"`` marks a
+#: disclosed band the extractor could not make sense of, and these strategies weight positions by
+#: that band -- an unusable amount does not become usable by being multiplied by a price.
+#:
+#: ``amount_quality == "snapped"`` is kept: it means the figure was rounded to the nearest
+#: published band, which is a repair rather than a defect, and it covers 21 032 of the rows here.
 CLEAN = (
     (pl.col("source_form") == "ptr")
     & pl.col("superseded_by").is_null()
     & pl.col("ticker").is_not_null()
+    & (pl.col("date_quality") == "ok")
+    & (pl.col("amount_quality") != "invalid")
 )
 
 #: The dataset's transaction types that mean "bought" and "sold".

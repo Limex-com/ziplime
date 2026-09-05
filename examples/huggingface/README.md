@@ -154,6 +154,61 @@ disclosed, so `bar_count=40` is forty *disclosure* days, which is a much longer 
 than forty sessions. The trailing-window columns (`net_notional_usd_30d` and friends) are the ones
 to read at any frequency coarser than daily, since ziplime downsamples with `.last()`.
 
+## Checking the data before trusting it
+
+```bash
+python examples/huggingface/validate_congress.py
+```
+
+A dataset built by parsing scanned PDFs will contain mistakes. The useful question is whether they
+are findable and bounded, and this dataset publishes the reference tables that make them findable:
+who was in office when, which filing a trade came from, and three views of the same disclosures
+that ought to reconcile.
+
+What the checks return, on revision `67c335f5`:
+
+| check | result |
+| --- | --- |
+| every `bioguide_id` resolves in `legislators` | yes, 698 of 698 |
+| `trades` and `features` reconcile | **exactly** — 178 841 clean rows minus 340 undateable = 178 501, the sum `features` publishes |
+| transactions dated before the member took office | 539, of which 498 are annual reports legitimately listing old assets |
+| disclosure lag | median 28 days, 86.3% inside the STOCK Act's 45 |
+| filed *before* the trade happened | 100 rows — impossible; the adapter floors them |
+
+Per-legislator profiles are where a parsing failure becomes something a human recognises as wrong,
+and three findings came out of them:
+
+**Rows the dataset flags, and rows it does not.** Fifteen transaction reports are dated more than
+two years before their filer entered Congress. Twelve carry `date_quality = "out_of_range"` — the
+publisher found them too, and Ro Khanna's eleven are a 2025 misread as 2005. Three are flagged
+`ok`: two of Jefferson Shreve's dated nine years early, and one of Tony Wied's dated four. Those
+are unflagged errors, and the `CLEAN` filter in `congress.py` does not catch them because nothing
+in the row says anything is wrong.
+
+**Two per cent of tickers are not tickers.** 1 954 distinct values in that column are CUSIPs
+(`011798LP8`), foreign listings (`1066.HK`, `3288.T`), fund names (`JOVE EQUITY FUND I, LP`) and
+placeholders (`US TREASURY`, `CD-EX`). The dataset README says these were replaced with nulls;
+some survived. Strategies are unaffected — nothing resolves them against an equity database — but
+`features` aggregates by this column and so publishes instruments that do not exist.
+
+**One member's disclosed volume is mostly an artifact.** Diana Harshbarger accounts for 27 of the
+43 transaction reports in the `$25m–$50m` band, every one of them in 2022 and none before or
+after, in ordinary listed shares like EA, Align and Southwest. Those 27 rows are 1.4% of her
+filings and 60% of her disclosed volume — $1.96bn, against $763m without them. Nothing in the data
+marks them: `amount_quality` reads `ok`. A strategy weighting positions by disclosed size, which
+`h06` does and which the published Congress Buys method does, is exposed to exactly this.
+
+### What the checks changed
+
+Running them was not academic. `congress.py` now also requires `date_quality == "ok"` and
+`amount_quality != "invalid"`, because without those the strategies were reading 500 rows with
+broken dates — including transactions dated 2005 — and 604 rows whose disclosed amount the
+extractor had itself marked unusable and which fed straight into position sizing. Adding the
+filter took 31 percentage points off `h06`'s return. That return was partly an artifact.
+
+`amount_quality == "snapped"` is kept: it means a figure was rounded to the nearest published
+band, which is a repair rather than a defect, and it covers 21 032 rows.
+
 ## Getting the disclosure date right
 
 The congressional strategies key on **`filing_date`**, joined from the `filings` table — not on
