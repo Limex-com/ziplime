@@ -73,6 +73,18 @@ EVENT_DATE_COLUMNS = (
     "expiration_date",
 )
 
+#: Columns that say when a row's own event happened, best first -- used to **floor** the knowledge
+#: date, never to replace it. A knowledge date earlier than its own event is impossible, and these
+#: datasets contain such rows: congress ``trades`` has 499, one of them dated a thousand years
+#: before the trade it describes by a misread year digit. Left alone, that row is visible from the
+#: start of every backtest.
+#:
+#: Deliberately narrower than :data:`EVENT_DATE_COLUMNS`. ``expiration_date`` is an event in the
+#: *future* -- when an option expires -- so flooring against it would hide every option trade until
+#: after it expired. ``filing_date`` is excluded for the opposite reason: it is closer to a
+#: knowledge date than an event one.
+FLOOR_EVENT_COLUMNS = ("event_date", "transaction_date", "period_of_report", "as_of_date")
+
 #: Columns naming the instrument a row is about, best first.
 ENTITY_COLUMNS = ("ticker", "asset_ticker", "symbol", "entity_id")
 
@@ -209,6 +221,27 @@ def resolve_knowledge_column(columns: list[str], repo_id: str, config: str) -> s
     raise NoKnowledgeDateError(
         f"{repo_id}:{config} has no knowledge-date column -- none of "
         f"{', '.join(KNOWLEDGE_DATE_COLUMNS)} is present.{detail}")
+
+
+def resolve_event_column(columns: list[str], declared: str | None = None) -> str | None:
+    """The column to floor the knowledge date against, or ``None`` if there is none.
+
+    Args:
+        columns: Column names present in the config's Parquet files.
+        declared: What the manifest names as its event date, if it names one. Trusted over the
+            preference list, since the publisher knows which of several date columns is the event.
+
+    Returns:
+        The event column, or ``None`` when the dataset carries no usable one -- in which case the
+        knowledge date stands on its own and nothing is floored.
+    """
+    present = set(columns)
+    if declared and declared in present:
+        return declared
+    for candidate in FLOOR_EVENT_COLUMNS:
+        if candidate in present:
+            return candidate
+    return None
 
 
 def resolve_entity_column(columns: list[str], repo_id: str, config: str) -> str:

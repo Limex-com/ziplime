@@ -209,7 +209,7 @@ class PointInTimeTests(unittest.IsolatedAsyncioTestCase):
         HuggingFaceDataSource.__init__(
             source, name="hf://test/set/features", revision=None, manifest=None,
             config="features", repo_files=(), knowledge_column="knowledge_date",
-            entity_column="ticker", asset_service=None,
+            entity_column="ticker", event_column="transaction_date", asset_service=None,
             start_date=datetime.date(2024, 1, 1), end_date=datetime.date(2024, 12, 31))
         source.data = pl.DataFrame({
             "date": [self.KNOWLEDGE],
@@ -265,7 +265,7 @@ class WindowTests(unittest.TestCase):
         HuggingFaceDataSource.__init__(
             source, name="test", revision=None, manifest=None, config="features",
             repo_files=tuple(files), knowledge_column="knowledge_date", entity_column="ticker",
-            asset_service=None, start_date=start, end_date=end)
+            event_column=None, asset_service=None, start_date=start, end_date=end)
         return source
 
     def test_partitions_outside_the_window_are_skipped(self):
@@ -299,13 +299,24 @@ class TimestampNormalisationTests(unittest.TestCase):
     """Whatever a publisher stamped, the mounted column is one comparable instant."""
 
     def normalise(self, frame: pl.DataFrame, zone: str = "UTC") -> pl.Series:
-        from ziplime.data.data_sources.huggingface.huggingface_data_source import _to_utc
-        return frame.select(
-            _to_utc("d", frame.schema["d"]).dt.convert_time_zone(zone).alias("x"))["x"]
+        from ziplime.data.data_sources.huggingface.huggingface_data_source import (
+            _to_session_time,
+        )
+        return frame.select(_to_session_time("d", frame.schema["d"], zone).alias("x"))["x"]
 
     def test_a_plain_date_becomes_midnight(self):
         out = self.normalise(pl.DataFrame({"d": [datetime.date(2024, 1, 2)]}))
         self.assertEqual(out[0], datetime.datetime(2024, 1, 2, tzinfo=datetime.timezone.utc))
+
+    def test_a_plain_date_stays_on_its_own_day_in_a_western_session(self):
+        # The bug this pins: read as midnight UTC and converted to New York, a date-only column
+        # lands at 19:00 the evening BEFORE -- look-ahead, on the wrong session.
+        from zoneinfo import ZoneInfo
+        out = self.normalise(pl.DataFrame({"d": [datetime.date(2024, 1, 2)]}),
+                             zone="America/New_York")
+        self.assertEqual(out[0].date(), datetime.date(2024, 1, 2))
+        self.assertEqual(out[0],
+                         datetime.datetime(2024, 1, 2, tzinfo=ZoneInfo("America/New_York")))
 
     def test_a_naive_timestamp_is_read_as_utc(self):
         # Guessing a publisher's local timezone would move every row by hours.
@@ -320,9 +331,11 @@ class TimestampNormalisationTests(unittest.TestCase):
                          datetime.datetime(2024, 1, 2, 20, 30, tzinfo=datetime.timezone.utc))
 
     def test_a_column_that_is_not_a_time_is_refused(self):
-        from ziplime.data.data_sources.huggingface.huggingface_data_source import _to_utc
+        from ziplime.data.data_sources.huggingface.huggingface_data_source import (
+            _to_session_time,
+        )
         with self.assertRaises(ManifestError):
-            _to_utc("d", pl.Utf8)
+            _to_session_time("d", pl.Utf8, "UTC")
 
 
 if __name__ == "__main__":

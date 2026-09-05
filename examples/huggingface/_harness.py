@@ -16,8 +16,8 @@ from exchange_calendars import get_calendar
 sys.path.insert(0, str(Path(__file__).parent))
 
 from hf_config import (  # noqa: E402
-    ASSET_DB_PATH, END, EQUITY_MIC, EQUITY_TICKERS, INSIDER_END, INSIDER_START, START,
-    STARTING_CASH, TRADING_CALENDAR,
+    ASSET_DB_PATH, CONGRESS_END, CONGRESS_START, CONGRESS_UNIVERSE, END, EQUITY_MIC,
+    EQUITY_TICKERS, INSIDER_END, INSIDER_START, START, STARTING_CASH, TRADING_CALENDAR,
 )
 
 from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
@@ -43,12 +43,22 @@ def load_strategy_info(path: Path) -> dict:
     info = dict(getattr(module, "STRATEGY_INFO", {}))
     info.setdefault("name", path.stem)
     info.setdefault("description", (module.__doc__ or "").strip().split("\n")[0])
-    info.setdefault("equities", EQUITY_TICKERS)
-    # The insider dataset stops in March 2016, so its strategies run on an earlier window than the
-    # congressional ones. Mounting it over 2023-2026 would fetch partitions holding nothing.
-    insider = info.get("window") == "insider"
-    info.setdefault("start", INSIDER_START if insider else START)
-    info.setdefault("end", INSIDER_END if insider else END)
+    # Each window comes with the universe that suits it. The datasets cover different decades --
+    # insider filings stop in March 2016, congressional disclosures run to 2026 -- so mounting one
+    # over the other's window would fetch partitions holding nothing.
+    window = info.get("window")
+    if window == "insider":
+        info.setdefault("equities", [(t, EQUITY_MIC) for t in EQUITY_TICKERS])
+        info.setdefault("start", INSIDER_START)
+        info.setdefault("end", INSIDER_END)
+    elif window == "congress":
+        info.setdefault("equities", CONGRESS_UNIVERSE)
+        info.setdefault("start", CONGRESS_START)
+        info.setdefault("end", CONGRESS_END)
+    else:
+        info.setdefault("equities", [(t, EQUITY_MIC) for t in EQUITY_TICKERS])
+        info.setdefault("start", START)
+        info.setdefault("end", END)
     info["path"] = str(path)
     return info
 
@@ -57,14 +67,15 @@ def list_strategies() -> list[dict]:
     return [load_strategy_info(p) for p in sorted(STRATEGY_DIR.glob("h[0-9][0-9]_*.py"))]
 
 
-async def load_listings(asset_service, tickers: list[str]):
+async def load_listings(asset_service, universe: list[tuple[str, str]]):
+    """Resolve ``(ticker, MIC)`` pairs to listings. The MIC is required, not decorative."""
     listings = []
-    for ticker in tickers:
+    for ticker, mic in universe:
         listing = await asset_service.get_exchange_asset_by_symbol(
-            symbol=AssetSymbol(symbol=ticker, mic=EQUITY_MIC), asset_type=AssetType.EQUITY)
+            symbol=AssetSymbol(symbol=ticker, mic=mic), asset_type=AssetType.EQUITY)
         if listing is None:
             raise SystemExit(
-                f"{ticker} is not in the asset database on {EQUITY_MIC}. "
+                f"{ticker} is not in the asset database on {mic}. "
                 f"Run examples/ingest_assets_data_yahoo_finance.py first.")
         listings.append(listing)
     return listings

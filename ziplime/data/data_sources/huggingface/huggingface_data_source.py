@@ -50,7 +50,7 @@ from ziplime.constants.data_type import DataType
 from ziplime.constants.period import Period
 from ziplime.data.data_sources.huggingface import hub
 from ziplime.data.data_sources.huggingface.manifest import (
-    DatasetManifest, ManifestError, parse_manifest, resolve_entity_column,
+    DatasetManifest, ManifestError, parse_manifest, resolve_entity_column, resolve_event_column,
     resolve_knowledge_column,
 )
 from ziplime.data.services.data_source import DataSource
@@ -94,6 +94,50 @@ def parse_address(address: str) -> tuple[str, str | None]:
     return repo_id, config
 
 
+async def load_table(repo_id: str, config: str | None = None, revision: str | None = None,
+                     row_filter: pl.Expr | None = None) -> pl.DataFrame:
+    """Read one config of a Hub dataset as a plain frame, with no point-in-time treatment.
+
+    Not everything in a dataset is a time series. Committee rosters, legislator biographies and
+    filing ledgers have no instrument and often no usable date; they exist to be **joined** to the
+    tables that do. Mounting them as a data source would be meaningless, so this returns the frame
+    and leaves what to do with it to the caller.
+
+    It is also the way to build a source the Hub does not publish directly: read two tables, join
+    them, and hand the result to :meth:`HuggingFaceDataSource.from_frame`.
+
+    Args:
+        repo_id: ``owner/name``, or a full ``hf://owner/name/config`` address.
+        config: Table to read. Defaults to the dataset's default.
+        revision: Branch, tag or commit. Pinned to a commit, like every other read here.
+        row_filter: Applied while the Parquet is read, not afterwards.
+
+    Returns:
+        The table, exactly as published.
+    """
+    repo, address_config = (parse_address(repo_id) if is_address(repo_id) else (repo_id, None))
+    pinned = hub.resolve_revision(repo, revision=revision)
+    manifest = parse_manifest(repo_id=repo, revision=pinned.sha,
+                              manifest_json=hub.read_text(pinned, "manifest.json"),
+                              readme=hub.read_text(pinned, "README.md"))
+    spec = manifest.config(config or address_config)
+    parts = [path for path in pinned.files if path.endswith(".parquet") and spec.matches(path)]
+    if not parts:
+        raise ManifestError(
+            f"{repo}:{spec.name} declares {list(spec.paths)} but the repository holds no Parquet "
+            f"file matching them at {pinned.short_sha}.")
+
+    # `diagonal` because a config may be split across files whose columns differ -- the congress
+    # trades table splits into house and senate, and the senate rows carry fewer fields.
+    frames = [pl.read_parquet(hub.download(pinned, part)) for part in parts]
+    frame = frames[0] if len(frames) == 1 else pl.concat(frames, how="diagonal")
+    if row_filter is not None:
+        frame = frame.filter(row_filter)
+    _logger.info("Read a Hugging Face table", dataset=pinned.describe(), config=spec.name,
+                 rows=len(frame), parts=len(parts))
+    return frame
+
+
 class HuggingFaceDataSource(DataSource):
     """One config of one Hub dataset, pinned to a commit and mounted point-in-time.
 
@@ -103,10 +147,11 @@ class HuggingFaceDataSource(DataSource):
 
     def __init__(self, name: str, revision: hub.RepoRevision, manifest: DatasetManifest,
                  config: str, repo_files: tuple[str, ...], knowledge_column: str,
-                 entity_column: str, asset_service, start_date: datetime.date,
+                 entity_column: str, event_column: str | None, asset_service,
+                 start_date: datetime.date,
                  end_date: datetime.date, fields: frozenset[str] | None = None,
                  frequency: datetime.timedelta | Period = datetime.timedelta(days=1),
-                 session_timezone: str = "UTC"):
+                 session_timezone: str = "UTC", row_filter: pl.Expr | None = None):
         # Timestamps are presented in the simulation's own timezone, not in UTC. polars refuses
         # to compare two tz-aware columns in different zones, and every window filter in the
         # engine compares this source's `date` against the simulation clock -- which is stamped
@@ -125,9 +170,13 @@ class HuggingFaceDataSource(DataSource):
         self.repo_files = repo_files
         self.knowledge_column = knowledge_column
         self.entity_column = entity_column
+        self.event_column = event_column
+        self.row_filter = row_filter
         self.asset_service = asset_service
         self.requested_fields = fields
         self.data: pl.DataFrame | None = None
+        #: Set by :meth:`from_frame`; materialising reads this instead of downloading Parquet.
+        self._source_frame: pl.DataFrame | None = None
         #: Set once the frame is built: what was kept, what was dropped, and why.
         self.mount_report: dict[str, Any] = {}
         self._logger = structlog.get_logger(__name__)
@@ -135,12 +184,48 @@ class HuggingFaceDataSource(DataSource):
     # ------------------------------------------------------------------ mounting
 
     @classmethod
+    def from_frame(cls, frame: pl.DataFrame, name: str, knowledge_column: str,
+                   entity_column: str, asset_service, start_date: datetime.date,
+                   end_date: datetime.date, event_column: str | None = None,
+                   fields: list[str] | frozenset[str] | None = None,
+                   session_timezone: str = "UTC",
+                   revision: hub.RepoRevision | None = None) -> Self:
+        """Mount a frame the caller built, under the same point-in-time rules as a Hub config.
+
+        For the cases the Hub cannot serve directly. The knowledge date a dataset publishes is not
+        always the one you want: congressional ``trades`` is keyed on ``notification_date``, which
+        on a House report is the day the *filer was told* about a trade in a managed account -- not
+        the day the report reached the public. Joining ``filings`` supplies the filing date, which
+        is, and the join has to happen before the mount.
+
+        Everything else is unchanged: the knowledge column is floored against the event column,
+        tickers are resolved to sids, and the engine's own window filter does the rest.
+
+        Args:
+            frame: The rows to mount.
+            name: What the strategy calls this source.
+            knowledge_column: The column to index on. Named rather than guessed, because a derived
+                frame may carry several date columns and only the caller knows which is knowledge.
+            entity_column: The column naming the instrument.
+            event_column: Floors the knowledge date, when given.
+            revision: Recorded for reproducibility, when the frame came from a pinned read.
+        """
+        source = cls(
+            name=name, revision=revision, manifest=None, config="(derived)", repo_files=(),
+            knowledge_column=knowledge_column, entity_column=entity_column,
+            event_column=event_column, asset_service=asset_service,
+            start_date=start_date, end_date=end_date,
+            fields=frozenset(fields) if fields else None, session_timezone=session_timezone)
+        source._source_frame = frame
+        return source
+
+    @classmethod
     async def mount(cls, address: str, config: str | None = None, revision: str | None = None,
                     asset_service=None, start_date: datetime.date | None = None,
                     end_date: datetime.date | None = None,
                     fields: list[str] | frozenset[str] | None = None,
                     name: str | None = None, session_timezone: str = "UTC",
-                    materialize: bool = False) -> Self:
+                    row_filter: pl.Expr | None = None, materialize: bool = False) -> Self:
         """Resolve a dataset and prepare it for reading.
 
         Args:
@@ -157,6 +242,10 @@ class HuggingFaceDataSource(DataSource):
             name: What the strategy calls this source. Defaults to the address.
             session_timezone: Zone to present timestamps in. Must match the simulation's trading
                 calendar, since every window filter compares the two.
+            row_filter: A polars expression selecting the rows to keep, applied while the Parquet
+                is read rather than afterwards. This is how a table with many rows per instrument
+                is narrowed -- to one legislator, or to the rows a dataset documents as clean --
+                without materialising the rest.
             materialize: Fetch the data now rather than on first read. Useful for failing fast in
                 an ingest script; a strategy leaves it False so nothing is downloaded until the
                 data is actually asked for.
@@ -186,12 +275,13 @@ class HuggingFaceDataSource(DataSource):
         probe = pl.scan_parquet(hub.download(pinned, repo_files[0])).collect_schema().names()
         knowledge_column = resolve_knowledge_column(probe, repo_id, spec.name)
         entity_column = resolve_entity_column(probe, repo_id, spec.name)
+        event_column = resolve_event_column(probe, declared=manifest.raw_manifest.get("event_date"))
 
         source = cls(
             name=name or f"{ADDRESS_SCHEME}{repo_id}/{spec.name}",
             revision=pinned, manifest=manifest, config=spec.name, repo_files=repo_files,
             knowledge_column=knowledge_column, entity_column=entity_column,
-            asset_service=asset_service,
+            event_column=event_column, asset_service=asset_service, row_filter=row_filter,
             start_date=start_date or manifest.coverage_start or datetime.date(1900, 1, 1),
             end_date=end_date or manifest.coverage_end or datetime.date(2099, 12, 31),
             fields=frozenset(fields) if fields else None,
@@ -200,7 +290,7 @@ class HuggingFaceDataSource(DataSource):
         _logger.info("Mounted a Hugging Face dataset",
                      dataset=pinned.describe(), config=spec.name,
                      knowledge_column=knowledge_column, entity_column=entity_column,
-                     parquet_parts=len(repo_files))
+                     event_column=event_column, parquet_parts=len(repo_files))
         if materialize:
             await source.materialize()
         return source
@@ -210,19 +300,46 @@ class HuggingFaceDataSource(DataSource):
         if self.data is not None:
             return self.data
 
-        parts = self._parts_in_window()
         window_start, window_end = self.start_date, self.end_date
+        if self._source_frame is not None:
+            parts = []
+            scan = self._source_frame.lazy()
+        else:
+            parts = self._parts_in_window()
+            scan = pl.scan_parquet([hub.download(self.revision, part) for part in parts])
+        schema = scan.collect_schema()
+        if self.row_filter is not None:
+            # Applied before anything else, so the rows a caller does not want are never read.
+            scan = scan.filter(self.row_filter)
 
-        scan = pl.scan_parquet([hub.download(self.revision, part) for part in parts])
-        knowledge_dtype = scan.collect_schema()[self.knowledge_column]
+        # Normalise the knowledge column first, so the window filter compares like with like: a
+        # Date column and a tz-aware bound do not compare in polars.
+        knowledge = _to_session_time(self.knowledge_column, schema[self.knowledge_column],
+                                     self.session_timezone)
+        floored = 0
+        if self.event_column and self.event_column in schema.names():
+            # A knowledge date earlier than its own event is impossible, and these datasets carry
+            # such rows -- a misread year digit puts a disclosure centuries before the trade it
+            # describes, which would make it visible from the first bar of every backtest. The
+            # event date is the earliest the row could conceivably have been known, so floor to it.
+            event = _to_session_time(self.event_column, schema[self.event_column],
+                                     self.session_timezone)
+            knowledge_floored = pl.max_horizontal(knowledge, event)
+            floored = int(
+                scan.select((knowledge < event).fill_null(False).sum()).collect().item() or 0)
+            knowledge = knowledge_floored
+
         frame = (
-            # Normalise the knowledge column first, so the window filter compares like with like:
-            # a Date column and a tz-aware bound do not compare in polars.
-            scan.with_columns(_to_utc(self.knowledge_column, knowledge_dtype)
-                              .dt.convert_time_zone(self.session_timezone).alias("date"))
+            scan.with_columns(knowledge.alias("date"))
             .filter(pl.col("date") >= window_start, pl.col("date") <= window_end)
             .collect()
         )
+        if floored:
+            self._logger.warning(
+                "Raised knowledge dates that preceded their own event", rows=floored,
+                knowledge_column=self.knowledge_column, event_column=self.event_column,
+                detail="Such a row cannot have been known before the thing it describes "
+                       "happened; it is held back to the event date rather than trusted.")
 
         rows_in_window = len(frame)
         frame = await self._attach_sids(frame)
@@ -230,11 +347,12 @@ class HuggingFaceDataSource(DataSource):
 
         self.data = frame
         self.mount_report = {
-            "dataset": self.revision.describe(),
+            "dataset": self.revision.describe() if self.revision else self.name,
             "config": self.config,
             "parquet_parts_available": len(self.repo_files),
             "parquet_parts_read": len(parts),
             "rows_in_window": rows_in_window,
+            "knowledge_dates_floored": floored,
             "rows_mounted": len(frame),
             "instruments": frame["sid"].n_unique() if len(frame) else 0,
         }
@@ -268,12 +386,14 @@ class HuggingFaceDataSource(DataSource):
         if self.asset_service is None:
             self._logger.warning(
                 "No asset service, so no ticker can be matched to a listing; this source will "
-                "return nothing", dataset=self.revision.repo_id)
+                "return nothing", dataset=self.name)
             return frame.clear().with_columns(pl.lit(None, dtype=pl.Int64).alias("sid"))
 
         tickers = [t for t in frame[self.entity_column].unique().to_list() if t]
-        asset_type = _ENTITY_DOMAIN_ASSET_TYPES.get(self.manifest.entity_domain or "",
-                                                    AssetType.EQUITY)
+        # A frame mounted through `from_frame` carries no manifest, so the domain is unknown and
+        # equities are the assumption -- which is what every dataset of this kind describes.
+        domain = self.manifest.entity_domain if self.manifest else None
+        asset_type = _ENTITY_DOMAIN_ASSET_TYPES.get(domain or "", AssetType.EQUITY)
         listings = await self.asset_service.get_exchange_assets_by_symbols(
             symbols=[AssetSymbol(symbol=ticker, mic=None) for ticker in tickers],
             asset_type=asset_type)
@@ -305,7 +425,7 @@ class HuggingFaceDataSource(DataSource):
         missing = set(self.requested_fields) - set(frame.columns) - {"date", "sid"}
         if missing:
             self._logger.warning("Requested fields the dataset does not publish",
-                                 missing=sorted(missing), dataset=self.revision.repo_id)
+                                 missing=sorted(missing), dataset=self.name)
         return frame.select(keep)
 
     # ------------------------------------------------------------------ reading
@@ -366,24 +486,30 @@ def _at_zone(day: datetime.date, timezone: str,
         day, datetime.time.max if end_of_day else datetime.time.min, tzinfo=zone)
 
 
-def _to_utc(column: str, dtype: pl.DataType) -> pl.Expr:
-    """Normalise a knowledge column to a UTC timestamp, whatever it was published as.
+def _to_session_time(column: str, dtype: pl.DataType, timezone: str) -> pl.Expr:
+    """Place a date column on the simulation's clock, whatever it was published as.
 
     The dtype comes from the scan's schema rather than being tested per row: the three shapes seen
     in practice are decided once for the whole column.
 
-    * a plain ``Date`` -- congress ``features``; midnight UTC on that day;
-    * a timestamp already carrying a zone -- insider ``feature_available_at``; converted;
-    * a naive timestamp -- read **as** UTC rather than as local time. Guessing the publisher's
+    * A plain ``Date`` -- congress ``notification_date``. It names a **calendar day**, not an
+      instant, so it is placed at midnight *in the session's own timezone*. Reading it as midnight
+      UTC and converting would move it to the previous evening anywhere west of Greenwich: a
+      disclosure dated the 24th became visible at 20:00 on the 23rd, four hours of look-ahead on
+      the wrong trading session.
+    * A timestamp carrying a zone -- insider ``feature_available_at``. Converted; the instant is
+      unchanged and only its label moves.
+    * A naive timestamp -- read **as** UTC rather than as local time. Guessing the publisher's
       timezone would shift every row by hours, and these datasets stamp in UTC.
     """
     expression = pl.col(column)
     if dtype == pl.Date:
-        return expression.cast(pl.Datetime("us")).dt.replace_time_zone("UTC")
+        return expression.cast(pl.Datetime("us")).dt.replace_time_zone(timezone)
     if isinstance(dtype, pl.Datetime):
         if dtype.time_zone is None:
-            return expression.cast(pl.Datetime("us")).dt.replace_time_zone("UTC")
-        return expression.dt.convert_time_zone("UTC").cast(pl.Datetime("us", time_zone="UTC"))
+            return (expression.cast(pl.Datetime("us")).dt.replace_time_zone("UTC")
+                    .dt.convert_time_zone(timezone))
+        return expression.dt.convert_time_zone(timezone)
     raise ManifestError(
         f"The knowledge column {column!r} is a {dtype}, which is not a date or a timestamp, so "
         f"rows cannot be placed in time.")

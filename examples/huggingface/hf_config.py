@@ -16,6 +16,27 @@ EQUITY_TICKERS = ["MSFT", "NVDA", "AAPL", "AMZN", "META"]
 #: and resolving by ticker alone would have to pick one of the two.
 EQUITY_MIC = "XNGS"
 
+#: The wider universe the congressional strategies trade, as (ticker, MIC) pairs.
+#:
+#: Every one is named with its venue on purpose. A bare ticker is not unique in this database:
+#: `T` resolves to a Moscow listing, `META` to both Nasdaq and NYSE Arca. Resolving by name alone
+#: picks one silently, and not necessarily the one the price bundle holds.
+CONGRESS_UNIVERSE = [
+    ("AAPL", "XNGS"), ("NVDA", "XNGS"), ("MSFT", "XNGS"), ("AMZN", "XNGS"),
+    ("GOOGL", "XNGS"), ("TSLA", "XNGS"), ("META", "XNGS"),
+    ("V", "XNYS"), ("DIS", "XNYS"), ("JPM", "XNYS"), ("BAC", "XNYS"),
+    ("PFE", "XNYS"), ("CRM", "XNYS"), ("PG", "XNYS"),
+]
+
+#: Window for the congressional strategies. Starts in 2016: the House catalog is thin before then
+#: -- roughly 60% of 2014 filings were scanned paper that no extractor has read.
+CONGRESS_START = datetime.date(2016, 1, 4)
+CONGRESS_END = datetime.date(2026, 8, 31)
+
+#: The committee whose members `h04` follows. House Armed Services is the most active in this
+#: data: 20 449 transaction reports from its members, against 6 711 for Financial Services.
+COMMITTEE_ID = "HSAS"
+
 #: Window for the congress examples. The dataset runs 2012-01-25 to 2026-08-24.
 START = datetime.date(2023, 1, 1)
 END = datetime.date(2026, 8, 31)

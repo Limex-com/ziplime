@@ -26,6 +26,33 @@ The equities are priced from Yahoo Finance. The datasets come from the Hub.
 | --- | --- | --- |
 | `h01_congress_flow` | `ZipLime/congress-trading` | the one-line form — an address inside `data.history` |
 | `h02_insider_cluster_buys` | `ZipLime/insider-trading` | the explicit form, mounted in `initialize` and **pinned to a commit** |
+| `h03_pelosi_portfolio` | congress `trades` + `filings` | replicating one legislator's book, on the day each report was filed |
+| `h04_committee_consensus` | + `committee_members` | several members of one committee buying the same name at once |
+| `h05_universe_benchmark` | none | the control: the same universe, equally weighted, ignoring every disclosure |
+
+## The result, before anything else
+
+```
+strategy                   sess trades    final value    return   max dd
+h03_pelosi_portfolio       2680    167   4,177,758.91 +317.78%  -45.70%
+h04_committee_consensus    2680     63   6,227,405.27 +522.74%  -38.75%
+h05_universe_benchmark     2680    601  10,734,032.51 +973.40%  -36.62%
+```
+
+**The control wins, and it is not close.** Holding the same fourteen names equally weighted and
+never reading a single disclosure returned +973%, against +523% for following a committee and
++318% for replicating Nancy Pelosi's book — with a *smaller* drawdown than either. On this universe
+and this decade, acting on congressional disclosures destroyed more than half the return available
+from simply owning the same shares.
+
+That is why `h05` is here. Both disclosure strategies return several hundred percent, and either
+number looks like a discovery until something honest sits next to it. What they are mostly
+measuring is that large-capitalisation American technology shares rose a great deal between 2016
+and 2026; the disclosures subtract from that by holding fewer names, and by being weeks late.
+
+None of this settles whether congressional trades carry information. It says that *these* rules,
+on *this* universe, over *this* window, did not extract any — which is the most a single backtest
+can say, and more than most report.
 
 ## The thing that makes it point-in-time
 
@@ -127,8 +154,30 @@ disclosed, so `bar_count=40` is forty *disclosure* days, which is a much longer 
 than forty sessions. The trailing-window columns (`net_notional_usd_30d` and friends) are the ones
 to read at any frequency coarser than daily, since ziplime downsamples with `.last()`.
 
+## Getting the disclosure date right
+
+The congressional strategies key on **`filing_date`**, joined from the `filings` table — not on
+`notification_date`, which is what the `trades` table is keyed on and what its README recommends.
+
+On a House Periodic Transaction Report the notification date is the day the **filer was told** about
+a transaction. For the managed and spousal accounts most of these trades sit in, that is frequently
+the day of the trade. Across the table, `filing_date` is later than `notification_date` in **116 603
+of 275 936 rows**; for Pelosi, notification equals the transaction date on **221 of 487**. A
+strategy keyed on notification would open positions a month before the disclosure existed — and
+would look considerably better for it.
+
+With `filing_date` the lag lands where the STOCK Act puts it: a median of **28 days**, 90th
+percentile 54. `examples/huggingface/congress.py` does the join and documents the three filters it
+applies — periodic reports only, no superseded amendments, tickered rows only.
+
+The adapter also floors every knowledge date against the event date it belongs to. Congressional
+`trades` contains **319 rows** whose disclosure is dated before the trade it describes, one of them
+by a misread year digit that puts it a thousand years early. Left alone, that row is visible from
+the first bar of every backtest.
+
 ## Results are not recommendations
 
-Five large-cap names over three years demonstrates the plumbing and concludes nothing about the
-signal. `h01` returns +157% over 2023–2026 on a universe of MSFT, NVDA, AAPL, AMZN and META —
-which is very largely what those five did anyway, regardless of what Congress disclosed.
+`h01` returns +157% over 2023–2026 on five names that rose a great deal regardless of what Congress
+disclosed. `h03` and `h04` lose decisively to their own control. Nothing here is evidence about a
+signal; it is a demonstration of the plumbing, and of what the plumbing has to get right before any
+evidence is possible.
