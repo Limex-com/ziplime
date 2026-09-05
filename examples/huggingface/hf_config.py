@@ -16,16 +16,32 @@ EQUITY_TICKERS = ["MSFT", "NVDA", "AAPL", "AMZN", "META"]
 #: and resolving by ticker alone would have to pick one of the two.
 EQUITY_MIC = "XNGS"
 
-#: The wider universe the congressional strategies trade, as (ticker, MIC) pairs.
+#: The universe the congressional strategies trade, as (ticker, MIC) pairs.
 #:
-#: Every one is named with its venue on purpose. A bare ticker is not unique in this database:
-#: `T` resolves to a Moscow listing, `META` to both Nasdaq and NYSE Arca. Resolving by name alone
+#: The sixty most-disclosed tickers that resolve to exactly one US listing, which together cover
+#: 23% of all transaction-report rows. Sixty rather than a handful on purpose: a universe of five
+#: mega-cap technology names decides the answer before the strategy runs, and this one carries
+#: banks, energy, healthcare and staples that behaved very differently over the window.
+#:
+#: Every one is named with its venue. A bare ticker is not unique in this database: `T` also
+#: resolves to a Moscow listing, `META` to both Nasdaq and NYSE Arca. Resolving by name alone
 #: picks one silently, and not necessarily the one the price bundle holds.
 CONGRESS_UNIVERSE = [
-    ("AAPL", "XNGS"), ("NVDA", "XNGS"), ("MSFT", "XNGS"), ("AMZN", "XNGS"),
-    ("GOOGL", "XNGS"), ("TSLA", "XNGS"), ("META", "XNGS"),
-    ("V", "XNYS"), ("DIS", "XNYS"), ("JPM", "XNYS"), ("BAC", "XNYS"),
-    ("PFE", "XNYS"), ("CRM", "XNYS"), ("PG", "XNYS"),
+    ("MSFT", "XNGS"), ("AAPL", "XNGS"), ("AMZN", "XNGS"), ("NVDA", "XNGS"),
+    ("GOOGL", "XNGS"), ("JPM", "XNYS"), ("UNH", "XNYS"), ("V", "XNYS"),
+    ("T", "XNYS"), ("WFC", "XNYS"), ("DIS", "XNYS"), ("JNJ", "XNYS"),
+    ("HD", "XNYS"), ("NTAP", "XNGS"), ("PYPL", "XNGS"), ("CMCSA", "XNGS"),
+    ("GOOG", "XNGS"), ("VZ", "XNYS"), ("INTC", "XNGS"), ("ADBE", "XNGS"),
+    ("ACN", "XNYS"), ("PG", "XNYS"), ("XOM", "XNYS"), ("CVX", "XNYS"),
+    ("MRK", "XNYS"), ("PFE", "XNYS"), ("BAC", "XNYS"), ("NFLX", "XNGS"),
+    ("PEP", "XNGS"), ("C", "XNYS"), ("SBUX", "XNGS"), ("GE", "XNYS"),
+    ("TXN", "XNGS"), ("TSLA", "XNGS"), ("CVS", "XNYS"), ("TMO", "XNYS"),
+    ("KO", "XNYS"), ("MDT", "XNYS"), ("IBM", "XNYS"), ("ABT", "XNYS"),
+    ("COST", "XNGS"), ("ABBV", "XNYS"), ("SCHW", "XNYS"), ("LLY", "XNYS"),
+    ("QCOM", "XNGS"), ("UPS", "XNYS"), ("NEE", "XNYS"), ("TJX", "XNYS"),
+    ("FDX", "XNYS"), ("ORCL", "XNYS"), ("MA", "XNYS"), ("CSCO", "XNGS"),
+    ("AVGO", "XNGS"), ("INTU", "XNGS"), ("BMY", "XNYS"), ("MS", "XNYS"),
+    ("SLB", "XNYS"), ("DHR", "XNYS"), ("CRM", "XNYS"), ("META", "XNGS"),
 ]
 
 #: Window for the congressional strategies. Starts in 2016: the House catalog is thin before then

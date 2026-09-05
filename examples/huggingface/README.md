@@ -29,56 +29,56 @@ The equities are priced from Yahoo Finance. The datasets come from the Hub.
 | `h03_pelosi_portfolio` | congress `trades` + `filings` | replicating one legislator's book, on the day each report was filed |
 | `h04_committee_consensus` | + `committee_members` | several members of one committee buying the same name at once |
 | `h05_universe_benchmark` | none | the control: the same universe, equally weighted, ignoring every disclosure |
+| `h06_congress_buys` | congress `trades` + `filings` | the published "Congress Buys" method — size-weighted, weekly, window stretched for diversification |
+| `h07_congress_long_short` | congress `trades` + `filings` | long the buys, short the sells: the same signal with market direction removed |
 
-## The result, before anything else
+## The results, before anything else
+
+Seven strategies, one universe of sixty names, 2016-2026. `h05` is the control: it holds all sixty
+equally weighted and reads no data at all.
 
 ```
 strategy                   sess trades    final value    return   max dd
-h03_pelosi_portfolio       2680    167   4,177,758.91 +317.78%  -45.70%
-h04_committee_consensus    2680     63   6,227,405.27 +522.74%  -38.75%
-h05_universe_benchmark     2680    601  10,734,032.51 +973.40%  -36.62%
+h06_congress_buys          2680   3913   7,728,267.35 +672.83%  -33.49%
+h05_universe_benchmark     2680   2525   6,294,918.97 +529.49%  -32.25%   <- control
+h03_pelosi_portfolio       2680    252   4,025,601.95 +302.56%  -49.44%
+h04_committee_consensus    2680    843   2,293,146.43 +129.31%  -47.44%
+h07_congress_long_short    2680   1798     846,034.61  -15.40%  -19.98%
 ```
 
-**The control wins, and it is not close.** Holding the same fourteen names equally weighted and
-never reading a single disclosure returned +973%, against +523% for following a committee and
-+318% for replicating Nancy Pelosi's book — with a *smaller* drawdown than either. On this universe
-and this decade, acting on congressional disclosures destroyed more than half the return available
-from simply owning the same shares.
+Three things fall out of that table, and the third is the one that matters.
 
-That is why `h05` is here. Both disclosure strategies return several hundred percent, and either
-number looks like a discovery until something honest sits next to it. What they are mostly
-measuring is that large-capitalisation American technology shares rose a great deal between 2016
-and 2026; the disclosures subtract from that by holding fewer names, and by being weeks late.
+**Only one rule beat the control.** `h06`, which follows the published Congress Buys method --
+weight by the disclosed purchase size, rebalance weekly, stretch the lookback until the book holds
+at least ten names -- returned 143 percentage points more than equal-weighting the same universe,
+at the same drawdown. The two rules written from scratch here, replicating one legislator and
+following one committee, lost to the control decisively and with far deeper drawdowns.
 
-None of this settles whether congressional trades carry information. It says that *these* rules,
-on *this* universe, over *this* window, did not extract any — which is the most a single backtest
-can say, and more than most report.
+**Almost all of the return is the market, in every case.** The control returns +529% because these
+sixty shares rose roughly sixfold. Against zero, `h03` at +303% reads as a triumph; against the
+control it is a 226-point shortfall. A long-only backtest on an alternative dataset without a
+matching control is close to uninterpretable, which is the cheapest and most-skipped honesty in
+this whole area.
 
-## The thing that makes it point-in-time
+**With market direction removed, the signal is negative.** `h07` runs the same disclosures
+dollar-neutral -- long the purchases, short the sales -- and loses 15% over ten years. That is
+consistent with the rest: the *buy* list carries something, since `h06` beat equal weight; the
+*sell* list is not a short signal, since members sell for liquidity and diversification as readily
+as from conviction; and shorting through a decade-long advance is expensive. It is one path with no
+significance test behind it, so it settles nothing on its own -- but it is the experiment that
+separates a signal from a rising market, and it is the one usually missing.
 
-These datasets carry two dates, and they are not interchangeable:
+### On comparing this to a published number
 
-* the **event date** — when the trade happened, when the quarter ended;
-* the **knowledge date** — when it became observable to someone watching the source.
+The Congress Buys page reports a 37.88% CAGR with a -22.80% drawdown and a beta of 1.14. The beta
+is the interesting figure: a book that moves 1.14 times the market is mostly a market position, so
+the published return needs the same control this table has.
 
-A member of Congress reports a transaction up to 45 days after making it. A 13F reports a quarter
-that ended 45 days earlier and is amended for months afterwards — the latest arrival in that
-dataset came **452 days** late. Index a backtest on the event date and it trades on information
-nobody had; the equity curve looks wonderful, and nothing in the output says why.
+The published backtest also starts on **1 April 2020**, eight trading days after the COVID low. Any
+long equity strategy begun there is flattered enormously, and the strategy's own contribution is
+invisible inside the recovery. `h06` uses the same method over 2016-2026 and is reported against
+`h05` for exactly that reason.
 
-So the mount indexes on the knowledge date, and ziplime's own window filter — `date < simulation
-time`, the same one every data source goes through — does the rest. The column is chosen by
-`ziplime/data/data_sources/huggingface/manifest.py`, which **refuses to mount a dataset that
-offers only event dates** rather than quietly using one.
-
-The order within the knowledge dates matters too. The insider `features` table carries both
-`knowledge_day` (the New York day of the underlying filings) and `feature_available_at` (midnight
-at the start of the *following* day, when the aggregated row could first be read). They differ by
-up to a day, always in the direction that flatters a backtest, so the later one wins.
-
-`tests/test_huggingface_datasets.py::PointInTimeTests` pins this down on a hand-made dataset: one
-disclosure executed on the 1st and published on the 20th, invisible for nineteen days and visible
-on the twentieth.
 
 ## How a dataset qualifies
 
