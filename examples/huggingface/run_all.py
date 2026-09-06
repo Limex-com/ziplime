@@ -48,13 +48,14 @@ async def main(only: list[str] | None = None, verbose: bool = False):
 
     width = max((len(r["name"]) for r in rows), default=10)
     print()
-    print(f"{'strategy'.ljust(width)}  {'sess':>5s} {'trades':>6s} {'final value':>14s} "
-          f"{'return':>9s} {'max dd':>8s}  description")
-    print("-" * (width + 60))
+    print(f"{'strategy'.ljust(width)}  {'trades':>6s} {'return':>9s} {'cagr':>7s} "
+          f"{'vol':>6s} {'sharpe':>7s} {'max dd':>8s} {'ret/dd':>7s}  description")
+    print("-" * (width + 66))
     for row in rows:
-        print(f"{row['name'].ljust(width)}  {row['sessions']:>5d} {row['transactions']:>6d} "
-              f"{row['final_value']:>14,.2f} {row['return']:>+8.2%} {row['max_drawdown']:>+8.2%}"
-              f"  {row['description']}")
+        print(f"{row['name'].ljust(width)}  {row['transactions']:>6d} {row['return']:>+8.2%} "
+              f"{row.get('cagr', float('nan')):>+6.2%} {row.get('volatility', float('nan')):>6.1%} "
+              f"{row.get('sharpe', float('nan')):>7.2f} {row['max_drawdown']:>+8.2%} "
+              f"{row.get('return_to_drawdown', float('nan')):>7.2f}  {row['description'][:52]}")
 
     print()
     if failures:

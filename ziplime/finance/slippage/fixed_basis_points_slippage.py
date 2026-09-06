@@ -96,7 +96,14 @@ class FixedBasisPointsSlippage(SlippageModel):
 
         target_cash = available_cash #* percentage
         max_quantity = target_cash / price_with_slippage
-        shares_to_fill = min(abs(max_quantity), max_volume - self.volume_for_bar)
+        # A volume cap bounds how much of an order can fill; it must never turn the order around.
+        # `max_volume - volume_for_bar` goes negative on a thin bar once part of the limit is
+        # already used, and returning that made `order_target_percent` ask for a *negative* number
+        # of shares -- opening a short in a long-only strategy. On a micro-cap universe that ran a
+        # book to -13m of exposure on a 1m account. Clamp the remaining capacity at zero: an
+        # exhausted limit means nothing more fills, not that the position reverses.
+        remaining_capacity = max(0, max_volume - self.volume_for_bar)
+        shares_to_fill = min(abs(max_quantity), remaining_capacity)
         # print(f"estimated_price_for_target_percentage={price_with_slippage}, shares_to_fill={shares_to_fill},"
         #       f"price_without_slippage={price}")
         return price_with_slippage, shares_to_fill

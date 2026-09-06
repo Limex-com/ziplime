@@ -17,7 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from hf_config import (  # noqa: E402
     ASSET_DB_PATH, CONGRESS_END, CONGRESS_START, CONGRESS_UNIVERSE, END, EQUITY_MIC,
-    EQUITY_TICKERS, INSIDER_END, INSIDER_START, START, STARTING_CASH, TRADING_CALENDAR,
+    EQUITY_TICKERS, INSIDER10_END, INSIDER10_START, INSIDER10_UNIVERSE, INSIDER_END,
+    INSIDER_START, START, STARTING_CASH, TRADING_CALENDAR,
 )
 
 from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
@@ -55,6 +56,10 @@ def load_strategy_info(path: Path) -> dict:
         info.setdefault("equities", CONGRESS_UNIVERSE)
         info.setdefault("start", CONGRESS_START)
         info.setdefault("end", CONGRESS_END)
+    elif window == "insider10":
+        info.setdefault("equities", INSIDER10_UNIVERSE)
+        info.setdefault("start", INSIDER10_START)
+        info.setdefault("end", INSIDER10_END)
     else:
         info.setdefault("equities", [(t, EQUITY_MIC) for t in EQUITY_TICKERS])
         info.setdefault("start", START)
@@ -64,7 +69,7 @@ def load_strategy_info(path: Path) -> dict:
 
 
 def list_strategies() -> list[dict]:
-    return [load_strategy_info(p) for p in sorted(STRATEGY_DIR.glob("h[0-9][0-9]_*.py"))]
+    return [load_strategy_info(p) for p in sorted(STRATEGY_DIR.glob("[hi][0-9][0-9]_*.py"))]
 
 
 async def load_listings(asset_service, universe: list[tuple[str, str]]):
@@ -81,8 +86,18 @@ async def load_listings(asset_service, universe: list[tuple[str, str]]):
     return listings
 
 
+#: One bundle per (universe, window). Eleven strategies share a universe of 125 names over ten
+#: years, and fetching those bars eleven times from Yahoo would dominate the run.
+_BUNDLE_CACHE: dict[tuple, "DataBundle"] = {}
+
+
 async def build_bundle(listings, start: datetime.date, end: datetime.date, asset_service):
     """Daily Yahoo bars for the example equities, stamped on the calendar's session closes."""
+    key = (tuple(sorted(listing.sid for listing in listings)), start, end)
+    cached = _BUNDLE_CACHE.get(key)
+    if cached is not None:
+        cached.asset_service = asset_service
+        return cached
     calendar = get_calendar(TRADING_CALENDAR)
     sessions = calendar.sessions_in_range(start, end)
     closes = {s.date(): c.to_pydatetime() for s, c in
@@ -114,13 +129,15 @@ async def build_bundle(listings, start: datetime.date, end: datetime.date, asset
         pl.col("index").first().alias("start"), pl.col("index").last().alias("end")])
     sid_indexes = {r["sid"]: (r["start"], r["end"] + 1) for r in indexes.iter_rows(named=True)}
 
-    return DataBundle(
+    bundle = DataBundle(
         name="hf_equities_daily", version="1",
         start_date=data["date"].min(), end_date=data["date"].max(),
         trading_calendar=calendar, frequency=datetime.timedelta(days=1),
         original_frequency=datetime.timedelta(days=1), data_type=DataType.MARKET_DATA,
         timestamp=data["date"].max(), data=data, sid_indexes=sid_indexes,
         asset_service=asset_service)
+    _BUNDLE_CACHE[key] = bundle
+    return bundle
 
 
 async def run_strategy(info: dict):
@@ -154,14 +171,41 @@ async def run_strategy(info: dict):
 
 
 def summarise(info: dict, result) -> dict:
+    """Summarise a run, including the risk figures a return on its own cannot be read without.
+
+    A concentrated book beats a diversified one on return simply by being concentrated. Sharpe and
+    the return-to-drawdown ratio are what say whether it did so by taking more risk or by taking
+    better ones, and every strategy in this directory holds fewer names than its control.
+    """
     perf = result.perf
+    returns = perf["returns"] if "returns" in perf.columns else None
+    total_return = float(perf["algorithm_period_return"].iloc[-1])
+    drawdown = float(perf["max_drawdown"].iloc[-1])
+    years = len(perf) / 252.0
+
+    sharpe = float("nan")
+    volatility = float("nan")
+    if returns is not None and len(returns) > 1:
+        daily = returns.astype(float)
+        volatility = float(daily.std() * (252 ** 0.5))
+        if volatility > 0:
+            sharpe = float(daily.mean() * 252 / volatility)
+    cagr = ((1.0 + total_return) ** (1.0 / years) - 1.0) if years > 0 and total_return > -1 else float("nan")
+
     return {
         "name": info["name"],
         "description": info["description"],
         "sessions": len(perf),
         "transactions": sum(len(t) for t in perf["transactions"]),
         "final_value": float(perf["portfolio_value"].iloc[-1]),
-        "return": float(perf["algorithm_period_return"].iloc[-1]),
-        "max_drawdown": float(perf["max_drawdown"].iloc[-1]),
+        "return": total_return,
+        "cagr": cagr,
+        "volatility": volatility,
+        "sharpe": sharpe,
+        "max_drawdown": drawdown,
+        # Return per unit of worst peak-to-trough loss. Crude, but it is the number that stops a
+        # concentrated book from looking better than a diversified one purely by being levered
+        # to the same market.
+        "return_to_drawdown": (total_return / abs(drawdown)) if drawdown else float("nan"),
         "errors": list(result.errors or []),
     }

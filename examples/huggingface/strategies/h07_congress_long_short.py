@@ -42,8 +42,7 @@ STRATEGY_INFO = {
     "description": "Long the disclosed buys, short the disclosed sells -- market direction removed",
 }
 
-LOOKBACK = 80
-WINDOW_DAYS = 60
+WINDOW = __import__("datetime").timedelta(days=60)
 #: Share of capital on each side. Half and half, so the book is close to dollar-neutral.
 SIDE_WEIGHT = 0.5
 #: No single name on either side may exceed this share of the book.
@@ -92,14 +91,15 @@ async def handle_data(context: TradingAlgorithm, data: BarData):
     if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
         return
 
-    filed = await data.history(assets=context.universe, bar_count=LOOKBACK,
+    # `since=` rather than a row count: these are disclosures, not bars, so "the last sixty rows"
+    # would mean sixty filings -- which for a rarely-traded name reaches back years.
+    filed = await data.history(assets=context.universe, since=WINDOW,
                                fields=["amount_usd", "direction"], data_source=context.flow)
     if filed.is_empty():
         return
     context.last_rebalance = today
 
-    cutoff = today - __import__("datetime").timedelta(days=WINDOW_DAYS)
-    recent = filed.filter(pl.col("date").dt.date() >= cutoff).to_dicts()
+    recent = filed.to_dicts()
     bought = side_weights([r for r in recent if (r["direction"] or 0) > 0], SIDE_WEIGHT)
     sold = side_weights([r for r in recent if (r["direction"] or 0) < 0], SIDE_WEIGHT)
     if not bought and not sold:

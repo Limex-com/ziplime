@@ -349,10 +349,11 @@ class BarData:
             return True
         return self._trading_calendar.is_session(session_label)
 
-    async def history(self, assets: list[Asset], bar_count: int,
+    async def history(self, assets: list[Asset], bar_count: int | None = None,
                 frequency: datetime.timedelta | Period = datetime.timedelta(days=1),
                 fields: list[str] | None=None,
-                data_source: str | None = None
+                data_source: str | None = None,
+                since: datetime.timedelta | None = None,
                 ) -> pl.DataFrame:
         """Returns a trailing window of length ``bar_count`` with data for
         the given assets, fields, and frequency, adjusted for splits, dividends,
@@ -408,11 +409,37 @@ class BarData:
               - ``asset``
 
         If the current simulation time is not a valid market time, we use the last market close instead.
+
+        Counting rows or counting time
+        ------------------------------
+
+        Pass **either** ``bar_count`` or ``since``, not both.
+
+        ``bar_count`` asks for a number of rows. On bar data that is a number of sessions, which is
+        almost always what a strategy means.
+
+        ``since`` asks for a span of calendar time -- ``since=datetime.timedelta(days=90)`` is
+        "everything filed in the last quarter", however many rows that turns out to be. This is the
+        one to use on **event data**, where rows do not arrive on a schedule: thirty rows of
+        congressional disclosures for one ticker can span four years, so ``bar_count=30`` there is
+        a question about how often that company's insiders file rather than about time.
+
+        Both return the same shape, so they are interchangeable at the call site.
         """
         assets = frozenset(assets)
         fields = frozenset(fields) if fields else None
 
+        if (bar_count is None) == (since is None):
+            raise ValueError(
+                "history() needs exactly one of bar_count or since: bar_count for a number of "
+                "rows, since for a span of calendar time. Event data usually wants since.")
+
         source = await self.resolve_data_source(data_source)
+
+        if since is not None:
+            return await source.get_data_by_window(
+                assets=assets, since=since, end_date=self._get_current_minute(),
+                frequency=frequency, fields=fields, include_end_date=False)
 
         df = await source.get_data_by_limit(assets=assets,
                                                          end_date=self._get_current_minute(),

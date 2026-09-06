@@ -7,6 +7,19 @@ from ziplime.constants.period import Period
 from ziplime.utils.date_utils import period_to_timedelta
 
 
+def _as_instant(bound: datetime.date | datetime.datetime) -> datetime.datetime:
+    """Normalise a source's window bound to a timezone-aware instant.
+
+    The constructor is typed for ``datetime.date`` but every read compares these bounds against the
+    simulation clock, which is a timezone-aware ``datetime`` -- so a source built with plain dates
+    raised ``TypeError: can't compare datetime.datetime to datetime.date`` on its first read. A
+    bare date is taken as midnight UTC; a naive datetime as UTC; an aware one is left alone.
+    """
+    if isinstance(bound, datetime.datetime):
+        return bound if bound.tzinfo else bound.replace(tzinfo=datetime.timezone.utc)
+    return datetime.datetime.combine(bound, datetime.time.min, tzinfo=datetime.timezone.utc)
+
+
 class DataSource:
 
     def __init__(self, name: str, start_date: datetime.date, end_date: datetime.date,
@@ -29,8 +42,8 @@ class DataSource:
                 corresponding aggregation methods.
         """
         self.name = name
-        self.start_date = start_date
-        self.end_date = end_date
+        self.start_date = _as_instant(start_date)
+        self.end_date = _as_instant(end_date)
         self.frequency = frequency
         self.frequency_td = period_to_timedelta(self.frequency)
         self.data_type = data_type
@@ -147,6 +160,62 @@ class DataSource:
                 limit)
             return df
         return df_raw
+
+    async def get_data_by_window(self, fields: frozenset[str] | None,
+                                 since: datetime.timedelta,
+                                 end_date: datetime.datetime,
+                                 frequency: datetime.timedelta | Period,
+                                 assets: frozenset[Asset],
+                                 include_end_date: bool,
+                                 ) -> pl.DataFrame:
+        """Fetch everything in the last ``since`` of calendar time, however many rows that is.
+
+        The counterpart to :meth:`get_data_by_limit`, and the right one for data that does not
+        arrive on a schedule. A bar source produces one row per session, so "the last 30 rows" and
+        "the last 30 sessions" mean the same thing. An event source does not: 30 rows of
+        congressional disclosures for one ticker can span four years, and 30 rows of insider
+        filings for a quiet issuer can span two. Asking for a count there is asking a question
+        about the filers rather than about time, and a strategy that means "the last quarter" has
+        to over-fetch and re-filter by date -- which every strategy in ``examples/huggingface``
+        used to do by hand.
+
+        The returned shape is identical to :meth:`get_data_by_limit`: flat rows carrying ``date``,
+        ``sid`` and the requested fields, sorted by date. The two are interchangeable at the call
+        site, which is the point.
+
+        Args:
+            fields: Columns to return besides ``date`` and ``sid``. ``None`` returns all of them.
+            since: How far back from ``end_date`` to read.
+            end_date: The near edge of the window, normally the simulation's current time.
+            frequency: Downsampling frequency, applied only when the source is finer than it.
+            assets: Instruments to return rows for.
+            include_end_date: Whether a row stamped exactly at ``end_date`` is visible. False is
+                what keeps a strategy from reading the bar it is currently trading into.
+
+        Returns:
+            The rows in ``(end_date - since, end_date)``, sorted by date.
+        """
+        if since <= datetime.timedelta(0):
+            raise ValueError(f"since must be a positive duration, got {since!r}.")
+
+        frequency_td = period_to_timedelta(frequency)
+        start_date = end_date - since
+        df = self.get_dataframe()
+        if fields is None:
+            fields = frozenset(df.columns)
+        cols = list(fields.union({"date", "sid"}))
+        sids = [asset.sid for asset in assets]
+
+        near_edge = (pl.col("date") <= end_date) if include_end_date else (pl.col("date") < end_date)
+        rows = df.select(pl.col(col) for col in cols).filter(
+            near_edge, pl.col("date") > start_date, pl.col("sid").is_in(sids)
+        ).sort(by="date")
+
+        if self.frequency_td < frequency_td:
+            rows = rows.group_by_dynamic(
+                index_column="date", every=frequency, by="sid"
+            ).agg(pl.col(field).last() for field in fields)
+        return rows
 
     def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str], dt: datetime.datetime,
                        frequency: datetime.timedelta):

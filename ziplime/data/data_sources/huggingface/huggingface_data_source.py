@@ -454,6 +454,16 @@ class HuggingFaceDataSource(DataSource):
             fields=fields, limit=limit, end_date=end_date, frequency=frequency, assets=assets,
             include_end_date=include_end_date)
 
+    async def get_data_by_window(self, fields: frozenset[str] | None, since: datetime.timedelta,
+                                 end_date: datetime.datetime,
+                                 frequency: datetime.timedelta | Period,
+                                 assets: frozenset[Asset], include_end_date: bool) -> pl.DataFrame:
+        """Serve a calendar-time window, materialising the dataset on the first call."""
+        await self.materialize()
+        return await super().get_data_by_window(
+            fields=fields, since=since, end_date=end_date, frequency=frequency, assets=assets,
+            include_end_date=include_end_date)
+
     def get_missing_data_by_limit(self, fields: frozenset[str] | None, limit: int,
                                   end_date: datetime.datetime,
                                   frequency: datetime.timedelta | Period,

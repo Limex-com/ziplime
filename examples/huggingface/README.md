@@ -138,6 +138,40 @@ datasets carry CUSIP-identified bonds, delisted names and foreign listings that 
 does not hold, and a mount that silently kept 60% of its rows without saying so would be worse
 than one that says so.
 
+## Counting rows or counting time
+
+`data.history` takes **either** `bar_count` or `since`, and on event data the choice matters more
+than it looks.
+
+```python
+# bar data: thirty rows is thirty sessions, which is what you meant
+await data.history(assets=universe, bar_count=30, fields=["close"])
+
+# event data: thirty *days*, however many filings that turns out to be
+await data.history(assets=universe, since=datetime.timedelta(days=30),
+                   fields=["net_notional_usd"], data_source=context.source)
+```
+
+A bar source emits one row per session, so a row count and a time span are the same question. A
+disclosure source does not. Thirty rows of congressional filings for a rarely-traded name reach
+back four years; thirty rows for Nvidia reach back four months. `bar_count=30` there is a question
+about how often that company's insiders file, not about the last month — and the strategy silently
+gets a different window per instrument.
+
+Both forms return the same shape, so they are interchangeable at the call site. Passing both, or
+neither, raises rather than picking one.
+
+Before this existed every strategy here over-fetched and re-filtered by hand:
+
+```python
+filed = await data.history(assets=universe, bar_count=80, ...)      # hope 80 is enough
+cutoff = today - datetime.timedelta(days=60)
+recent = filed.filter(pl.col("date").dt.date() >= cutoff)           # then throw most of it away
+```
+
+That is three lines of boilerplate per strategy, a guess at `bar_count` that is wrong for some
+instrument in every universe, and a silent truncation when the guess is too small.
+
 ## Three things worth copying
 
 **Name the exchange.** `context.symbol("META")` is ambiguous — META lists on two venues — and

@@ -23,6 +23,7 @@ from ziplime.finance.domain.transaction import Transaction
 from ziplime.finance.execution import (
     LimitOrder, MarketOrder, StopLimitOrder, StopOrder, make_execution_style,
 )
+from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
 from ziplime.finance.slippage.no_slippage import NoSlippage
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 
@@ -563,6 +564,56 @@ class CanTradeTests(unittest.TestCase):
 
         answer = bar_data.can_trade(assets=[listed, unlisted])
         self.assertEqual([bool(v) for v in answer.to_numpy()], [True, False])
+
+
+class VolumeCapSignTests(unittest.IsolatedAsyncioTestCase):
+    """A volume cap could return a negative quantity, reversing the order.
+
+    `FixedBasisPointsSlippage.order_target_percentage_maximum_quantity` capped an order at
+    `max_volume - volume_for_bar`. Once part of a thin bar's limit was already used that difference
+    goes negative, and `_calculate_order_percent_amount` passes it straight through `min()` as the
+    number of shares to order. `order_target_percent` then asked for a *negative* quantity, opening
+    a short inside a long-only strategy.
+
+    It only bites on thin instruments -- a mega-cap bar has volume to spare -- which is why it
+    surfaced on a micro-cap universe, where it ran a book to -13m of exposure on a 1m account.
+    A cap must bound magnitude and never direction.
+    """
+
+    def make_exchange(self, volume: float, price: float = 10.0):
+        from unittest.mock import AsyncMock, Mock
+        exchange = Mock()
+        exchange.get_spot_value = AsyncMock(return_value={"close": [price], "volume": [volume]})
+        return exchange
+
+    async def quantity_for(self, volume: float, already_used: int, cash: float = 100_000.0):
+        model = FixedBasisPointsSlippage(basis_points=5.0, volume_limit=0.1)
+        model._volume_for_bar = already_used
+        _, quantity = await model.order_target_percentage_maximum_quantity(
+            exchange=self.make_exchange(volume), dt=SESSION, asset=make_equity(),
+            percentage=1.0, available_cash=cash)
+        return quantity
+
+    async def test_an_exhausted_cap_fills_nothing_rather_than_reversing(self):
+        # 10% of 1000 shares is 100; 400 of the limit is already spent.
+        self.assertEqual(await self.quantity_for(volume=1_000, already_used=400), 0)
+
+    async def test_a_partly_used_cap_leaves_the_remainder(self):
+        self.assertEqual(await self.quantity_for(volume=10_000, already_used=400), 600)
+
+    async def test_an_untouched_cap_allows_its_whole_share(self):
+        self.assertEqual(await self.quantity_for(volume=10_000, already_used=0), 1_000)
+
+    async def test_the_cap_never_exceeds_what_the_cash_buys(self):
+        # 10% of a million shares is 100 000, but 100 000 dollars buys about 10 000 at 10 each.
+        quantity = await self.quantity_for(volume=1_000_000, already_used=0, cash=100_000.0)
+        self.assertLess(quantity, 10_001)
+
+    async def test_no_input_produces_a_negative_quantity(self):
+        for volume in (0, 1, 10, 1_000, 100_000):
+            for used in (0, 1, 50, 5_000):
+                quantity = await self.quantity_for(volume=volume, already_used=used)
+                self.assertGreaterEqual(quantity, 0, f"volume={volume} used={used}")
 
 
 if __name__ == "__main__":

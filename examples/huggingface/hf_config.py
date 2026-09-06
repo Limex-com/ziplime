@@ -73,3 +73,63 @@ CONGRESS_DATASET = "ZipLime/congress-trading"
 CONGRESS_REVISION = "67c335f5207d5190ada5f89803615848dbf52ee0"
 INSIDER_DATASET = "ZipLime/insider-trading"
 INSIDER_REVISION = "ba0785efcede0b3a13af48dc658a1d39bc87ad1e"
+
+
+# ---------------------------------------------------------------------------------------------
+# The insider-trading strategy suite (i00-i10).
+# ---------------------------------------------------------------------------------------------
+
+#: Window. The dataset covers 2006-01-03 to 2026-06-30 without a missing month; this takes the
+#: most recent decade of it, which is where the price history is densest.
+INSIDER10_START = datetime.date(2016, 1, 4)
+INSIDER10_END = datetime.date(2026, 6, 30)
+
+INSIDER_REVISION_CURRENT = "a1ef3c9e"
+
+#: The universe: names whose insiders actually trade.
+#:
+#: Chosen by cluster-buy days over 2016-2026 among tickers with at least 20 disclosed open-market
+#: purchases, then narrowed to those resolving to exactly one US listing with a usable Yahoo
+#: history. Mostly regional banks and micro caps, which is not an accident -- insider buying is
+#: concentrated in small companies, and that is where the literature finds whatever signal exists.
+#:
+#: **This list survives.** Of 251 candidates, 84 no longer return data from Yahoo at all
+#: ("possibly delisted") and 42 more lack a long enough history: 126 of 251 dropped out, and the
+#: ones that died are precisely those where insider buying did not work. Absolute returns from any
+#: backtest on this universe are therefore biased upward, and badly. The control (`i00`) holds the
+#: same 125 names, so it carries the identical bias and comparisons against it stay meaningful
+#: even though the absolute numbers do not.
+INSIDER10_UNIVERSE = [
+    ("GABC", "XNGS"), ("ED", "XNYS"), ("SYBT", "XNGS"), ("MMLP", "XNGS"),
+    ("YORW", "XNGS"), ("TEX", "XNYS"), ("OPK", "XNGS"), ("BH", "XNYS"),
+    ("MCHX", "XNGS"), ("HY", "XNYS"), ("GEG", "XNGS"), ("BUSE", "XNGS"),
+    ("MTDR", "XNYS"), ("BATRA", "XNGS"), ("CWH", "XNYS"), ("FUNC", "XNGS"),
+    ("TPL", "XNYS"), ("SSP", "XNGS"), ("RM", "XNYS"), ("RUN", "XNGS"),
+    ("COTY", "XNYS"), ("TLYS", "XNYS"), ("CTRN", "XNGS"), ("APO", "XNYS"),
+    ("BW", "XNYS"), ("FFIN", "XNGS"), ("NOG", "XNYS"), ("DKL", "XNYS"),
+    ("SXT", "XNYS"), ("TRN", "XNYS"), ("FLWS", "XNGS"), ("SHEN", "XNGS"),
+    ("CBAN", "XNYS"), ("FSK", "XNYS"), ("PFSI", "XNYS"), ("EPD", "XNYS"),
+    ("FSTR", "XNGS"), ("IFF", "XNYS"), ("CRMT", "XNGS"), ("BBW", "XNYS"),
+    ("PRTS", "XNGS"), ("CODI", "XNYS"), ("EARN", "XNYS"), ("DXLG", "XNGS"),
+    ("ASPS", "XNGS"), ("PRPL", "XNGS"), ("LAB", "XNGS"), ("ADC", "XNYS"),
+    ("CARE", "XNGS"), ("ITRI", "XNGS"), ("SPOK", "XNGS"), ("FFBC", "XNGS"),
+    ("TRST", "XNGS"), ("GPMT", "XNYS"), ("UMH", "XNYS"), ("CPIX", "XNGS"),
+    ("NNBR", "XNGS"), ("UFI", "XNYS"), ("CCNE", "XNGS"), ("HRTG", "XNYS"),
+    ("CLF", "XNYS"), ("HTLD", "XNGS"), ("NRIM", "XNGS"), ("CAC", "XNGS"),
+    ("UAN", "XNYS"), ("CHCO", "XNGS"), ("CULP", "XNYS"), ("LCUT", "XNGS"),
+    ("ENR", "XNYS"), ("PGC", "XNGS"), ("FNKO", "XNGS"), ("COGT", "XNGS"),
+    ("TNET", "XNYS"), ("TISI", "XNYS"), ("STRR", "XNGS"), ("LXRX", "XNGS"),
+    ("BY", "XNYS"), ("CSV", "XNYS"), ("TKO", "XNYS"), ("HWBK", "XNGS"),
+    ("FBIZ", "XNGS"), ("INCY", "XNGS"), ("NXRT", "XNYS"), ("FNB", "XNYS"),
+    ("NDLS", "XNGS"), ("PETS", "XNGS"), ("NSIT", "XNGS"), ("ANGI", "XNGS"),
+    ("GTES", "XNYS"), ("TBBK", "XNGS"), ("RRGB", "XNGS"), ("SCOR", "XNGS"),
+    ("SWX", "XNYS"), ("VST", "XNYS"), ("SVVC", "XNGS"), ("CVNA", "XNYS"),
+    ("BBDC", "XNYS"), ("CQP", "XNYS"), ("FPI", "XNYS"), ("MPAA", "XNGS"),
+    ("SAFE", "XNYS"), ("MYE", "XNYS"), ("THFF", "XNGS"), ("FCNCA", "XNGS"),
+    ("CVI", "XNYS"), ("BG", "XNYS"), ("UTI", "XNYS"), ("GRPN", "XNGS"),
+    ("SNX", "XNYS"), ("ATEC", "XNGS"), ("UMBF", "XNGS"), ("BNED", "XNYS"),
+    ("STX", "XNGS"), ("SFNC", "XNGS"), ("SHBI", "XNGS"), ("CCO", "XNYS"),
+    ("OLN", "XNYS"), ("RVSB", "XNGS"), ("COLB", "XNGS"), ("CWEN", "XNYS"),
+    ("GOGO", "XNGS"), ("AP", "XNYS"), ("MRBK", "XNGS"), ("CLBK", "XNGS"),
+    ("HLF", "XNYS"),
+]
