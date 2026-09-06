@@ -70,7 +70,7 @@ STARTING_CASH = 1_000_000.0
 #: append-only and grow, so `main` today is not `main` next month, and an unpinned backtest
 #: quietly stops being comparable with the one you ran before.
 CONGRESS_DATASET = "ZipLime/congress-trading"
-CONGRESS_REVISION = "67c335f5207d5190ada5f89803615848dbf52ee0"
+CONGRESS_REVISION = "cb3c6896"
 INSIDER_DATASET = "ZipLime/insider-trading"
 INSIDER_REVISION = "ba0785efcede0b3a13af48dc658a1d39bc87ad1e"
 

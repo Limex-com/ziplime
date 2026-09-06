@@ -49,7 +49,10 @@ def rule(title: str) -> None:
 
 
 async def main() -> int:
-    revision = CONGRESS_REVISION
+    # Resolve up front so the report names the exact commit it read, whether the caller pinned
+    # one or left it to the default branch.
+    from ziplime.data.data_sources.huggingface import hub
+    revision = hub.resolve_revision(DATASET, revision=CONGRESS_REVISION).sha
     trades = await load_table(DATASET, "trades", revision=revision)
     filings = await load_table(DATASET, "filings", revision=revision)
     legislators = await load_table(DATASET, "legislators", revision=revision)
