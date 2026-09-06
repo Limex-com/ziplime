@@ -77,6 +77,14 @@ class RepoRevision:
         return f"{self.repo_id}@{self.short_sha}"
 
 
+#: Resolved revisions, for the life of the process. Eleven strategies mounting the same dataset
+#: made eleven identical calls to the Hub, and a run that pins a commit should not need the network
+#: to confirm what it already named. Keyed by what was asked for, so `main` and a commit stay
+#: distinct -- and `main` is still re-resolved in the next process, which is where a moving branch
+#: is allowed to move.
+_RESOLVED: dict[tuple[str, str | None], "RepoRevision"] = {}
+
+
 def resolve_revision(repo_id: str, revision: str | None = None) -> RepoRevision:
     """Pin ``repo_id`` to a commit and list the files it holds.
 
@@ -88,6 +96,10 @@ def resolve_revision(repo_id: str, revision: str | None = None) -> RepoRevision:
     Returns:
         The pinned revision, including its file listing so callers need no second round trip.
     """
+    cached = _RESOLVED.get((repo_id, revision))
+    if cached is not None:
+        return cached
+
     api = _api()
     try:
         info = api.dataset_info(repo_id, revision=revision)
@@ -104,6 +116,10 @@ def resolve_revision(repo_id: str, revision: str | None = None) -> RepoRevision:
         _logger.info("Pinned a Hugging Face dataset to the commit it is at now",
                      dataset=repo_id, revision=pinned.sha,
                      detail="Pass revision= to mount this exact data again later.")
+    _RESOLVED[(repo_id, revision)] = pinned
+    # A commit resolves to itself, so record that too: a caller that pinned the sha explicitly
+    # should not go to the network either.
+    _RESOLVED[(repo_id, pinned.sha)] = pinned
     return pinned
 
 

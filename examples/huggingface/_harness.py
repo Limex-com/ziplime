@@ -27,6 +27,7 @@ from ziplime.constants.data_type import DataType  # noqa: E402
 from ziplime.core.ingest_data import get_asset_service  # noqa: E402
 from ziplime.core.run_simulation import run_simulation  # noqa: E402
 from ziplime.data.domain.data_bundle import DataBundle  # noqa: E402
+from ziplime.data.services import frame_cache  # noqa: E402
 from ziplime.finance.commission import PerShare  # noqa: E402
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage  # noqa: E402
 from ziplime.utils.bundle_utils import get_market_data_source  # noqa: E402
@@ -86,18 +87,33 @@ async def load_listings(asset_service, universe: list[tuple[str, str]]):
     return listings
 
 
-#: One bundle per (universe, window). Eleven strategies share a universe of 125 names over ten
-#: years, and fetching those bars eleven times from Yahoo would dominate the run.
+#: One bundle per (universe, window), for the life of the process. Eleven strategies share a
+#: universe of 125 names over ten years, and fetching those bars eleven times from Yahoo would
+#: dominate the run.
 _BUNDLE_CACHE: dict[tuple, "DataBundle"] = {}
+
+#: How long a cached price frame stays usable. A day, because price history is **not** immutable:
+#: a split or a dividend restates every bar before it once the source adjusts, so a frame cached
+#: last month is wrong after last week's split. A day is short enough that a restatement is caught
+#: on the next session and long enough that an afternoon of editing a strategy pays the download
+#: once. Delete the cache, or set ZIPLIME_CACHE_DIR elsewhere, to force a refetch.
+BARS_MAX_AGE = datetime.timedelta(days=1)
 
 
 async def build_bundle(listings, start: datetime.date, end: datetime.date, asset_service):
     """Daily Yahoo bars for the example equities, stamped on the calendar's session closes."""
-    key = (tuple(sorted(listing.sid for listing in listings)), start, end)
+    sids = tuple(sorted(listing.sid for listing in listings))
+    key = (sids, start, end)
     cached = _BUNDLE_CACHE.get(key)
     if cached is not None:
         cached.asset_service = asset_service
         return cached
+
+    # Across processes: the same bars, read off the disk instead of off the network.
+    disk_key = frame_cache.cache_key("yahoo-daily-bars", sids, start, end)
+    data = frame_cache.load(disk_key, max_age=BARS_MAX_AGE)
+    if data is not None:
+        return _assemble_bundle(data, asset_service, key)
     calendar = get_calendar(TRADING_CALENDAR)
     sessions = calendar.sessions_in_range(start, end)
     closes = {s.date(): c.to_pydatetime() for s, c in
@@ -125,6 +141,12 @@ async def build_bundle(listings, start: datetime.date, end: datetime.date, asset
 
     columns = ["date", "sid", "symbol", "mic", "open", "high", "low", "close", "price", "volume"]
     data = frame.select(columns).sort(["sid", "date"])
+    frame_cache.store(disk_key, data)
+    return _assemble_bundle(data, asset_service, key)
+
+
+def _assemble_bundle(data, asset_service, key) -> DataBundle:
+    """Wrap a bar frame as a bundle and remember it for the rest of the process."""
     indexes = data.with_row_index().group_by("sid", maintain_order=True).agg([
         pl.col("index").first().alias("start"), pl.col("index").last().alias("end")])
     sid_indexes = {r["sid"]: (r["start"], r["end"] + 1) for r in indexes.iter_rows(named=True)}
@@ -132,7 +154,7 @@ async def build_bundle(listings, start: datetime.date, end: datetime.date, asset
     bundle = DataBundle(
         name="hf_equities_daily", version="1",
         start_date=data["date"].min(), end_date=data["date"].max(),
-        trading_calendar=calendar, frequency=datetime.timedelta(days=1),
+        trading_calendar=get_calendar(TRADING_CALENDAR), frequency=datetime.timedelta(days=1),
         original_frequency=datetime.timedelta(days=1), data_type=DataType.MARKET_DATA,
         timestamp=data["date"].max(), data=data, sid_indexes=sid_indexes,
         asset_service=asset_service)

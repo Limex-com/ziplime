@@ -138,6 +138,37 @@ datasets carry CUSIP-identified bonds, delisted names and foreign listings that 
 does not hold, and a mount that silently kept 60% of its rows without saying so would be worse
 than one that says so.
 
+## What gets cached, and what expires
+
+There is no ingest step, so everything is fetched on demand -- and a research loop that refetches
+on every process start is unusable. Four things are remembered, at different levels:
+
+| what | where | expires |
+| --- | --- | --- |
+| Dataset Parquet files | `huggingface_hub`'s own cache, keyed by commit | never — a commit is immutable |
+| The resolved commit of a branch | in the process | at process exit, so `main` can move |
+| The mounted frame (windowed, sids resolved) | rebuilt each mount | — it takes 0.95s |
+| Daily price bars | `~/.cache/ziplime/frames`, as Parquet | **one day** |
+
+The last row is the one with a trap in it. **Price history is not immutable**: a split or a
+dividend restates every bar before it once the source adjusts, so a frame cached in June is wrong
+after a July split. A day is short enough to catch a restatement on the next session and long
+enough that an afternoon of editing a strategy pays the download once. Point-in-time datasets are
+different — pinned to a commit, they can be cached forever, which is what `frame_cache.FOREVER` is
+for.
+
+Set `ZIPLIME_CACHE_DIR` to move it, or delete the directory to force a refetch.
+
+```
+build bundle, cold           17.87s
+build bundle, fresh process   0.13s
+```
+
+The mounted frame is not cached at all, and does not need to be. It used to take 57 seconds, of
+which 0.04 was reading Parquet and the rest was resolving twelve thousand tickers to sids one
+database query at a time. Batching that query made it 0.95 seconds — which is the better answer
+than caching a slow computation.
+
 ## Counting rows or counting time
 
 `data.history` takes **either** `bar_count` or `since`, and on event data the choice matters more
