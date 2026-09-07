@@ -11,57 +11,48 @@ always include one.
 
 Expect very few names: cluster buys fire on 3% of issuer-days and CEO/CFO purchases on 1.3%, so the
 intersection is rare and the book is concentrated.
+
 """
+import datetime
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from insider import mount_features  # noqa: E402
 from hf_config import INSIDER10_UNIVERSE  # noqa: E402
-from insider import mount_features
-from portfolio import rebalance  # noqa: E402
+from playbook import any_of, equities, every, hold, show_once  # noqa: E402
 
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
 
 STRATEGY_INFO = {"window": "insider10",
                  "description": "Require a buying cluster and an officer among the buyers"}
-LOOKBACK = 30
-HOLD_DAYS = 120
-REBALANCE_EVERY_DAYS = 7
+
+WINDOW = datetime.timedelta(days=30)
+HOLD_FOR = datetime.timedelta(days=120)
 FIELDS = ["is_cluster_buy", "n_ceo_buys", "n_cfo_buys"]
 
 
 async def initialize(context: TradingAlgorithm):
-    context.universe = [await context.symbol(t, mic=m) for t, m in INSIDER10_UNIVERSE]
+    context.universe = await equities(context, INSIDER10_UNIVERSE)
     context.source = await mount_features(context, fields=FIELDS)
     context.opened_on = {}
-    context.held = frozenset()
-    context.last_rebalance = None
 
 
+@every(days=7)
 async def handle_data(context: TradingAlgorithm, data: BarData):
     today = context.simulation_dt.date()
-    if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
-        return
-    context.last_rebalance = today
-
-    window = await data.history(assets=context.universe, bar_count=LOOKBACK,
+    window = await data.history(assets=context.universe, since=WINDOW,
                                 fields=FIELDS, data_source=context.source)
-    clustered, officer = set(), set()
-    if not window.is_empty():
-        for row in window.iter_rows(named=True):
-            if row["is_cluster_buy"]:
-                clustered.add(row["sid"])
-            if (row["n_ceo_buys"] or 0) + (row["n_cfo_buys"] or 0) > 0:
-                officer.add(row["sid"])
 
-    for sid in clustered & officer:
+    clustered = any_of(window, lambda r: r["is_cluster_buy"])
+    officers = any_of(window, lambda r: (r["n_ceo_buys"] or 0) + (r["n_cfo_buys"] or 0) > 0)
+    for sid in clustered & officers:
         context.opened_on[sid] = today
-    context.opened_on = {s: d for s, d in context.opened_on.items()
-                         if (today - d).days < HOLD_DAYS}
-    held = frozenset(context.opened_on)
-    if held == context.held:
-        return
-    context.held = held
-    weight = 1.0 / len(held) if held else 0.0
-    await rebalance(context, data, {sid: weight for sid in held})
+    context.opened_on = {sid: opened for sid, opened in context.opened_on.items()
+                         if today - opened < HOLD_FOR}
+
+    held = await hold(context, data, context.opened_on)
+    names = {a.sid: a.symbol for a in context.universe}
+    show_once(context, f"cluster and officer together, holding {len(held)}:",
+              (names.get(sid, sid) for sid in sorted(held)))

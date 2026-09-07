@@ -169,6 +169,76 @@ which 0.04 was reading Parquet and the rest was resolving twelve thousand ticker
 database query at a time. Batching that query made it 0.95 seconds — which is the better answer
 than caching a slow computation.
 
+## A strategy should be its idea
+
+Zipline algorithms are short because two things are handed to them: `schedule_function` decides
+when the logic runs, and a pipeline turns a column of numbers into a ranked selection. Neither
+exists in this fork, so the first version of these strategies hand-rolled both — the same
+five-line *has it been ninety days yet* gate in **twenty files out of twenty**, the same loop
+skipping rows with missing inputs, the same rank-and-equal-weight.
+
+`playbook.py` takes that out of the way. A whole strategy, all of its logic:
+
+```python
+async def initialize(context):
+    context.universe = await equities(context, FUNDAMENTALS_UNIVERSE)
+    context.source = await mount(context)
+
+@every(days=90)
+async def handle_data(context, data):
+    rows = await data.current(assets=context.universe, fields=FIELDS,
+                              data_source=context.source)
+    scores = factor(fresh(rows, context, MAX_AGE),
+                    lambda r: -(r["net_income"] - r["operating_cash_flow"]) / r["total_assets"])
+    held = await hold_top(context, data, scores, keep=KEEP)
+```
+
+| | |
+| --- | --- |
+| `@every(days=N)` | run at most this often — `schedule_function` wearing a smaller hat |
+| `equities(context, pairs)` | resolve `(ticker, MIC)` pairs to listings |
+| `fresh(rows, context, max_age)` | drop values too old to act on |
+| `factor(rows, fn)` | score, skipping rows whose inputs are missing |
+| `any_of(rows, predicate)` | the instruments an event fired on |
+| `hold_top(...)` / `hold(...)` | rank-and-weight, or hold a set |
+| `show_once(...)` | report the first book and then be quiet |
+
+`factor` catches exactly `TypeError` and `ZeroDivisionError` — arithmetic on `None`, and a zero
+denominator. On sparse fundamentals those two *mean* "this company did not report it", which is
+the normal case rather than an error; anything else still raises. That also retires the `NEEDS`
+constant every scoring strategy used to carry.
+
+Measured across the seven strategies rewritten on it:
+
+```
+                            before   after
+i01_cluster_buys                24      14   -41%
+i02_executive_buys              25      14   -44%
+i06_directors_only              26      15   -42%
+f03_low_accruals                33      12   -63%
+TOTAL                          186      99   -46%
+```
+
+### Two things this nearly got wrong
+
+**A refactor must not move the numbers, and this one appeared to.** `i01` fell from +319.58% to
++262.07%. Running it once with the old `bar_count=30` reproduced +319.58% and 12 128 trades
+exactly — so the plumbing was sound and the difference came entirely from switching that read to
+`since=30 days`, which is a deliberate change of window semantics made in the same pass. The
+`since` version is kept because it is the correct one; the number moved for a reason worth naming.
+
+**`hold` trades when the set changes, not when weights drift.** A signal saying *hold these names*
+is answered by the membership of the set. Rebalancing to equal weight in between quietly turns the
+rule into "hold these names and also sell whichever of them went up" — a different strategy, and
+on this data a worse one.
+
+### Where these belong
+
+`every` is `schedule_function`; `factor` with `hold_top` is what a pipeline does. They sit in an
+examples directory because that is where they could be written today, not because that is where
+they should live. If one moves into the engine first, make it `every` — it was duplicated in every
+strategy here without exception.
+
 ## One way to read, whatever the dataset
 
 Every strategy here reads through the same two calls, against prices, congressional
