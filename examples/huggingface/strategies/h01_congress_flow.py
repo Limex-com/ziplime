@@ -19,6 +19,7 @@ The rule below is deliberately plain -- hold the names Congress has been net buy
 equally -- because the example is about the plumbing, not the signal. The result is not a
 recommendation, and a five-name universe over three years is far too small to conclude anything.
 """
+from ziplime.api import date_rules
 from ziplime.domain.bar_data import BarData
 from ziplime.finance.execution import MarketOrder
 from ziplime.trading.trading_algorithm import TradingAlgorithm
@@ -36,7 +37,6 @@ CONGRESS = "hf://ZipLime/congress-trading/features"
 #: Trailing disclosure days to weigh. The dataset publishes a row only on days a name was
 #: disclosed, so 40 rows is a much longer stretch of calendar than 40 sessions.
 LOOKBACK = 40
-REBALANCE_EVERY_DAYS = 30
 
 
 async def initialize(context: TradingAlgorithm):
@@ -44,15 +44,12 @@ async def initialize(context: TradingAlgorithm):
     # have to pick one -- silently, and not necessarily the one the price bundle holds.
     context.universe = [await context.symbol(ticker, mic=EXCHANGE)
                         for ticker in ("MSFT", "NVDA", "AAPL", "AMZN", "META")]
-    context.last_rebalance = None
     context.reported = False
+    context.schedule_function(rebalance, date_rules.month_start())
 
 
-async def handle_data(context: TradingAlgorithm, data: BarData):
+async def rebalance(context: TradingAlgorithm, data: BarData):
     today = context.simulation_dt.date()
-    if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
-        return
-    context.last_rebalance = today
 
     flow = await data.history(assets=context.universe, bar_count=LOOKBACK,
                               fields=["net_notional_usd", "n_disclosures"],

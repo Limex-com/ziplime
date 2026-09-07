@@ -13,28 +13,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from hf_config import INSIDER10_UNIVERSE  # noqa: E402
-from portfolio import priced, rebalance  # noqa: E402
+from portfolio import priced, rebalance_to  # noqa: E402
 
+from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
 
 STRATEGY_INFO = {"window": "insider10",
                  "description": "Equal-weight all 125 names, ignoring every filing -- the control"}
-REBALANCE_EVERY_DAYS = 90
 
 
 async def initialize(context: TradingAlgorithm):
     context.universe = [await context.symbol(t, mic=m) for t, m in INSIDER10_UNIVERSE]
-    context.last_rebalance = None
+    context.schedule_function(rebalance, date_rules.quarter_start())
 
 
-async def handle_data(context: TradingAlgorithm, data: BarData):
-    today = context.simulation_dt.date()
-    if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
-        return
+async def rebalance(context: TradingAlgorithm, data: BarData):
     live = await priced(context, data)
     if not live:
         return
-    context.last_rebalance = today
     weight = 1.0 / len(live)
-    await rebalance(context, data, {sid: weight for sid in live})
+    await rebalance_to(context, data, {sid: weight for sid in live})

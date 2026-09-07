@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from hf_config import CONGRESS_UNIVERSE  # noqa: E402
 
+from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.finance.execution import MarketOrder  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
@@ -28,19 +29,15 @@ STRATEGY_INFO = {
     "description": "Equal-weight the same universe, ignoring every disclosure -- the control",
 }
 
-REBALANCE_EVERY_DAYS = 90
 
 
 async def initialize(context: TradingAlgorithm):
     context.universe = [await context.symbol(ticker, mic=mic)
                         for ticker, mic in CONGRESS_UNIVERSE]
-    context.last_rebalance = None
+    context.schedule_function(rebalance, date_rules.quarter_start())
 
 
-async def handle_data(context: TradingAlgorithm, data: BarData):
-    today = context.simulation_dt.date()
-    if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
-        return
+async def rebalance(context: TradingAlgorithm, data: BarData):
 
     # Only names with a quote today: several of these listed part-way through the window, and a
     # target on a name with no price cannot be filled.
@@ -49,7 +46,6 @@ async def handle_data(context: TradingAlgorithm, data: BarData):
               if price and price > 0}
     if not priced:
         return
-    context.last_rebalance = today
 
     weight = 1.0 / len(priced)
     for asset in context.universe:

@@ -21,6 +21,7 @@ used; this example takes the published one as-is.
 Not a recommendation: five large caps over three years is a demonstration of the mechanism, not
 evidence about the signal.
 """
+from ziplime.api import date_rules
 from ziplime.domain.bar_data import BarData
 from ziplime.finance.execution import MarketOrder
 from ziplime.trading.trading_algorithm import TradingAlgorithm
@@ -38,7 +39,6 @@ DATASET = "ZipLime/insider-trading"
 REVISION = "ba0785efcede0b3a13af48dc658a1d39bc87ad1e"
 
 LOOKBACK = 30
-REBALANCE_EVERY_DAYS = 14
 
 
 async def initialize(context: TradingAlgorithm):
@@ -51,15 +51,12 @@ async def initialize(context: TradingAlgorithm):
     context.insiders = await context.huggingface_dataset(
         DATASET, config="features", revision=REVISION,
         fields=["is_cluster_buy", "n_unique_buyers_30d", "buy_notional_usd_30d"])
-    context.last_rebalance = None
     context.reported = False
+    context.schedule_function(rebalance, date_rules.week_start())
 
 
-async def handle_data(context: TradingAlgorithm, data: BarData):
+async def rebalance(context: TradingAlgorithm, data: BarData):
     today = context.simulation_dt.date()
-    if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
-        return
-    context.last_rebalance = today
 
     window = await data.history(assets=context.universe, bar_count=LOOKBACK,
                                 fields=["is_cluster_buy", "n_unique_buyers_30d"],

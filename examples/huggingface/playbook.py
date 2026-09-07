@@ -1,62 +1,41 @@
 """The parts every strategy repeats, so that a strategy is its idea and not its plumbing.
 
 Zipline algorithms are short because two things are given to them: `schedule_function` decides
-when the logic runs, and a pipeline turns a column of numbers into a ranked selection. Neither
-exists in this fork, so nineteen strategies here each hand-rolled both -- the same five-line
-"has it been ninety days yet" gate in twenty files out of twenty, the same loop skipping rows
-whose inputs are missing, the same rank-and-equal-weight.
+when the logic runs, and a pipeline turns a column of numbers into a ranked selection. This fork
+carries the first already -- it needed four bugs fixed before it would run, but it is the real
+thing and strategies here use it. The second has no equivalent, so twenty files each hand-rolled
+the same loop skipping rows whose inputs are missing and the same rank-and-equal-weight.
 
 None of that is the strategy. What follows takes it out of the way. A rule that says *hold the
 companies whose earnings are cash rather than accruals* should read as roughly that sentence, and
 after this it does:
 
-    @every(days=90)
-    async def handle_data(context, data):
+    async def initialize(context):
+        context.universe = await equities(context, FUNDAMENTALS_UNIVERSE)
+        context.source = await mount(context)
+        context.schedule_function(rebalance, date_rules.quarter_start())
+
+    async def rebalance(context, data):
         rows = await data.current(assets=context.universe, fields=FIELDS,
                                   data_source=context.source)
         scores = factor(fresh(rows, context, MAX_AGE),
                         lambda r: -(r["net_income"] - r["operating_cash_flow"]) / r["total_assets"])
         await hold_top(context, data, scores, keep=40)
 
-These belong in the engine rather than in an examples directory -- `every` in particular is
-`schedule_function` wearing a smaller hat. They are here because that is where they can be written
-today.
+What remains here is the pipeline half, and it belongs in the engine rather than in an examples
+directory. It is written here because that is where it could be written today.
 """
 import datetime
-import functools
 
 import polars as pl
 
-from portfolio import priced, rebalance
+from portfolio import priced, rebalance_to
 
 #: Skip a row rather than fail when its inputs are missing. Sparse fundamentals make this the
 #: normal case: a company that did not report gross profit is not an error, it is a company that
 #: did not report gross profit. Only the two errors that *mean* "missing" are caught -- arithmetic
 #: on ``None`` and division by a zero denominator. Anything else is a bug and still raises.
 _MISSING = (TypeError, ZeroDivisionError)
-
-
-def every(days: int):
-    """Run the decorated ``handle_data`` at most once every ``days`` calendar days.
-
-    The gate every strategy was writing by hand, with the state kept on the algorithm rather than
-    in a module global so two strategies in one process cannot interfere.
-
-    Counting calendar days rather than sessions is deliberate here: these datasets publish on
-    filing schedules, not trading ones, and "once a quarter" means ninety days whatever the
-    exchange was doing.
-    """
-    def decorate(handler):
-        @functools.wraps(handler)
-        async def gated(context, data):
-            today = context.simulation_dt.date()
-            last = getattr(context, "_last_run", None)
-            if last is not None and (today - last).days < days:
-                return
-            context._last_run = today
-            return await handler(context, data)
-        return gated
-    return decorate
 
 
 async def equities(context, pairs: list[tuple[str, str]]) -> list:
@@ -120,7 +99,7 @@ async def hold_top(context, data, scores: dict[int, float], keep: int,
         return {}
     weight = 1.0 / len(ranked)
     targets = {sid: weight for sid, _ in ranked}
-    await rebalance(context, data, targets, tolerance=weight * tolerance)
+    await rebalance_to(context, data, targets, tolerance=weight * tolerance)
     return targets
 
 
@@ -153,7 +132,7 @@ async def hold(context, data, sids, rebalance_drift: bool = False,
     if unchanged and not rebalance_drift:
         return targets
     context._held = sids
-    await rebalance(context, data, targets, tolerance=weight * tolerance if weight else 0.0)
+    await rebalance_to(context, data, targets, tolerance=weight * tolerance if weight else 0.0)
     return targets
 
 
@@ -190,5 +169,5 @@ def show_once(context, heading: str, lines) -> None:
         print(f"    {line}")
 
 
-__all__ = ["every", "equities", "fresh", "factor", "hold_top", "hold", "any_of", "show_once",
-           "priced", "rebalance"]
+__all__ = ["equities", "fresh", "factor", "hold_top", "hold", "any_of", "show_once",
+           "priced", "rebalance_to"]

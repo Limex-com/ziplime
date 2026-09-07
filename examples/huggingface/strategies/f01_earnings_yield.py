@@ -28,8 +28,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from fundamentals import FIELDS, mount, rank_and_hold  # noqa: E402
 from hf_config import FUNDAMENTALS_UNIVERSE  # noqa: E402
-from portfolio import priced, rebalance  # noqa: E402
+from portfolio import priced, rebalance_to  # noqa: E402
 
+from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
 
@@ -40,22 +41,18 @@ STRATEGY_INFO = {"window": "fundamentals", "description": "Hold the highest earn
 #: the book forever.
 MAX_STALENESS = datetime.timedelta(days=550)
 KEEP = 40
-REBALANCE_EVERY_DAYS = 90
 NEEDS = ['net_income', 'shares_outstanding', 'shares_adjustment']
 
 
 async def initialize(context: TradingAlgorithm):
     context.universe = [await context.symbol(t, mic=m) for t, m in FUNDAMENTALS_UNIVERSE]
     context.source = await mount(context)
-    context.last_rebalance = None
     context.reported = False
+    context.schedule_function(rebalance, date_rules.quarter_start())
 
 
-async def handle_data(context: TradingAlgorithm, data: BarData):
+async def rebalance(context: TradingAlgorithm, data: BarData):
     today = context.simulation_dt.date()
-    if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
-        return
-    context.last_rebalance = today
 
     # The same call every strategy in this directory makes, against every dataset. The source
     # was mounted knowing that its rows are revisions, so `current` means the newest known value
@@ -90,4 +87,4 @@ async def handle_data(context: TradingAlgorithm, data: BarData):
         for sid, s in top:
             print(f"    {names.get(sid, sid):6s} {s:>10.4f}")
 
-    await rebalance(context, data, rank_and_hold(scores, KEEP), tolerance=0.01)
+    await rebalance_to(context, data, rank_and_hold(scores, KEEP), tolerance=0.01)

@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from congress import load_disclosures, mount_disclosures  # noqa: E402
 from hf_config import CONGRESS_REVISION, CONGRESS_UNIVERSE  # noqa: E402
 
+from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.finance.execution import MarketOrder  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
@@ -46,7 +47,6 @@ BASE_WINDOW_DAYS = 30
 MAX_WINDOW_DAYS = 365
 #: No single name may exceed this share of the book.
 MAX_WEIGHT = 0.20
-REBALANCE_EVERY_DAYS = 7
 #: Leave a position alone while it is within this much of its target. Without a band, a weekly
 #: rebalance re-trades all sixty names every week against nothing but price drift: an earlier
 #: version of this did exactly that and paid commission on 20 719 trades, against the 3 287 the
@@ -66,8 +66,8 @@ async def initialize(context: TradingAlgorithm):
         start_date=context.clock.start_session, end_date=context.clock.end_session,
         session_timezone=str(context.clock.trading_calendar.tz),
         fields=["amount_usd", "ticker"])
-    context.last_rebalance = None
     context.reported = False
+    context.schedule_function(rebalance, date_rules.week_start())
 
 
 def weights_from(filed: pl.DataFrame, today) -> dict[int, float]:
@@ -107,16 +107,13 @@ def weights_from(filed: pl.DataFrame, today) -> dict[int, float]:
     return weights
 
 
-async def handle_data(context: TradingAlgorithm, data: BarData):
+async def rebalance(context: TradingAlgorithm, data: BarData):
     today = context.simulation_dt.date()
-    if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
-        return
 
     filed = await data.history(assets=context.universe, bar_count=LOOKBACK,
                                fields=["amount_usd"], data_source=context.buys)
     if filed.is_empty():
         return
-    context.last_rebalance = today
 
     weights = weights_from(filed, today)
     if not weights:

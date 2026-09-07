@@ -19,8 +19,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from hf_config import INSIDER10_UNIVERSE  # noqa: E402
 from insider import mount_features
-from portfolio import rebalance  # noqa: E402
+from portfolio import rebalance_to  # noqa: E402
 
+from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
 
@@ -28,7 +29,6 @@ STRATEGY_INFO = {"window": "insider10",
                  "description": "Hold names whose insider buying is large against their own history"}
 LOOKBACK = 120
 HOLD_DAYS = 90
-REBALANCE_EVERY_DAYS = 7
 #: How many times its own typical level the trailing purchase total must reach.
 MULTIPLE = 3.0
 
@@ -38,14 +38,11 @@ async def initialize(context: TradingAlgorithm):
     context.source = await mount_features(context, fields=["buy_notional_usd_30d"])
     context.opened_on = {}
     context.held = frozenset()
-    context.last_rebalance = None
+    context.schedule_function(rebalance, date_rules.week_start())
 
 
-async def handle_data(context: TradingAlgorithm, data: BarData):
+async def rebalance(context: TradingAlgorithm, data: BarData):
     today = context.simulation_dt.date()
-    if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
-        return
-    context.last_rebalance = today
 
     window = await data.history(assets=context.universe, bar_count=LOOKBACK,
                                 fields=["buy_notional_usd_30d"], data_source=context.source)
@@ -72,4 +69,4 @@ async def handle_data(context: TradingAlgorithm, data: BarData):
         return
     context.held = held
     weight = 1.0 / len(held) if held else 0.0
-    await rebalance(context, data, {sid: weight for sid in held})
+    await rebalance_to(context, data, {sid: weight for sid in held})

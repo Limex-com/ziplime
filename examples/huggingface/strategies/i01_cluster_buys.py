@@ -16,8 +16,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from insider import mount_features  # noqa: E402
 from hf_config import INSIDER10_UNIVERSE  # noqa: E402
-from playbook import any_of, equities, every, hold, show_once  # noqa: E402
+from playbook import any_of, equities, hold, show_once  # noqa: E402
 
+from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
 
@@ -32,10 +33,10 @@ async def initialize(context: TradingAlgorithm):
     context.universe = await equities(context, INSIDER10_UNIVERSE)
     context.source = await mount_features(context, fields=["is_cluster_buy"])
     context.opened_on = {}
+    context.schedule_function(rebalance, date_rules.week_start())
 
 
-@every(days=7)
-async def handle_data(context: TradingAlgorithm, data: BarData):
+async def rebalance(context: TradingAlgorithm, data: BarData):
     today = context.simulation_dt.date()
     window = await data.history(assets=context.universe, since=WINDOW,
                                 fields=["is_cluster_buy"], data_source=context.source)

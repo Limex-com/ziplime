@@ -20,8 +20,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from fundamentals import FIELDS, mount  # noqa: E402
 from hf_config import FUNDAMENTALS_UNIVERSE  # noqa: E402
-from playbook import equities, every, factor, fresh, hold_top, show_once  # noqa: E402
+from playbook import equities, factor, fresh, hold_top, show_once  # noqa: E402
 
+from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
 
@@ -37,10 +38,10 @@ KEEP = 40
 async def initialize(context: TradingAlgorithm):
     context.universe = await equities(context, FUNDAMENTALS_UNIVERSE)
     context.source = await mount(context)
+    context.schedule_function(rebalance, date_rules.quarter_start())
 
 
-@every(days=90)
-async def handle_data(context: TradingAlgorithm, data: BarData):
+async def rebalance(context: TradingAlgorithm, data: BarData):
     rows = await data.current(assets=context.universe, fields=FIELDS,
                               data_source=context.source)
     scores = factor(

@@ -32,7 +32,7 @@ async def priced(context, data) -> dict[int, float]:
             in zip(quotes["sid"].to_list(), quotes["price"].to_list()) if price and price > 0}
 
 
-async def rebalance(context, data, targets: dict[int, float], tolerance: float = 0.0) -> bool:
+async def rebalance_to(context, data, targets: dict[int, float], tolerance: float = 0.0) -> bool:
     """Move the book to ``targets``, touching only what can actually be traded today.
 
     Args:

@@ -172,20 +172,22 @@ than caching a slow computation.
 ## A strategy should be its idea
 
 Zipline algorithms are short because two things are handed to them: `schedule_function` decides
-when the logic runs, and a pipeline turns a column of numbers into a ranked selection. Neither
-exists in this fork, so the first version of these strategies hand-rolled both — the same
-five-line *has it been ninety days yet* gate in **twenty files out of twenty**, the same loop
-skipping rows with missing inputs, the same rank-and-equal-weight.
+when the logic runs, and a pipeline turns a column of numbers into a ranked selection. The first
+version of these strategies hand-rolled both — the same five-line *has it been ninety days yet*
+gate in **twenty files out of twenty**, the same loop skipping rows with missing inputs, the same
+rank-and-equal-weight.
 
-`playbook.py` takes that out of the way. A whole strategy, all of its logic:
+The gate did not need writing at all. `schedule_function` is in this fork, ported from zipline
+intact, and it works — after four bugs. See [Restoring `schedule_function`](#restoring-schedule_function)
+below. So a strategy here is now shaped the way a zipline algorithm has always been shaped:
 
 ```python
 async def initialize(context):
     context.universe = await equities(context, FUNDAMENTALS_UNIVERSE)
     context.source = await mount(context)
+    context.schedule_function(rebalance, date_rules.quarter_start())
 
-@every(days=90)
-async def handle_data(context, data):
+async def rebalance(context, data):
     rows = await data.current(assets=context.universe, fields=FIELDS,
                               data_source=context.source)
     scores = factor(fresh(rows, context, MAX_AGE),
@@ -193,9 +195,13 @@ async def handle_data(context, data):
     held = await hold_top(context, data, scores, keep=KEEP)
 ```
 
+That is the whole algorithm. There is no module-level `handle_data` at all, which is the ordinary
+zipline shape and the one thing that used to crash on the first bar.
+
+`playbook.py` supplies the other half — the pipeline part, which this fork has no equivalent of:
+
 | | |
 | --- | --- |
-| `@every(days=N)` | run at most this often — `schedule_function` wearing a smaller hat |
 | `equities(context, pairs)` | resolve `(ticker, MIC)` pairs to listings |
 | `fresh(rows, context, max_age)` | drop values too old to act on |
 | `factor(rows, fn)` | score, skipping rows whose inputs are missing |
@@ -208,7 +214,10 @@ denominator. On sparse fundamentals those two *mean* "this company did not repor
 the normal case rather than an error; anything else still raises. That also retires the `NEEDS`
 constant every scoring strategy used to carry.
 
-Measured across the seven strategies rewritten on it:
+`portfolio.rebalance` is now `rebalance_to`, because `rebalance` is the name the scheduled
+function wants and the helper is the one that takes targets.
+
+Measured across the seven strategies rewritten on the playbook:
 
 ```
                             before   after
@@ -232,12 +241,80 @@ is answered by the membership of the set. Rebalancing to equal weight in between
 rule into "hold these names and also sell whichever of them went up" — a different strategy, and
 on this data a worse one.
 
-### Where these belong
+## Restoring `schedule_function`
 
-`every` is `schedule_function`; `factor` with `hold_top` is what a pipeline does. They sit in an
-examples directory because that is where they could be written today, not because that is where
-they should live. If one moves into the engine first, make it `every` — it was duplicated in every
-strategy here without exception.
+`schedule_function`, `date_rules` and `time_rules` were all here, wired into the run loop and
+already `async`. They were also unexercised by any test, and four things had rotted:
+
+1. **Month rules could not be constructed.** `TradingDayOfMonthRule.__init__` called
+   `lossless_float_to_int(n)` — a four-argument `@curry`-ed preprocessor, invoked with one
+   argument. It returned a partially-applied `curry` object, so the next line compared an `int` to
+   a function and raised. `date_rules.month_start()` had never worked in this fork. Upstream
+   applied it as a `@preprocess` decorator, which the port dropped; it is called directly now.
+2. **An algorithm that only schedules crashed on the first bar.** `AlgorithmFile` defaults a
+   missing `handle_data` to a plain `def noop`, and the engine awaits it — `await None`. The two
+   hooks the engine awaits now default to an `async def`.
+3. **The period sets were rebuilt on every bar.** `execution_period_values` groups every session
+   the calendar knows — 36 410 for XNYS — and upstream's `@lazyval` did not survive the port,
+   leaving it commented out. **2.2 ms per bar per rule**, which is most of a ten-year run.
+   Memoised against the calendar it was computed for, so re-threading a calendar still recomputes:
+   **0.29 ms**, a 7.5× improvement.
+4. **A pandas `FutureWarning` once per bar.** `Series.view` → `.astype`.
+
+There is one addition. Upstream stops at months, and company fundamentals arrive four times a
+year, so `date_rules.quarter_start()` and `quarter_end()` join the family — a strategy reading
+statements has no reason to wake up in the two months between them.
+
+`tests/test_schedule_function.py` covers all of it, including the fractional-offset refusal
+(`month_start(1.5)` means nothing and now raises rather than truncating) and the holiday shifts:
+2016's quarters start on 4 January and 3 October, not 1 January and 1 October.
+
+### What changed in the results, and what that revealed
+
+The cadence is now a calendar rule rather than a day count from the first bar:
+
+```
+7 days  -> date_rules.week_start()
+14 days -> date_rules.week_start()      h02 only; it now rebalances twice as often
+30 days -> date_rules.month_start()
+90 days -> date_rules.quarter_start()
+```
+
+Returns moved, and by more than a cadence change should cost — `i04` fell from +403.67% to
++269.65%, `i09` from +430.80% to +276.66%. That is too large to wave through, so the mechanism was
+checked rather than trusted. Counting both gates over the same 2 637 sessions:
+
+```
+every(days=7)    546 fires   Mon 12, Tue 348, Wed 102, Thu 22, Fri 62
+week_start()     548 fires   Mon 492, Tue 56
+dates in common:  50 of 548
+```
+
+The frequency is identical. The *days* barely overlap: counting seven calendar days is pushed
+forward by every holiday, so the old gate drifted off Monday and settled on Tuesday, while
+`week_start` is the first session of the week by construction. So the port is right — same number
+of rebalances — and the return moved because the book was rebuilt on a different day.
+
+Which raises the real question, and it is not about `schedule_function` at all. Running `i04`
+unchanged except for `days_offset`:
+
+| rebalance day | return | sharpe | max dd |
+|---|---|---|---|
+| Monday | +269.65% | 0.55 | -61.09% |
+| Tuesday | +202.37% | 0.50 | -58.14% |
+| Wednesday | +373.13% | 0.64 | -59.16% |
+| Thursday | +305.26% | 0.62 | -50.21% |
+| Friday | +257.64% | 0.59 | -53.15% |
+
+**Same rule, same signal, same 548 rebalances: a 171-point spread on the choice of weekday.** The
+control (`i00`) returns +221.28% at Sharpe 0.64 — which every one of those five ties or beats on
+return and none beats on Sharpe. The +403.67% this strategy used to print was not a result; it was
+one draw from that distribution, and the old gate picked the day by accident of the holiday
+calendar.
+
+This is a property of the strategies, not of the scheduler, and it was invisible while the
+rebalance day was an emergent side effect of a day counter. Read every concentrated number in the
+tables below as one sample from a spread of this width.
 
 ## One way to read, whatever the dataset
 

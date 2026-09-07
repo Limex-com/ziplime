@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from congress import SALES, load_disclosures, mount_disclosures  # noqa: E402
 from hf_config import CONGRESS_REVISION, CONGRESS_UNIVERSE  # noqa: E402
 
+from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.finance.execution import MarketOrder  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
@@ -47,7 +48,6 @@ WINDOW = __import__("datetime").timedelta(days=60)
 SIDE_WEIGHT = 0.5
 #: No single name on either side may exceed this share of the book.
 MAX_WEIGHT = 0.10
-REBALANCE_EVERY_DAYS = 7
 TOLERANCE = 0.02
 
 
@@ -63,8 +63,8 @@ async def initialize(context: TradingAlgorithm):
         start_date=context.clock.start_session, end_date=context.clock.end_session,
         session_timezone=str(context.clock.trading_calendar.tz),
         fields=["amount_usd", "direction", "ticker"])
-    context.last_rebalance = None
     context.reported = False
+    context.schedule_function(rebalance, date_rules.week_start())
 
 
 def side_weights(rows: list[dict], budget: float) -> dict[int, float]:
@@ -86,10 +86,8 @@ def side_weights(rows: list[dict], budget: float) -> dict[int, float]:
     return {sid: min(budget * value / gross, MAX_WEIGHT) for sid, value in totals.items()}
 
 
-async def handle_data(context: TradingAlgorithm, data: BarData):
+async def rebalance(context: TradingAlgorithm, data: BarData):
     today = context.simulation_dt.date()
-    if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
-        return
 
     # `since=` rather than a row count: these are disclosures, not bars, so "the last sixty rows"
     # would mean sixty filings -- which for a rarely-traded name reaches back years.
@@ -97,7 +95,6 @@ async def handle_data(context: TradingAlgorithm, data: BarData):
                                fields=["amount_usd", "direction"], data_source=context.flow)
     if filed.is_empty():
         return
-    context.last_rebalance = today
 
     recent = filed.to_dicts()
     bought = side_weights([r for r in recent if (r["direction"] or 0) > 0], SIDE_WEIGHT)

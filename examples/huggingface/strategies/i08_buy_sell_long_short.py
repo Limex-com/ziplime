@@ -19,8 +19,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from hf_config import INSIDER10_UNIVERSE  # noqa: E402
 from insider import mount_features
-from portfolio import rebalance  # noqa: E402
+from portfolio import rebalance_to  # noqa: E402
 
+from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
 
@@ -29,14 +30,13 @@ STRATEGY_INFO = {"window": "insider10",
 LOOKBACK = 30
 SIDE_WEIGHT = 0.5
 MAX_WEIGHT = 0.05
-REBALANCE_EVERY_DAYS = 7
 
 
 async def initialize(context: TradingAlgorithm):
     context.universe = [await context.symbol(t, mic=m) for t, m in INSIDER10_UNIVERSE]
     context.source = await mount_features(
         context, fields=["n_open_market_buys", "n_open_market_sells"])
-    context.last_rebalance = None
+    context.schedule_function(rebalance, date_rules.week_start())
 
 
 def side(sids: set[int], budget: float) -> dict[int, float]:
@@ -46,11 +46,7 @@ def side(sids: set[int], budget: float) -> dict[int, float]:
     return {sid: min(budget / len(sids), MAX_WEIGHT) for sid in sids}
 
 
-async def handle_data(context: TradingAlgorithm, data: BarData):
-    today = context.simulation_dt.date()
-    if context.last_rebalance and (today - context.last_rebalance).days < REBALANCE_EVERY_DAYS:
-        return
-    context.last_rebalance = today
+async def rebalance(context: TradingAlgorithm, data: BarData):
 
     window = await data.history(
         assets=context.universe, bar_count=LOOKBACK,
@@ -72,4 +68,4 @@ async def handle_data(context: TradingAlgorithm, data: BarData):
     targets = side(bought, SIDE_WEIGHT)
     targets.update({sid: -w for sid, w in side(sold, SIDE_WEIGHT).items()})
     if targets:
-        await rebalance(context, data, targets, tolerance=0.01)
+        await rebalance_to(context, data, targets, tolerance=0.01)
