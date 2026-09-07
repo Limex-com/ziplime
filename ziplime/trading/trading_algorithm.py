@@ -355,9 +355,12 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
         self._in_before_trading_start = True
 
+        # `before_trading_start` fires 46 minutes before the open, which is not a market minute at
+        # any intraday rate -- not only at one minute. Testing for equality left every other
+        # intraday rate reading data at a minute the calendar does not have.
         with handle_non_market_minutes(
                 data
-        ) if self.clock.emission_rate == datetime.timedelta(minutes=1) else ExitStack():
+        ) if self.clock.emission_rate < datetime.timedelta(days=1) else ExitStack():
             self._before_trading_start(self, data)
 
         self._in_before_trading_start = False
@@ -533,9 +536,12 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         date_rule = date_rule or date_rules.every_day()
         time_rule = (
             (time_rule or time_rules.every_minute())
-            if self.clock.emission_rate == datetime.timedelta(minutes=1)
+            if self.clock.emission_rate < datetime.timedelta(days=1)
             else
-            # If we are in daily mode the time_rule is ignored.
+            # A daily simulation has one bar per session, so there is no time of day to schedule
+            # against and the time rule is ignored. Any intraday rate does have one: this used to
+            # test for exactly one minute, which silently discarded `market_open(minutes=30)` on a
+            # five-minute run and fired the function on every bar instead.
             time_rules.every_minute()
         )
 
@@ -2553,8 +2559,12 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                         # self.datetime = dt
                         # self.on_dt_changed(dt=dt)
                         self.before_trading_start(data=self.current_data)
-                    elif action == SimulationEvent.EMISSION_RATE_END and self.clock.emission_rate == datetime.timedelta(
-                            minutes=1):
+                    elif (action == SimulationEvent.EMISSION_RATE_END
+                          and self.clock.emission_rate < datetime.timedelta(days=1)):
+                        # Syncing sale prices to the ledger happens here for intraday rates and in
+                        # the session-end branch for daily ones. Testing for exactly one minute
+                        # meant a five-minute run did neither, and carried a portfolio value that
+                        # never moved between sessions.
                         # await self._ledger.sync_last_sale_prices(dt=dt, handle_non_market_minutes=False)
                         await self.sync_last_sale_prices_to_ledger(dt=dt,
                                                                    handle_non_market_minutes=False)  # TODO : remove

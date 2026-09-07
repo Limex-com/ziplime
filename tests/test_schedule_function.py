@@ -132,3 +132,71 @@ def test_an_algorithm_that_only_schedules_needs_no_handle_data(tmp_path: Path):
     assert asyncio.iscoroutinefunction(algo.handle_data)
     assert asyncio.iscoroutinefunction(algo.initialize)
     asyncio.run(algo.handle_data(None, None))
+
+
+def intraday_grid(day: str, emission_rate: datetime.timedelta, calendar: str = CALENDAR):
+    """The minutes an intraday simulation clock emits for one session.
+
+    Built the way :class:`~ziplime.gens.domain.simulation_clock.SimulationClock` builds them:
+    from the session's first minute to its close, stepping by the emission rate.
+    """
+    import polars as pl
+
+    cal = get_calendar(calendar)
+    session = cal.sessions_in_range(day, day)
+    opens = cal.first_minutes.loc[session].dt.tz_convert(cal.tz)
+    closes = cal.schedule.loc[session, "close"].dt.tz_convert(cal.tz)
+    return list(pl.datetime_range(opens.iloc[0], closes.iloc[0], interval=emission_rate,
+                                  eager=True))
+
+
+def times_fired(time_rule, emission_rate: datetime.timedelta, day: str = "2026-09-02"):
+    cal = get_calendar(CALENDAR)
+    rule = make_eventrule(date_rule=date_rules.every_day(), time_rule=time_rule,
+                          cal=cal, half_days=True)
+    return [minute.time().strftime("%H:%M")
+            for minute in intraday_grid(day, emission_rate) if rule.should_trigger(minute)]
+
+
+MINUTE = datetime.timedelta(minutes=1)
+FIVE_MINUTES = datetime.timedelta(minutes=5)
+
+
+def test_time_rules_on_a_one_minute_grid():
+    """The resolution these rules were written for, and the behaviour that must not change."""
+    assert times_fired(time_rules.market_open(minutes=1), MINUTE) == ["09:31"]
+    assert times_fired(time_rules.market_open(minutes=30), MINUTE) == ["10:00"]
+    assert times_fired(time_rules.market_close(minutes=30), MINUTE) == ["15:30"]
+    assert times_fired(time_rules.market_close(minutes=1), MINUTE) == ["15:59"]
+
+
+def test_time_rules_fire_on_the_first_bar_at_or_after_their_target():
+    """A five-minute grid has bars at 09:31, 09:36, 09:41 -- and none at 10:00.
+
+    Matching the target minute exactly meant `market_open(minutes=30)` never fired at any rate but
+    one minute, silently: the scheduled function was simply never called and the run completed.
+    """
+    assert times_fired(time_rules.market_open(minutes=1), FIVE_MINUTES) == ["09:31"]
+    assert times_fired(time_rules.market_open(minutes=30), FIVE_MINUTES) == ["10:01"]
+    assert times_fired(time_rules.market_close(minutes=30), FIVE_MINUTES) == ["15:31"]
+
+
+def test_an_offset_shorter_than_a_bar_has_no_bar_to_fire_on():
+    """`market_close(minutes=1)` asks for 15:59 and the last five-minute bar is 15:56.
+
+    Pinned rather than worked around: there is no bar in the last minute of the session, so the
+    honest answer is that the rule does not fire. Ask for an offset at least one bar long.
+    """
+    assert times_fired(time_rules.market_close(minutes=1), FIVE_MINUTES) == []
+
+
+def test_a_time_rule_fires_once_a_session_not_once_a_bar():
+    """`>=` on its own would fire on every bar after the target; `OncePerDay` is what stops it."""
+    cal = get_calendar(CALENDAR)
+    rule = make_eventrule(date_rule=date_rules.every_day(),
+                          time_rule=time_rules.market_open(minutes=30),
+                          cal=cal, half_days=True)
+    fired = [minute for day in ("2026-09-02", "2026-09-03", "2026-09-04")
+             for minute in intraday_grid(day, FIVE_MINUTES) if rule.should_trigger(minute)]
+    assert [m.date().isoformat() for m in fired] == ["2026-09-02", "2026-09-03", "2026-09-04"]
+    assert {m.time().strftime("%H:%M") for m in fired} == {"10:01"}

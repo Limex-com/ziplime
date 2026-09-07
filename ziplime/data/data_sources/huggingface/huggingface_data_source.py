@@ -294,8 +294,7 @@ class HuggingFaceDataSource(DataSource):
             readme=hub.read_text(pinned, "README.md"))
 
         spec = manifest.config(config or address_config)
-        repo_files = tuple(path for path in pinned.files
-                           if path.endswith(".parquet") and spec.matches(path))
+        repo_files = spec.select(path for path in pinned.files if path.endswith(".parquet"))
         if not repo_files:
             raise ManifestError(
                 f"{repo_id}:{spec.name} declares the paths {list(spec.paths)} but the repository "

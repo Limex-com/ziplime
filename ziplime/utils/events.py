@@ -401,7 +401,12 @@ class AfterOpen(StatelessRule):
         if self._period_start is None or self._period_close <= dt:
             self.calculate_dates(dt)
 
-        return dt == self._period_end
+        # The first bar at or after the target, not the bar *equal* to it. `OncePerDay` wraps this
+        # rule, so only that first one gets through. Equality assumes a bar exists on every minute,
+        # which is true only when the emission rate is one minute: on a five-minute grid the bars
+        # fall at 09:31, 09:36, 09:41 and `market_open(minutes=30)` asks for 10:00, which is not
+        # one of them, so the function was never called and nothing said so.
+        return dt >= self._period_end
 
 
 class BeforeClose(StatelessRule):
@@ -455,7 +460,12 @@ class BeforeClose(StatelessRule):
         if self._period_start is None or self._period_close <= dt:
             self.calculate_dates(dt)
 
-        return self._period_start == dt
+        # The first bar at or after the target -- see `AfterOpen.should_trigger`. One consequence
+        # is worth knowing: an offset smaller than the bar length can leave no bar to fire on at
+        # all. `market_close(minutes=1)` on a five-minute grid asks for 15:59 and the session's
+        # last bar is 15:56, so it does not fire that day. Ask for an offset at least as long as
+        # a bar.
+        return dt >= self._period_start
 
 
 class NotHalfDay(StatelessRule):

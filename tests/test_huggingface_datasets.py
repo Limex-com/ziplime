@@ -28,8 +28,9 @@ from ziplime.data.data_sources.huggingface.huggingface_data_source import (
     HuggingFaceDataSource, is_address, parse_address,
 )
 from ziplime.data.data_sources.huggingface.manifest import (
-    EVENT_DATE_COLUMNS, KNOWLEDGE_DATE_COLUMNS, ManifestError, NoKnowledgeDateError,
-    _glob_matches, parse_manifest, resolve_entity_column, resolve_knowledge_column,
+    EVENT_DATE_COLUMNS, KNOWLEDGE_DATE_COLUMNS, ConfigSpec, ManifestError,
+    NoKnowledgeDateError, _glob_matches, parse_manifest, resolve_entity_column,
+    resolve_knowledge_column,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "huggingface"
@@ -99,6 +100,52 @@ class GlobTests(unittest.TestCase):
 
     def test_an_unrelated_path_does_not_match(self):
         self.assertFalse(_glob_matches("data/features/**/*.parquet", "data/trades/a.parquet"))
+
+
+class DeltaConfigTests(unittest.TestCase):
+    """A config published as a Delta table as well as Parquet matches its own glob twice.
+
+    `ZipLime/insider-trading:pit` declares `data/pit/**/*.parquet` and holds 344 Delta parts beside
+    341 partitioned ones -- the same Form 4s in two layouts -- plus three transaction-log
+    checkpoints whose columns are `add`, `remove`, `metaData`. Taking the glob at its word reads
+    every filing twice and probes the schema of a log file, which is how mounting this config
+    failed with "no knowledge-date column" on a table whose knowledge dates are the point.
+    """
+
+    PIT = ConfigSpec(name="pit", paths=("data/pit/**/*.parquet",),
+                     delta_path="data/pit/insider_trading.delta")
+
+    FILES = (
+        "data/pit/insider_trading.delta/_delta_log/00000000000000000099.checkpoint.parquet",
+        "data/pit/insider_trading.delta/part-00000-0008a703-c000.snappy.parquet",
+        "data/pit/insider_trading.delta/part-00001-1118b814-c000.snappy.parquet",
+        "data/pit/knowledge_year=2025/part-000.parquet",
+        "data/pit/knowledge_year=2026/part-000.parquet",
+    )
+
+    def test_the_plain_partitions_win_over_the_delta_copy(self):
+        self.assertEqual(
+            self.PIT.select(self.FILES),
+            ("data/pit/knowledge_year=2025/part-000.parquet",
+             "data/pit/knowledge_year=2026/part-000.parquet"))
+
+    def test_a_delta_only_config_still_resolves(self):
+        """`ZipLime/congress-trading:pit` publishes no plain partitions at all."""
+        delta_only = tuple(f for f in self.FILES if ".delta/" in f)
+        self.assertEqual(
+            self.PIT.select(delta_only),
+            ("data/pit/insider_trading.delta/part-00000-0008a703-c000.snappy.parquet",
+             "data/pit/insider_trading.delta/part-00001-1118b814-c000.snappy.parquet"))
+
+    def test_the_transaction_log_is_never_data(self):
+        for chosen in (self.PIT.select(self.FILES),
+                       self.PIT.select(f for f in self.FILES if ".delta/" in f)):
+            self.assertFalse([path for path in chosen if "_delta_log" in path])
+
+    def test_a_config_without_a_delta_table_is_unchanged(self):
+        plain = ConfigSpec(name="features", paths=("data/features/**/*.parquet",))
+        files = ("data/features/a.parquet", "data/features/y=2026/b.parquet")
+        self.assertEqual(plain.select(files), files)
 
 
 class ManifestTests(unittest.TestCase):
