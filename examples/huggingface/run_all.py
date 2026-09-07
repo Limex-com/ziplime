@@ -51,11 +51,18 @@ async def main(only: list[str] | None = None, verbose: bool = False):
     print(f"{'strategy'.ljust(width)}  {'trades':>6s} {'return':>9s} {'cagr':>7s} "
           f"{'vol':>6s} {'sharpe':>7s} {'max dd':>8s} {'ret/dd':>7s}  description")
     print("-" * (width + 66))
+    def cell(value, spec: str, width: int) -> str:
+        """A blank rather than `nan`. A run too short to annualise has no annual rate, and
+        printing one that reads `+nan%` invites someone to fix the formatting instead."""
+        return "--".rjust(width) if value != value else format(value, spec)
+
     for row in rows:
+        nan = float("nan")
         print(f"{row['name'].ljust(width)}  {row['transactions']:>6d} {row['return']:>+8.2%} "
-              f"{row.get('cagr', float('nan')):>+6.2%} {row.get('volatility', float('nan')):>6.1%} "
-              f"{row.get('sharpe', float('nan')):>7.2f} {row['max_drawdown']:>+8.2%} "
-              f"{row.get('return_to_drawdown', float('nan')):>7.2f}  {row['description'][:52]}")
+              f"{cell(row.get('cagr', nan), '>+6.2%', 7)} "
+              f"{cell(row.get('volatility', nan), '>6.1%', 6)} "
+              f"{cell(row.get('sharpe', nan), '>7.2f', 7)} {row['max_drawdown']:>+8.2%} "
+              f"{cell(row.get('return_to_drawdown', nan), '>7.2f', 7)}  {row['description'][:52]}")
 
     print()
     if failures:

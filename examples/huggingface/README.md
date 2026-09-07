@@ -31,6 +31,10 @@ The equities are priced from Yahoo Finance. The datasets come from the Hub.
 | `h05_universe_benchmark` | none | the control: the same universe, equally weighted, ignoring every disclosure |
 | `h06_congress_buys` | congress `trades` + `filings` | the published "Congress Buys" method — size-weighted, weekly, window stretched for diversification |
 | `h07_congress_long_short` | congress `trades` + `filings` | long the buys, short the sells: the same signal with market direction removed |
+| `m00_intraday_control` | none | the intraday control: nineteen names bought once, never touched |
+| `m01_next_bar_after_filing` | insider `pit`, one-minute bars | acting in the first bar an acceptance timestamp allows — five filings in six wait for the next open |
+| `m02_act_at_the_open` | insider `pit`, five-minute bars | the same decision executed 30 minutes after the open |
+| `m03_act_at_the_close` | insider `pit`, five-minute bars | the same decision executed 30 minutes before the close |
 
 ## The results, before anything else
 
@@ -315,6 +319,90 @@ calendar.
 This is a property of the strategies, not of the scheduler, and it was invisible while the
 rebalance day was an emergent side effect of a day counter. Read every concentrated number in the
 tables below as one sample from a spread of this width.
+
+## Minutes, and what a daily bar cannot say
+
+These datasets record when something became public **to the second**. Every strategy above runs on
+daily bars, where that precision buys nothing: a Form 4 accepted at 16:54 on Tuesday and one
+accepted at 09:31 are the same row to a simulation with one bar per session.
+
+It is not a small distinction. Across all 309 011 Form 4 point-in-time rows filed in 2026, by New
+York time:
+
+```
+00:00-09:30  pre-market        11 159    3.6%
+09:30-16:00  market open       39 535   12.8%
+16:00-20:00  after the close  220 129   71.2%
+20:00-24:00  late              38 188   12.4%
+             median 16:54
+```
+
+**Five filings in six arrive after the close.** The earliest honest fill for those is the next
+session's open — a statement a daily backtest has no way to make. `m01_next_bar_after_filing` runs
+on one-minute bars and prints it:
+
+```
+HSY    filed 09-02 16:59:51 -> acted 09-03 09:31  ( 16.5h later)
+CRWD   filed 09-02 20:00:06 -> acted 09-03 09:31  ( 13.5h later)
+UTHR   filed 09-03 16:31:54 -> acted 09-04 09:31  ( 17.0h later)
+STX    filed 09-03 16:51:20 -> acted 09-04 09:31  ( 16.7h later)
+```
+
+Of the 38 distinct instants at which a Form 4 on these nineteen names became public over those
+three sessions, **not one fell inside market hours**.
+
+### Time of day, measured the way the weekday was
+
+`m02` and `m03` are the same rule reading the same disclosures at the same instant — both look at
+the first bar of the session — and differ only in when the orders go out:
+
+```
+m00_intraday_control      19 trades   -1.40%    the universe, bought once
+m02_act_at_the_open      138 trades   +7.96%    30 minutes after the open
+m03_act_at_the_close     137 trades   +9.90%    30 minutes before the close
+```
+
+Twenty sessions of five-minute bars is a demonstration, not evidence, and the gap between the two
+is well inside what twenty sessions can produce by chance. What it does establish is that the hour
+is a free parameter nobody chose deliberately — the same finding as the weekday, one level down.
+
+### What this took
+
+Four more things were broken, and each of them failed silently rather than loudly.
+
+1. **Time rules only worked at exactly one minute.** `AfterOpen` and `BeforeClose` compared the
+   bar to the target minute with `==`. On a five-minute grid the bars fall at 09:31, 09:36, 09:41
+   and `market_open(minutes=30)` asks for 10:00 — so the scheduled function was never called and
+   the run completed normally. They now fire on the first bar at or after the target, which is
+   identical behaviour on a one-minute grid. One consequence is pinned by a test: an offset
+   shorter than a bar (`market_close(minutes=1)` on five-minute data) has no bar to fire on and
+   does not fire.
+2. **Everything but exactly one minute or exactly one day was mis-handled.** Three checks in
+   `trading_algorithm` tested `emission_rate == timedelta(minutes=1)` where they meant *intraday*.
+   A five-minute run consequently never synced sale prices to the ledger — neither branch claimed
+   it — and carried a portfolio value that did not move. They test `< timedelta(days=1)` now.
+3. **A config published as a Delta table was read twice.** `ZipLime/insider-trading:pit` declares
+   `data/pit/**/*.parquet` and holds 344 Delta parts beside 341 partitioned ones — the same
+   filings in two layouts — plus transaction-log checkpoints whose columns are `add`, `remove`,
+   `metaData`. Mounting it failed with *no knowledge-date column* because the schema probe read a
+   log file; had it not, every Form 4 would have been counted twice. `ConfigSpec.select` now
+   returns one copy and never the log.
+4. **The "no price in this bar" warning raised `AttributeError`.** It formatted
+   `position.asset.asset_name`, a field `ExchangeAsset` does not have. Daily bars always have a
+   price, so nothing had ever reached that line.
+
+And one piece of new plumbing that had to be right: a vendor labels an intraday bar with the time
+it **starts**, and the clock emits the minute a bar **ends**. Stamping the vendor's label directly
+is a one-bar look-ahead that raises nothing and simply improves the returns.
+`ziplime.data.services.bar_alignment` stamps each bar at the first clock minute at or after its
+close, drops the last bar of each session because there is no honest minute left to trade it, and
+`tests/test_bar_alignment.py` asserts no bar is ever stamped before its own close.
+
+### Running them
+
+Intraday examples cannot be pinned to fixed dates. Yahoo serves about a week of one-minute history
+and two months of five-minute, and deletes what falls off the back, so the window follows the
+calendar and these four do not reproduce a number twice. The timing is what reproduces.
 
 ## One way to read, whatever the dataset
 

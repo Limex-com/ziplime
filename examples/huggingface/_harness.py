@@ -33,7 +33,14 @@ from ziplime.finance.commission import PerShare  # noqa: E402
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage  # noqa: E402
 from ziplime.utils.bundle_utils import get_market_data_source  # noqa: E402
 
+from intraday import (  # noqa: E402
+    INTRADAY_UNIVERSE, build_intraday_bundle, recent_window,
+)
+
 TZ = ZoneInfo("America/New_York")
+
+#: Sessions a run needs before an annual rate means anything. A quarter of a year.
+MIN_SESSIONS_TO_ANNUALISE = 60
 STRATEGY_DIR = Path(__file__).parent / "strategies"
 
 
@@ -66,6 +73,18 @@ def load_strategy_info(path: Path) -> dict:
         info.setdefault("equities", INSIDER10_UNIVERSE)
         info.setdefault("start", INSIDER10_START)
         info.setdefault("end", INSIDER10_END)
+    elif window in ("intraday-1m", "intraday-5m"):
+        # The only windows here that are not fixed dates. Yahoo deletes intraday history as it
+        # ages -- seven days of one-minute bars, sixty of five-minute -- so the window has to
+        # follow the calendar, and these examples demonstrate a mechanism rather than reproduce
+        # a number. See `intraday.recent_window`.
+        rate = (datetime.timedelta(minutes=1) if window == "intraday-1m"
+                else datetime.timedelta(minutes=5))
+        start, end = recent_window(rate, sessions=3 if window == "intraday-1m" else 20)
+        info.setdefault("equities", INTRADAY_UNIVERSE)
+        info.setdefault("emission_rate", rate)
+        info.setdefault("start", start)
+        info.setdefault("end", end)
     else:
         info.setdefault("equities", [(t, EQUITY_MIC) for t in EQUITY_TICKERS])
         info.setdefault("start", START)
@@ -75,7 +94,7 @@ def load_strategy_info(path: Path) -> dict:
 
 
 def list_strategies() -> list[dict]:
-    return [load_strategy_info(p) for p in sorted(STRATEGY_DIR.glob("[hif][0-9][0-9]_*.py"))]
+    return [load_strategy_info(p) for p in sorted(STRATEGY_DIR.glob("[hifm][0-9][0-9]_*.py"))]
 
 
 async def load_listings(asset_service, universe: list[tuple[str, str]]):
@@ -202,7 +221,12 @@ def _assemble_bundle(data, asset_service, key) -> DataBundle:
 async def run_strategy(info: dict):
     asset_service = get_asset_service(db_path=ASSET_DB_PATH, clear_asset_db=False)
     listings = await load_listings(asset_service, info["equities"])
-    bundle = await build_bundle(listings, info["start"], info["end"], asset_service)
+    emission_rate = info.get("emission_rate", datetime.timedelta(days=1))
+    if emission_rate < datetime.timedelta(days=1):
+        bundle = await build_intraday_bundle(listings, info["start"], info["end"],
+                                             emission_rate, asset_service, TRADING_CALENDAR)
+    else:
+        bundle = await build_bundle(listings, info["start"], info["end"], asset_service)
 
     start = datetime.datetime.combine(info["start"], datetime.time.min, tzinfo=TZ)
     end = datetime.datetime.combine(info["end"], datetime.time.max, tzinfo=TZ)
@@ -214,7 +238,7 @@ async def run_strategy(info: dict):
             total_cash=STARTING_CASH,
             market_data_source=bundle,
             custom_data_sources=[],
-            emission_rate=datetime.timedelta(days=1),
+            emission_rate=emission_rate,
             benchmark_returns=None, benchmark_asset_symbol=None,
             stop_on_error=True,
             asset_service=asset_service,
@@ -241,15 +265,21 @@ def summarise(info: dict, result) -> dict:
     total_return = float(perf["algorithm_period_return"].iloc[-1])
     drawdown = float(perf["max_drawdown"].iloc[-1])
     years = len(perf) / 252.0
+    # Annualising a run of a few sessions produces a number that is arithmetically correct and
+    # says nothing: +1.26% over three days is "+186% a year", and a Sharpe of 6. The intraday
+    # examples exist to demonstrate timing over a window Yahoo will still serve, so they report
+    # what happened and leave the annual figures blank rather than printing fiction.
+    annualisable = len(perf) >= MIN_SESSIONS_TO_ANNUALISE
 
     sharpe = float("nan")
     volatility = float("nan")
-    if returns is not None and len(returns) > 1:
+    if returns is not None and len(returns) > 1 and annualisable:
         daily = returns.astype(float)
         volatility = float(daily.std() * (252 ** 0.5))
         if volatility > 0:
             sharpe = float(daily.mean() * 252 / volatility)
-    cagr = ((1.0 + total_return) ** (1.0 / years) - 1.0) if years > 0 and total_return > -1 else float("nan")
+    cagr = (((1.0 + total_return) ** (1.0 / years) - 1.0)
+            if annualisable and years > 0 and total_return > -1 else float("nan"))
 
     return {
         "name": info["name"],
