@@ -169,6 +169,46 @@ which 0.04 was reading Parquet and the rest was resolving twelve thousand ticker
 database query at a time. Batching that query made it 0.95 seconds — which is the better answer
 than caching a slow computation.
 
+## One way to read, whatever the dataset
+
+Every strategy here reads through the same two calls, against prices, congressional
+disclosures, insider filings and SEC financial statements alike:
+
+```python
+window  = await data.history(assets=universe, since=..., fields=[...], data_source=source)
+current = await data.current(assets=universe, fields=[...], data_source=source)
+```
+
+That was not true for a while, and the way it broke is worth knowing.
+
+`data.current` asks a source for its state now, and the base implementation takes the newest row.
+For prices and for daily aggregates that is right. For SEC statements it is wrong: the same period
+is republished as it is revised, and a later filing restating it reports **fewer** line items — so
+the newest row is missing whatever that filing did not repeat, which is 78% of `total_assets`.
+
+The first version of these examples fixed that in the strategy: `fundamentals.as_of(window, FIELDS)`
+coalesced the columns after reading. It worked, and it was wrong in design — the caller had to know
+which dataset needed which helper, and a fundamentals strategy ended up importing
+`from insider import rebalance` because that is where the shared code happened to live.
+
+Now the source declares it. `HuggingFaceDataSource` takes a `Resolution`:
+
+| | what `data.current` returns |
+| --- | --- |
+| `LATEST_ROW` (default) | the newest row per instrument — prices, daily aggregates |
+| `COALESCE` | the newest non-null value per **column**, across the revisions visible then |
+
+`fundamentals.mount()` passes `COALESCE`; nothing else needs to. The helper is gone, and reading a
+financial statement looks exactly like reading a price.
+
+What legitimately stays per dataset is **preparation**, not access: which config to mount, which
+columns, which rows to exclude. `congress.load_disclosures()` joins `filings` to get a real
+publication date; `fundamentals.load_statements()` filters `period_kind` and derives a split
+factor. That is knowledge about a dataset and it has to live somewhere. The reading does not.
+
+Portfolio helpers live in `portfolio.py` for the same reason — turning target weights into orders
+has nothing to do with what the strategy read.
+
 ## Counting rows or counting time
 
 `data.history` takes **either** `bar_count` or `since`, and on event data the choice matters more

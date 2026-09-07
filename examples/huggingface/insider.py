@@ -64,61 +64,10 @@ def newest_per_sid(frame, columns: list[str]) -> dict[int, dict]:
     whole of it, but doing it in three places invited three subtly different versions.
 
     Its companion ``window_sums`` is gone: it summed a frame after re-filtering it by date, which
-    is what ``data.history(since=...)`` now does at the source.
+    is what ``data.history(since=...)`` now does at the source. ``priced`` and ``rebalance`` moved
+    to ``portfolio``, where they always belonged.
     """
     latest: dict[int, dict] = {}
     for row in frame.sort("date").iter_rows(named=True):
         latest[row["sid"]] = row
     return {sid: {c: row.get(c) for c in columns} for sid, row in latest.items()}
-
-
-async def priced(context, data) -> dict[int, float]:
-    """Instruments with a live quote today, keyed by sid.
-
-    Necessary because a target of zero is still an order. Several names in this universe list
-    part-way through the window -- BATRA began trading in 2016 -- and calling
-    ``order_target_percent(asset, 0.0)`` on one that has no price raises
-    ``CannotOrderDelistedAsset`` rather than doing nothing. So the rebalance skips them entirely.
-    """
-    quotes = await data.current(assets=context.universe, fields=["price"])
-    return {sid: price for sid, price
-            in zip(quotes["sid"].to_list(), quotes["price"].to_list()) if price and price > 0}
-
-
-async def rebalance(context, data, targets: dict[int, float], tolerance: float = 0.0) -> bool:
-    """Move the book to ``targets``, touching only what can actually be traded today.
-
-    Args:
-        targets: Desired weight per sid. Anything omitted is targeted at zero.
-        tolerance: Leave a position alone while it is within this much of its target. Zero
-            rebalances on any difference; the weekly strategies pass a band to avoid trading
-            against nothing but price drift.
-
-    Returns:
-        Whether anything was ordered.
-    """
-    from ziplime.finance.execution import MarketOrder
-
-    live = await priced(context, data)
-    if not live:
-        return False
-    value = context.portfolio.portfolio_value
-    traded = False
-    for asset in context.universe:
-        if asset.sid not in live:
-            continue
-        # `order_target_percent` does not account for open orders -- its own docstring says two
-        # calls allocate twice. These are thin micro caps, so an order is often still working a
-        # week later when the next rebalance comes round, and re-targeting stacks on top of it.
-        # An earlier version without this guard ran the book to 15x leverage and a short exposure
-        # of ten billion on a one-million-dollar account.
-        if context.get_open_orders(asset):
-            continue
-        target = targets.get(asset.sid, 0.0)
-        if tolerance:
-            held = await context.portfolio.get_asset_positions_value(asset)
-            if abs(target - (held / value if value else 0.0)) < tolerance:
-                continue
-        await context.order_target_percent(asset=asset, target=target, style=MarketOrder())
-        traded = True
-    return traded

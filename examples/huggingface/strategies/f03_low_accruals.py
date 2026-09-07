@@ -14,21 +14,24 @@ picking read most companies drop out for want of a balance sheet.
 """
 import datetime
 import sys
+
+import polars as pl
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from fundamentals import FIELDS, as_of, mount, rank_and_hold  # noqa: E402
+from fundamentals import FIELDS, mount, rank_and_hold  # noqa: E402
 from hf_config import FUNDAMENTALS_UNIVERSE  # noqa: E402
-from insider import priced, rebalance  # noqa: E402
+from portfolio import priced, rebalance  # noqa: E402
 
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
 
 STRATEGY_INFO = {"window": "fundamentals", "description": "Hold companies whose earnings are cash rather than accruals"}
 
-#: How far back to look for the freshest filing. Annual statements, so a year and a half covers a
-#: company that files late without reaching back to the one before.
-WINDOW = datetime.timedelta(days=550)
+#: Ignore a company whose freshest statement is older than this. Annual filings, so a year and a
+#: half allows for a late filer without letting a company that stopped reporting in 2015 sit in
+#: the book forever.
+MAX_STALENESS = datetime.timedelta(days=550)
 KEEP = 40
 REBALANCE_EVERY_DAYS = 90
 NEEDS = ['net_income', 'operating_cash_flow', 'total_assets']
@@ -47,9 +50,15 @@ async def handle_data(context: TradingAlgorithm, data: BarData):
         return
     context.last_rebalance = today
 
-    window = await data.history(assets=context.universe, since=WINDOW,
-                                fields=FIELDS, data_source=context.source)
-    known = as_of(window, FIELDS)
+    # The same call every strategy in this directory makes, against every dataset. The source
+    # was mounted knowing that its rows are revisions, so `current` means the newest known value
+    # per column rather than the newest row.
+    statements = await data.current(assets=context.universe, fields=FIELDS,
+                                    data_source=context.source)
+    if statements.is_empty():
+        return
+    fresh = statements.filter(pl.col("date") >= context.simulation_dt - MAX_STALENESS)
+    known = {r["sid"]: r for r in fresh.iter_rows(named=True)}
     if not known:
         return
     prices = await priced(context, data)

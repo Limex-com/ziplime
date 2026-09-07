@@ -26,9 +26,10 @@ Measured on `period_year=2022` as of 2026-01-01, against the README's own recipe
     revenue               28 689 kept                            (+19.6%)
     operating_cash_flow   24 184 kept                            (+17.1%)
 
-:func:`as_of` therefore coalesces **field by field** across the revisions visible at the simulation
-time -- newest non-null wins per column, not per row. It is still strictly point-in-time: only rows
-the engine has already filtered by ``knowledge_date`` reach it.
+So the source is mounted with ``Resolution.COALESCE`` and a strategy simply calls
+``data.current``: the newest non-null value per column, across the revisions visible at the
+simulation time. There is no helper to import and nothing for the caller to remember -- reading
+these statements looks exactly like reading a price.
 """
 import datetime
 import sys
@@ -42,9 +43,11 @@ from hf_config import (  # noqa: E402
     CIK_TO_TICKER, FUNDAMENTALS_DATASET, FUNDAMENTALS_END, FUNDAMENTALS_START,
 )
 
+from ziplime.data.data_sources.huggingface import hub  # noqa: E402
 from ziplime.data.data_sources.huggingface.huggingface_data_source import (  # noqa: E402
-    HuggingFaceDataSource,
+    HuggingFaceDataSource, Resolution,
 )
+from ziplime.data.data_sources.huggingface.manifest import parse_manifest  # noqa: E402
 
 #: Statement kinds a strategy may mix. Annual flows and the balance sheets that go with them.
 #:
@@ -108,17 +111,6 @@ def _split_factors(tickers: list[str], start: datetime.date,
     return factors
 
 
-def _period_years(start: datetime.date, end: datetime.date) -> list[int]:
-    """Period years whose filings can be knowable inside the window.
-
-    The config partitions by **event** year, not knowledge year, so a window cannot be pruned the
-    way the insider dataset's can. A filing about 2013 can be accepted in 2015, and a comparative
-    restatement of it later still -- so the read starts three years before the window and runs to
-    its end.
-    """
-    return list(range(start.year - 3, end.year + 1))
-
-
 def load_statements(revision: str | None = None,
                     start: datetime.date | None = None,
                     end: datetime.date | None = None) -> pl.DataFrame:
@@ -126,30 +118,42 @@ def load_statements(revision: str | None = None,
 
     Every revision is kept as its own row with its own ``knowledge_date``. Collapsing them here
     would decide, at mount time, what a strategy is allowed to know later -- which is the whole
-    thing this dataset exists to avoid.
+    thing this dataset exists to avoid. The mount is given ``Resolution.COALESCE`` instead, so the
+    collapse happens per read and only over what was visible then.
+
+    The file paths come from ``manifest.json`` rather than being written out here. This config has
+    been re-partitioned twice while these examples were being written -- by ``period_year``, then
+    by ``knowledge_year``, then flattened into a Delta table -- and each time a hard-coded glob
+    stopped finding anything. The manifest is the only part of the layout that is promised.
     """
     start = start or FUNDAMENTALS_START
     end = end or FUNDAMENTALS_END
     sha = HfApi().dataset_info(FUNDAMENTALS_DATASET, revision=revision).sha
+    pinned = hub.resolve_revision(FUNDAMENTALS_DATASET, revision=sha)
+    manifest = parse_manifest(
+        repo_id=FUNDAMENTALS_DATASET, revision=sha,
+        manifest_json=hub.read_text(pinned, "manifest.json"),
+        readme=hub.read_text(pinned, "README.md"))
+    spec = manifest.config("pit")
 
-    frames = []
-    for year in _period_years(start, end):
-        local = snapshot_download(FUNDAMENTALS_DATASET, repo_type="dataset", revision=sha,
-                                  allow_patterns=[f"data/pit/period_year={year}/**"])
-        parts = list(Path(local).glob(f"data/pit/period_year={year}/**/*.parquet"))
-        if parts:
-            frames.append(pl.read_parquet(parts, columns=[
-                "entity_id", "knowledge_date", "event_date", "period_kind", "revision",
-                "logical_report_id", *SOURCE_FIELDS]))
-    if not frames:
-        raise SystemExit(f"No statements found for {start}..{end}.")
+    prefix = spec.paths[0].split("**")[0].split("*")[0].rstrip("/")
+    local = snapshot_download(FUNDAMENTALS_DATASET, repo_type="dataset", revision=sha,
+                              allow_patterns=[f"{prefix}/**"])
+    parts = [path for path in Path(local).glob(f"{prefix}/**/*.parquet")]
+    if not parts:
+        raise SystemExit(f"No Parquet under {prefix} at {sha[:8]}; the layout changed again.")
 
-    statements = (pl.concat(frames, how="diagonal")
-                  .filter(pl.col("period_kind").is_in(ANNUAL_KINDS))
-                  .with_columns(pl.col("entity_id")
-                                .replace_strict(CIK_TO_TICKER, default=None)
-                                .alias("ticker"))
-                  .filter(pl.col("ticker").is_not_null()))
+    statements = (
+        pl.scan_parquet(parts)
+        .select(["entity_id", "knowledge_date", "event_date", "period_kind", "revision",
+                 "logical_report_id", *SOURCE_FIELDS])
+        .filter(pl.col("period_kind").is_in(ANNUAL_KINDS))
+        .collect()
+        .with_columns(pl.col("entity_id")
+                      .replace_strict(CIK_TO_TICKER, default=None)
+                      .alias("ticker"))
+        .filter(pl.col("ticker").is_not_null())
+    )
 
     # Put every as-filed share count on the same basis as the back-adjusted price series.
     splits = _split_factors(sorted(set(statements["ticker"].to_list())), start, end)
@@ -183,35 +187,11 @@ async def mount(context, statements: pl.DataFrame | None = None,
         event_column=None, asset_service=context.asset_service,
         start_date=context.clock.start_session, end_date=context.clock.end_session,
         session_timezone=str(context.clock.trading_calendar.tz),
-        fields=FIELDS)
-
-
-def as_of(window: pl.DataFrame, fields: list[str]) -> dict[int, dict[str, float]]:
-    """The freshest known value of each field per instrument, coalesced across revisions.
-
-    Not the freshest *row*. A later filing repeats a period with fewer line items, so picking the
-    newest row silently drops whatever it omitted -- 78% of ``total_assets``, measured. Taking the
-    newest non-null per column keeps what was known without inventing anything: every value
-    returned appeared in some filing already visible at this moment.
-
-    Args:
-        window: What ``data.history`` returned, already filtered by knowledge date.
-        fields: Columns to resolve.
-
-    Returns:
-        ``{sid: {field: value}}``, omitting instruments with nothing known yet.
-    """
-    if window.is_empty():
-        return {}
-    resolved = (window.sort("date")
-                .group_by("sid")
-                .agg([pl.col(field).drop_nulls().last().alias(field) for field in fields]))
-    out: dict[int, dict[str, float]] = {}
-    for row in resolved.iter_rows(named=True):
-        values = {field: row[field] for field in fields if row[field] is not None}
-        if values:
-            out[row["sid"]] = values
-    return out
+        fields=FIELDS,
+        # The source resolves its own current view, so a strategy just calls `data.current`.
+        # Coalescing is not a preference here: a later filing restating a period reports fewer
+        # line items, so taking its row drops 78% of `total_assets`.
+        resolution=Resolution.COALESCE)
 
 
 def rank_and_hold(scores: dict[int, float], keep: int) -> dict[int, float]:

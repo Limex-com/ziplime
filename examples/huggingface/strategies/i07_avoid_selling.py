@@ -18,7 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from hf_config import INSIDER10_UNIVERSE  # noqa: E402
-from insider import mount_features, priced, rebalance  # noqa: E402
+from insider import mount_features
+from portfolio import priced, rebalance  # noqa: E402
 
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
