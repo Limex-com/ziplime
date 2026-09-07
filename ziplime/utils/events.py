@@ -14,6 +14,7 @@
 # limitations under the License.
 from abc import ABCMeta, ABC, abstractmethod
 from collections import namedtuple
+import functools
 import inspect
 import warnings
 
@@ -21,7 +22,6 @@ import datetime
 import numpy as np
 import pandas as pd
 import pytz
-from toolz import curry
 from ziplime.utils.context_tricks import nop_context
 
 
@@ -50,6 +50,7 @@ __all__ = [
 ]
 
 MAX_MONTH_RANGE = 23
+MAX_QUARTER_RANGE = 60
 MAX_WEEK_RANGE = 5
 
 
@@ -123,12 +124,13 @@ def _build_date(date, kwargs):
         return date
 
 
-@curry
-def lossless_float_to_int(funcname, func, argname, arg):
-    """
-    A preprocessor that coerces integral floats to ints.
+def lossless_float_to_int(funcname, argname, arg):
+    """Coerce an integral float to an int, and refuse a fractional one.
 
-    Receipt of non-integral floats raises a TypeError.
+    ``date_rules.month_start(days_offset=1.0)`` means the second trading day; ``1.5`` means
+    nothing, and silently truncating it would schedule the caller's function on a day they did not
+    ask for. Upstream applied this through a ``@preprocess`` decorator, which this fork does not
+    carry -- it is called directly instead.
     """
     if not isinstance(arg, float):
         return arg
@@ -146,6 +148,30 @@ def lossless_float_to_int(funcname, func, argname, arg):
         return arg_as_int
 
     raise TypeError(arg)
+
+
+def _per_calendar(compute):
+    """Memoise a rule property against the calendar it was computed for.
+
+    ``execution_period_values`` groups every session the calendar knows -- 36 410 of them for
+    XNYS -- and was recomputing that on **every bar**, 2.2 ms a time, because upstream's
+    ``@lazyval`` did not survive the port into this fork. Keying the cache on the calendar rather
+    than caching outright keeps the ``cal`` setter meaningful: threading a different calendar
+    through a rule recomputes rather than silently answering for the old one.
+    """
+    name = f"_{compute.__name__}_for"
+
+    @property
+    @functools.wraps(compute)
+    def cached(self):
+        entry = getattr(self, name, None)
+        if entry is not None and entry[0] is self.cal:
+            return entry[1]
+        value = compute(self)
+        setattr(self, name, (self.cal, value))
+        return value
+
+    return cached
 
 
 class EventManager:
@@ -442,8 +468,8 @@ class NotHalfDay(StatelessRule):
 
 
 class TradingDayOfWeekRule(StatelessRule, metaclass=ABCMeta):
-    # @preprocess(n=lossless_float_to_int("TradingDayOfWeekRule"))
     def __init__(self, n: int, invert):
+        n = lossless_float_to_int("TradingDayOfWeekRule", "n", n)
         if not 0 <= n < MAX_WEEK_RANGE:
             raise _out_of_range_error(MAX_WEEK_RANGE)
 
@@ -454,8 +480,7 @@ class TradingDayOfWeekRule(StatelessRule, metaclass=ABCMeta):
         val = self.cal.minute_to_session(dt, direction="none").value
         return val in self.execution_period_values
 
-    # @lazyval
-    @property
+    @_per_calendar
     def execution_period_values(self):
         # calculate the list of periods that match the given criteria
         sessions = self.cal.sessions
@@ -464,7 +489,7 @@ class TradingDayOfWeekRule(StatelessRule, metaclass=ABCMeta):
             # Group by ISO year (0) and week (1)
             .groupby(sessions.map(lambda x: x.isocalendar()[0:2]))
             .nth(self.td_delta)
-            .view(np.int64)
+            .astype(np.int64)
         )
 
 
@@ -489,7 +514,7 @@ class NDaysBeforeLastTradingDayOfWeek(TradingDayOfWeekRule):
 
 class TradingDayOfMonthRule(StatelessRule, metaclass=ABCMeta):
     def __init__(self, n, invert):
-        n = lossless_float_to_int(n)
+        n = lossless_float_to_int("TradingDayOfMonthRule", "n", n)
         if not 0 <= n < MAX_MONTH_RANGE:
             raise _out_of_range_error(MAX_MONTH_RANGE)
         if invert:
@@ -502,8 +527,7 @@ class TradingDayOfMonthRule(StatelessRule, metaclass=ABCMeta):
         value = self.cal.minute_to_session(dt, direction="none").value
         return value in self.execution_period_values
 
-    # @lazyval
-    @property
+    @_per_calendar
     def execution_period_values(self):
         # calculate the list of periods that match the given criteria
         sessions = self.cal.sessions
@@ -532,6 +556,54 @@ class NDaysBeforeLastTradingDayOfMonth(TradingDayOfMonthRule):
 
     def __init__(self, n):
         super(NDaysBeforeLastTradingDayOfMonth, self).__init__(n, invert=True)
+
+
+class TradingDayOfQuarterRule(StatelessRule, metaclass=ABCMeta):
+    """Trading day *n* of each calendar quarter, counted from either end.
+
+    Not part of upstream zipline, which stops at months. It is here because company fundamentals
+    arrive quarterly and a strategy that reads them has no reason to wake up in the two months
+    between: expressing "rebalance on the new statements" as a month rule plus a counter is the
+    plumbing this API exists to remove.
+
+    Calendar quarters, not fiscal ones. A filer whose year ends in June still reports four times
+    a year; which quarter of *its* calendar a statement belongs to is a question about the filing,
+    and the answer is in the data rather than in the schedule.
+    """
+
+    def __init__(self, n, invert):
+        n = lossless_float_to_int("TradingDayOfQuarterRule", "n", n)
+        if not 0 <= n < MAX_QUARTER_RANGE:
+            raise _out_of_range_error(MAX_QUARTER_RANGE)
+        self.td_delta = (-n - 1) if invert else n
+
+    def should_trigger(self, dt):
+        value = self.cal.minute_to_session(dt, direction="none").value
+        return value in self.execution_period_values
+
+    @_per_calendar
+    def execution_period_values(self):
+        sessions = self.cal.sessions
+        return set(
+            pd.Series(data=sessions)
+            .groupby([sessions.year, sessions.quarter])
+            .nth(self.td_delta)
+            .astype(np.int64)
+        )
+
+
+class NthTradingDayOfQuarter(TradingDayOfQuarterRule):
+    """A rule that triggers on the nth trading day of the quarter, zero-indexed."""
+
+    def __init__(self, n):
+        super(NthTradingDayOfQuarter, self).__init__(n, invert=False)
+
+
+class NDaysBeforeLastTradingDayOfQuarter(TradingDayOfQuarterRule):
+    """A rule that triggers n trading days before the last trading day of the quarter."""
+
+    def __init__(self, n):
+        super(NDaysBeforeLastTradingDayOfQuarter, self).__init__(n, invert=True)
 
 
 # Stateful rules
@@ -639,6 +711,38 @@ class date_rules:
         rule : ziplime.utils.events.EventRule
         """
         return NDaysBeforeLastTradingDayOfMonth(n=days_offset)
+
+    @staticmethod
+    def quarter_start(days_offset=0):
+        """Create a rule that triggers a fixed number of trading days after each quarter starts.
+
+        Parameters
+        ----------
+        days_offset : int, optional
+            Trading days to wait before triggering each quarter. Default is 0, i.e. trigger on the
+            first trading day of January, April, July and October.
+
+        Returns
+        -------
+        rule : ziplime.utils.events.EventRule
+        """
+        return NthTradingDayOfQuarter(n=days_offset)
+
+    @staticmethod
+    def quarter_end(days_offset=0):
+        """Create a rule that triggers a fixed number of trading days before each quarter ends.
+
+        Parameters
+        ----------
+        days_offset : int, optional
+            Trading days prior to quarter end to trigger. Default is 0, i.e. trigger on the last
+            trading day of the quarter.
+
+        Returns
+        -------
+        rule : ziplime.utils.events.EventRule
+        """
+        return NDaysBeforeLastTradingDayOfQuarter(n=days_offset)
 
     @staticmethod
     def week_start(days_offset=0):
