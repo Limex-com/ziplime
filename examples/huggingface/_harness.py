@@ -17,8 +17,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from hf_config import (  # noqa: E402
     ASSET_DB_PATH, CONGRESS_END, CONGRESS_START, CONGRESS_UNIVERSE, END, EQUITY_MIC,
-    EQUITY_TICKERS, INSIDER10_END, INSIDER10_START, INSIDER10_UNIVERSE, INSIDER_END,
-    INSIDER_START, START, STARTING_CASH, TRADING_CALENDAR,
+    EQUITY_TICKERS, FUNDAMENTALS_END, FUNDAMENTALS_START, FUNDAMENTALS_UNIVERSE, INSIDER10_END,
+    INSIDER10_START, INSIDER10_UNIVERSE, INSIDER_END, INSIDER_START, START, STARTING_CASH,
+    TRADING_CALENDAR,
 )
 
 from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
@@ -57,6 +58,10 @@ def load_strategy_info(path: Path) -> dict:
         info.setdefault("equities", CONGRESS_UNIVERSE)
         info.setdefault("start", CONGRESS_START)
         info.setdefault("end", CONGRESS_END)
+    elif window == "fundamentals":
+        info.setdefault("equities", FUNDAMENTALS_UNIVERSE)
+        info.setdefault("start", FUNDAMENTALS_START)
+        info.setdefault("end", FUNDAMENTALS_END)
     elif window == "insider10":
         info.setdefault("equities", INSIDER10_UNIVERSE)
         info.setdefault("start", INSIDER10_START)
@@ -70,7 +75,7 @@ def load_strategy_info(path: Path) -> dict:
 
 
 def list_strategies() -> list[dict]:
-    return [load_strategy_info(p) for p in sorted(STRATEGY_DIR.glob("[hi][0-9][0-9]_*.py"))]
+    return [load_strategy_info(p) for p in sorted(STRATEGY_DIR.glob("[hif][0-9][0-9]_*.py"))]
 
 
 async def load_listings(asset_service, universe: list[tuple[str, str]]):
@@ -139,7 +144,39 @@ async def build_bundle(listings, start: datetime.date, end: datetime.date, asset
                                                            time_zone=str(calendar.tz)))
         .alias("date")).drop("_d")
 
-    columns = ["date", "sid", "symbol", "mic", "open", "high", "low", "close", "price", "volume"]
+    # An **unadjusted** close alongside the adjusted bars.
+    #
+    # Every price here is back-adjusted for splits, which is right for returns and wrong for
+    # anything multiplied by a share count. A filing reports shares as they existed then; a split
+    # afterwards divides the historical price but not that number, so `price x shares` understates
+    # the market value by the split factor. Deckers is the example that caught it: a 2013 market
+    # value came out seven times too small and its earnings yield at 57%, a P/E of 1.8.
+    #
+    # Ratios built only from filings -- gross profitability, accruals, return on equity -- are
+    # unaffected. Only the ones that meet a price need this column.
+    raw = await source.get_data(
+        symbols=[listing.symbol for listing in listings],
+        frequency=datetime.timedelta(days=1),
+        date_from=datetime.datetime.combine(start, datetime.time.min, tzinfo=calendar.tz),
+        date_to=datetime.datetime.combine(end, datetime.time.max, tzinfo=calendar.tz),
+        auto_adjust=False)
+    if not raw.is_empty():
+        raw = raw.with_columns(
+            pl.col("symbol").replace_strict(sid_by_symbol, return_dtype=pl.Int64).alias("sid"),
+            pl.col("date").dt.convert_time_zone(str(calendar.tz)).dt.date().alias("_d"),
+        ).filter(pl.col("_d").is_in(list(closes)))
+        raw = raw.with_columns(
+            pl.col("_d").map_elements(closes.__getitem__,
+                                      return_dtype=pl.Datetime(time_unit="us",
+                                                               time_zone=str(calendar.tz)))
+            .alias("date")).drop("_d")
+        frame = frame.join(raw.select(["date", "sid", pl.col("close").alias("unadjusted_close")]),
+                           on=["date", "sid"], how="left")
+    else:
+        frame = frame.with_columns(pl.col("close").alias("unadjusted_close"))
+
+    columns = ["date", "sid", "symbol", "mic", "open", "high", "low", "close", "price", "volume",
+               "unadjusted_close"]
     data = frame.select(columns).sort(["sid", "date"])
     frame_cache.store(disk_key, data)
     return _assemble_bundle(data, asset_service, key)

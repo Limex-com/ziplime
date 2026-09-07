@@ -133,3 +133,149 @@ INSIDER10_UNIVERSE = [
     ("GOGO", "XNGS"), ("AP", "XNYS"), ("MRBK", "XNGS"), ("CLBK", "XNGS"),
     ("HLF", "XNYS"),
 ]
+
+
+# ---------------------------------------------------------------------------------------------
+# The fundamentals suite (f00-f03), on ZipLime/company-fundamentals.
+# ---------------------------------------------------------------------------------------------
+
+FUNDAMENTALS_DATASET = "ZipLime/company-fundamentals"
+
+#: Window. XBRL tagging begins in 2009 Q1 and small filers only arrive from 2012, so the corpus is
+#: thin before then; this takes the decade where coverage is stable.
+FUNDAMENTALS_START = datetime.date(2013, 1, 2)
+FUNDAMENTALS_END = datetime.date(2026, 6, 30)
+
+#: The dataset has **no ticker column** -- its identifier is the issuer CIK, and the README says so
+#: explicitly, calling a CIK-to-ticker map "a separate problem with its own point-in-time trap".
+#: It is right. This map is built from ZipLime/insider-trading, which carries both keys, by taking
+#: the most recently filed ticker per CIK.
+#:
+#: That last-known-ticker rule is itself look-ahead: a company that changed symbol in 2020 is
+#: labelled here with the symbol it uses now, and the price series fetched under that symbol is the
+#: post-change one. For the names below -- large, long-listed, continuously reporting -- symbol
+#: changes are rare, but the bias is real and this is where it enters.
+CIK_TO_TICKER = {
+    "0001433270": "AR", "0001521951": "FBIZ", "0001627223": "CC", "0000711377": "NEOG",
+    "0001157601": "MDGL", "0000072573": "MOV", "0000066382": "MLKN", "0000314203": "MUX",
+    "0001227654": "CMP", "0000918646": "EXP", "0001280058": "BLKB", "0000891166": "UVE",
+    "0001634117": "BNED", "0001156039": "ELV", "0001645113": "NVCR", "0000060714": "LXU",
+    "0001110803": "ILMN", "0001022671": "STLD", "0001101302": "ENTG", "0000023197": "CMTL",
+    "0000108385": "WRLD", "0001395942": "OPLN", "0000018255": "CATO", "0000315374": "HURC",
+    "0000356309": "NJR", "0000912728": "FWRD", "0000876523": "EZPW", "0000089800": "SHW",
+    "0001043277": "CHRW", "0001361658": "TNL", "0001177609": "FIVE", "0001175454": "CPAY",
+    "0000091767": "SON", "0001424929": "FOXF", "0000104889": "GHC", "0000912767": "UFPI",
+    "0000100726": "UFI", "0001138723": "ARAY", "0000104894": "ELME", "0001308208": "ULH",
+    "0000110621": "RPM", "0001087294": "CPIX", "0000935703": "DLTR", "0001022408": "PLUS",
+    "0001041514": "LSAK", "0000040704": "GIS", "0001408198": "MSCI", "0001501989": "CTMX",
+    "0000701985": "BBWI", "0000880117": "JBSS", "0000832988": "SIG", "0000057515": "MZTI",
+    "0000898437": "ANIK", "0001500217": "AAT", "0001497770": "WD", "0000215466": "CDE",
+    "0001436126": "MG", "0000896156": "ETD", "0000825542": "SMG", "0001145986": "ASPN",
+    "0001410636": "AWK", "0000712770": "OLP", "0001636282": "SYRE", "0001467858": "GM",
+    "0000355948": "RELL", "0001509991": "KOS", "0000078128": "WTRG", "0000866729": "SCHL",
+    "0000067716": "MDU", "0001466026": "MSBI", "0000918251": "MPAA", "0001158449": "AAP",
+    "0001000209": "MFIN", "0001009829": "JAKK", "0000745732": "ROST", "0000080420": "POWL",
+    "0000037996": "F", "0000946673": "BANR", "0000907254": "BFS", "0001130144": "BSRR",
+    "0000910521": "DECK", "0001144215": "AYI", "0001230245": "PIPR", "0000056873": "KR",
+    "0000027904": "DAL", "0001056903": "AWR", "0001321732": "PEN", "0001050915": "PWR",
+    "0000037785": "FMC", "0000004127": "SWKS", "0001108524": "CRM", "0000354190": "AJG",
+    "0000723254": "CTAS", "0001031296": "FE", "0000063276": "MAT", "0000018498": "GCO",
+    "0000835011": "MGPI", "0000024090": "CIA", "0001610250": "BOOT", "0001099590": "MELI",
+    "0001069183": "AXON", "0000859070": "FCBC", "0001060391": "RSG", "0000082020": "USLM",
+    "0001332551": "ACR", "0000069633": "NSSC", "0001035092": "SHBI", "0001579298": "BURL",
+    "0000108516": "WOR", "0001345126": "CODI", "0001018724": "AMZN", "0001116132": "TPR",
+    "0000895417": "ELS", "0001467761": "FIEE", "0000014930": "BC", "0000091419": "SJM",
+    "0001041368": "RVSB", "0000707179": "ONB", "0000106640": "WHR", "0000315293": "AON",
+    "0001014739": "OPCH", "0000056679": "KFY", "0001067294": "CBRL", "0001165002": "WHG",
+    "0001520697": "ACHC", "0000719955": "WSM", "0001326380": "GME", "0001265131": "HTH",
+    "0001170010": "KMX", "0001423221": "NX", "0000706698": "UTMD", "0000763744": "LCII",
+    "0000794367": "M", "0000845877": "AGM", "0000056978": "KLIC", "0000730272": "RGEN",
+    "0001403568": "ULTA", "0000715957": "D", "0000926423": "MIND", "0000907471": "CASH",
+    "0000723603": "CULP", "0001080014": "INVA", "0000080172": "NPK", "0001446847": "IRWD",
+    "0000357294": "HOV", "0001436425": "HBCP", "0001011060": "NORD", "0000936340": "DTE",
+    "0001406587": "FOR", "0000812011": "MTN", "0001633978": "LITE", "0001163370": "NRIM",
+    "0001569187": "AHRT", "0001050446": "MSTR", "0000726958": "CASY", "0000717954": "UNF",
+    "0001520006": "MTDR", "0000887905": "LTC", "0000009326": "BCPC", "0000926282": "ADTN",
+    "0001632127": "CABO", "0001474903": "BGSF", "0001459200": "ALRM", "0000746838": "UIS",
+    "0001624794": "CSW", "0000921557": "RBCAA", "0000072331": "NDSN", "0001318220": "WCN",
+    "0000915779": "DAKT", "0001529377": "ACRE", "0001096752": "EPC", "0000895456": "RCKY",
+    "0000813298": "DXLG", "0000916365": "TSCO", "0000319201": "KLAC", "0001021635": "OGE",
+    "0001050743": "PGC", "0001730984": "BCML", "0000703351": "EAT", "0001467373": "ACN",
+    "0001466085": "IRT", "0001365135": "WU", "0001157647": "WNEB", "0001267565": "COLL",
+    "0001192448": "GKOS", "0001400810": "HCI", "0000842023": "TECH", "0000037472": "FLXS",
+    "0000889900": "PTEN", "0001012019": "RUSHA", "0000765207": "FNLC", "0001571776": "CHMI",
+    "0001057379": "HCKT", "0000882184": "DHI", "0001598665": "HRTG", "0001486957": "BWXT",
+    "0000093556": "SWK", "0001337298": "FF", "0000769397": "ADSK", "0000106040": "WDC",
+    "0000766829": "HTO", "0001055160": "MFA", "0001434647": "ZVRA", "0000712034": "ACCO",
+    "0000799167": "MRTN", "0001005286": "LFCR", "0000752714": "MGRC", "0001441236": "CLW",
+    "0000879526": "WNC", "0000794170": "TOL", "0001445305": "WK", "0001730168": "AVGO",
+    "0000079282": "BRO", "0001405495": "IDCC", "0000793952": "HOG", "0000007084": "ADM",
+    "0000945841": "POOL", "0001039684": "OKE", "0000729986": "UBSI", "0001495320": "VRA",
+    "0000818479": "XRAY", "0001411579": "AMC", "0000785956": "JJSF", "0001613103": "MDT",
+    "0000277948": "CSX", "0000840489": "FCFS", "0001224608": "CNO", "0000012659": "HRB",
+    "0000027419": "TGT", "0000911177": "CWST",
+}
+
+#: 230 issuers: those reporting the fields these strategies need most completely, that map to
+#: exactly one US listing and have a usable price history. Survivorship applies here as everywhere
+#: else in this directory -- the control (`f00`) holds the same names and carries the same bias.
+FUNDAMENTALS_UNIVERSE = [
+    ("SYRE", "XNGS"), ("CASH", "XNGS"), ("NVCR", "XNGS"), ("AMZN", "XNGS"),
+    ("BNED", "XNYS"), ("TGT", "XNYS"), ("UVE", "XNYS"), ("MELI", "XNGS"),
+    ("FNLC", "XNGS"), ("CSX", "XNGS"), ("FIVE", "XNGS"), ("FF", "XNYS"),
+    ("ADTN", "XNGS"), ("WNC", "XNYS"), ("NORD", "XNYS"), ("CMP", "XNYS"),
+    ("LFCR", "XNGS"), ("KR", "XNYS"), ("AWK", "XNYS"), ("GME", "XNYS"),
+    ("UTMD", "XNGS"), ("UBSI", "XNGS"), ("HRTG", "XNYS"), ("CHMI", "XNYS"),
+    ("ELS", "XNYS"), ("POOL", "XNGS"), ("NRIM", "XNGS"), ("D", "XNYS"),
+    ("BGSF", "XNYS"), ("CPIX", "XNGS"), ("FLXS", "XNGS"), ("OKE", "XNYS"),
+    ("CRM", "XNYS"), ("BANR", "XNGS"), ("NSSC", "XNGS"), ("ACHC", "XNGS"),
+    ("POWL", "XNGS"), ("SWK", "XNYS"), ("PIPR", "XNYS"), ("COLL", "XNGS"),
+    ("BCPC", "XNGS"), ("IRT", "XNYS"), ("HCKT", "XNGS"), ("BWXT", "XNYS"),
+    ("FBIZ", "XNGS"), ("AAT", "XNYS"), ("FMC", "XNYS"), ("MSTR", "XNGS"),
+    ("BURL", "XNYS"), ("ULTA", "XNGS"), ("PLUS", "XNGS"), ("MDGL", "XNGS"),
+    ("NEOG", "XNGS"), ("CULP", "XNYS"), ("GCO", "XNYS"), ("XRAY", "XNGS"),
+    ("WNEB", "XNGS"), ("ELME", "XNYS"), ("JBSS", "XNGS"), ("IRWD", "XNGS"),
+    ("DECK", "XNYS"), ("CPAY", "XNYS"), ("CODI", "XNYS"), ("ELV", "XNYS"),
+    ("CIA", "XNYS"), ("ACN", "XNYS"), ("ACRE", "XNYS"), ("OLP", "XNYS"),
+    ("CMTL", "XNGS"), ("FIEE", "ARCX"), ("NPK", "XNYS"), ("UFPI", "XNGS"),
+    ("MLKN", "XNGS"), ("BBWI", "XNYS"), ("CDE", "XNYS"), ("SIG", "XNYS"),
+    ("EZPW", "XNGS"), ("RSG", "XNYS"), ("ROST", "XNGS"), ("AAP", "XNYS"),
+    ("HRB", "XNYS"), ("PGC", "XNGS"), ("WOR", "XNYS"), ("NX", "XNYS"),
+    ("RELL", "XNGS"), ("LSAK", "XNGS"), ("SHBI", "XNGS"), ("SHW", "XNYS"),
+    ("WSM", "XNYS"), ("ENTG", "XNGS"), ("MGPI", "XNGS"), ("BSRR", "XNGS"),
+    ("MDU", "XNYS"), ("M", "XNYS"), ("AJG", "XNYS"), ("ARAY", "XNGS"),
+    ("LCII", "XNYS"), ("VRA", "XNGS"), ("KOS", "XNYS"), ("AHRT", "XNYS"),
+    ("BFS", "XNYS"), ("ULH", "XNGS"), ("FCFS", "XNGS"), ("JJSF", "XNGS"),
+    ("BRO", "XNYS"), ("EXP", "XNYS"), ("PEN", "XNYS"), ("HCI", "XNYS"),
+    ("WHG", "XNYS"), ("LTC", "XNYS"), ("AYI", "XNYS"), ("CTAS", "XNGS"),
+    ("AGM", "XNYS"), ("HBCP", "XNGS"), ("USLM", "XNGS"), ("TPR", "XNYS"),
+    ("MSCI", "XNYS"), ("CBRL", "XNGS"), ("CSW", "XNYS"), ("BCML", "XNGS"),
+    ("AVGO", "XNGS"), ("BC", "XNYS"), ("ADSK", "XNGS"), ("SMG", "XNYS"),
+    ("AXON", "XNGS"), ("RUSHA", "XNGS"), ("UIS", "XNYS"), ("TECH", "XNGS"),
+    ("ILMN", "XNGS"), ("WRLD", "XNGS"), ("RGEN", "XNGS"), ("AWR", "XNYS"),
+    ("MUX", "XNYS"), ("MFA", "XNYS"), ("KFY", "XNYS"), ("STLD", "XNGS"),
+    ("SON", "XNYS"), ("AMC", "XNYS"), ("WK", "XNYS"), ("MAT", "XNGS"),
+    ("FCBC", "XNGS"), ("CATO", "XNYS"), ("MFIN", "XNGS"), ("OGE", "XNYS"),
+    ("MTN", "XNYS"), ("MIND", "XNGS"), ("TNL", "XNYS"), ("WCN", "XNYS"),
+    ("WHR", "XNYS"), ("NJR", "XNYS"), ("CHRW", "XNGS"), ("DXLG", "XNGS"),
+    ("HURC", "XNGS"), ("MTDR", "XNYS"), ("ADM", "XNYS"), ("GM", "XNYS"),
+    ("DAL", "XNYS"), ("MGRC", "XNGS"), ("ACR", "XNYS"), ("CWST", "XNGS"),
+    ("WTRG", "XNYS"), ("CABO", "XNYS"), ("GKOS", "XNYS"), ("WD", "XNYS"),
+    ("SJM", "XNYS"), ("LXU", "XNYS"), ("SCHL", "XNGS"), ("UNF", "XNYS"),
+    ("F", "XNYS"), ("FWRD", "XNGS"), ("MG", "XNYS"), ("CTMX", "XNGS"),
+    ("DHI", "XNYS"), ("RVSB", "XNGS"), ("SWKS", "XNGS"), ("RCKY", "XNGS"),
+    ("NDSN", "XNGS"), ("ANIK", "XNGS"), ("BLKB", "XNGS"), ("HTH", "XNYS"),
+    ("ALRM", "XNGS"), ("ZVRA", "XNGS"), ("CC", "XNYS"), ("IDCC", "XNGS"),
+    ("OPCH", "XNGS"), ("HTO", "XNGS"), ("FE", "XNYS"), ("WDC", "XNGS"),
+    ("ACCO", "XNYS"), ("TOL", "XNYS"), ("KLAC", "XNGS"), ("MPAA", "XNGS"),
+    ("DTE", "XNYS"), ("TSCO", "XNGS"), ("MDT", "XNYS"), ("CNO", "XNYS"),
+    ("GHC", "XNYS"), ("CASY", "XNGS"), ("HOG", "XNYS"), ("MSBI", "XNGS"),
+    ("WU", "XNYS"), ("EPC", "XNYS"), ("KLIC", "XNGS"), ("DAKT", "XNGS"),
+    ("BOOT", "XNYS"), ("JAKK", "XNGS"), ("MOV", "XNYS"), ("RBCAA", "XNGS"),
+    ("PTEN", "XNGS"), ("HOV", "XNYS"), ("GIS", "XNYS"), ("LITE", "XNGS"),
+    ("AON", "XNYS"), ("UFI", "XNYS"), ("EAT", "XNYS"), ("KMX", "XNYS"),
+    ("DLTR", "XNGS"), ("MRTN", "XNGS"), ("PWR", "XNYS"), ("MZTI", "XNGS"),
+    ("OPLN", "XNYS"), ("CLW", "XNYS"), ("ASPN", "XNYS"), ("FOXF", "XNGS"),
+    ("FOR", "XNYS"), ("ONB", "XNGS"), ("INVA", "XNGS"), ("ETD", "XNYS"),
+    ("RPM", "XNYS"), ("AR", "XNYS"),
+]
