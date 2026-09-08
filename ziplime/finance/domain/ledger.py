@@ -509,8 +509,11 @@ class Ledger:
         if dividends > 0:
             self._cash_flow(dividends)
 
-    def capital_change(self, change_amount: float):
-        self.update_portfolio()
+    async def capital_change(self, change_amount: float):
+        # `update_portfolio` is a coroutine. Called without awaiting, the portfolio value a target
+        # capital change is measured against was whatever the last bar left behind, so the deposit
+        # or withdrawal computed from it was wrong by a bar of profit and loss.
+        await self.update_portfolio()
         # we update the cash and total value so this is not dirty
         self._portfolio.portfolio_value += change_amount
         self._portfolio.cash += change_amount

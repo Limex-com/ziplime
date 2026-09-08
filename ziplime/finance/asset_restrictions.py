@@ -9,6 +9,7 @@ from toolz import groupby
 from enum import IntEnum
 
 from ziplime.assets.entities.asset import Asset
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.utils.numpy_utils import vectorized_is_element
 
 Restriction = namedtuple("Restriction", ["asset", "effective_date", "state"])
@@ -22,6 +23,18 @@ RESTRICTION_STATES = IntEnum(
     start=0,
 )
 
+
+
+def _is_one_asset(assets) -> bool:
+    """Whether ``assets`` is a single instrument rather than an iterable of them.
+
+    Orders in this fork carry an :class:`ExchangeAsset` -- a listing, wrapping an
+    :class:`Asset` rather than subclassing it -- so the ``_is_one_asset(assets)`` test these
+    methods used was false for every order. Execution fell through to the vectorised branch, where
+    ``pd.Index`` of a single listing raises ``TypeError``, which is what `set_asset_restrictions`
+    did instead of restricting anything.
+    """
+    return isinstance(assets, (Asset, ExchangeAsset))
 
 class Restrictions(metaclass=abc.ABCMeta):
     """Abstract restricted list interface, representing a set of assets that an
@@ -101,7 +114,7 @@ class _UnionRestrictions(Restrictions):
         return _UnionRestrictions(new_sub_restrictions)
 
     def is_restricted(self, assets, dt):
-        if isinstance(assets, Asset):
+        if _is_one_asset(assets):
             return any(r.is_restricted(assets, dt) for r in self.sub_restrictions)
 
         return reduce(
@@ -114,7 +127,7 @@ class NoRestrictions(Restrictions):
     """A no-op restrictions that contains no restrictions."""
 
     def is_restricted(self, assets, dt):
-        if isinstance(assets, Asset):
+        if _is_one_asset(assets):
             return False
         return pd.Series(index=pd.Index(assets), data=False)
 
@@ -134,7 +147,7 @@ class StaticRestrictions(Restrictions):
 
     def is_restricted(self, assets, dt):
         """An asset is restricted for all dts if it is in the static list."""
-        if isinstance(assets, Asset):
+        if _is_one_asset(assets):
             return assets in self._restricted_set
         return pd.Series(
             index=pd.Index(assets),
@@ -166,7 +179,7 @@ class HistoricalRestrictions(Restrictions):
         """Returns whether or not an asset or iterable of assets is restricted
         on a dt.
         """
-        if isinstance(assets, Asset):
+        if _is_one_asset(assets):
             return self._is_restricted_for_asset(assets, dt)
 
         is_restricted = partial(self._is_restricted_for_asset, dt=dt)
@@ -201,7 +214,7 @@ class HistoricalRestrictions(Restrictions):
 #
 #     def is_restricted(self, assets, dt):
 #         securities_in_list = self.current_securities(dt)
-#         if isinstance(assets, Asset):
+#         if _is_one_asset(assets):
 #             return assets in securities_in_list
 #         return pd.Series(
 #             index=pd.Index(assets),

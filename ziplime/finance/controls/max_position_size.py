@@ -32,7 +32,10 @@ class MaxPositionSize(TradingControl):
         if self.asset is not None and self.asset != asset:
             return
 
-        current_share_count = portfolio.positions[asset].amount
+        # `Portfolio.positions` in this fork is nested exchange -> account -> asset, not the flat
+        # `{asset: Position}` upstream had, so subscripting it by asset raised `KeyError` for every
+        # instrument -- including, and especially, the ones with no position yet.
+        current_share_count = await portfolio.get_asset_positions_amount(asset=asset)
         shares_post_order = current_share_count + amount
 
         too_many_shares = (
@@ -41,12 +44,11 @@ class MaxPositionSize(TradingControl):
         if too_many_shares:
             self.handle_violation(asset, amount, algo_datetime)
 
+        # Only fetch a price when there is a notional cap to check it against. This read happened
+        # on every order regardless, so a share-only cap paid for a quote it never used.
+        if self.max_notional is None:
+            return
+
         current_price = await algo_current_data.current(asset, "price")
-        value_post_order = shares_post_order * current_price
-
-        too_much_value = (
-                self.max_notional is not None and abs(value_post_order) > self.max_notional
-        )
-
-        if too_much_value:
+        if abs(shares_post_order * current_price) > self.max_notional:
             self.handle_violation(asset, amount, algo_datetime)

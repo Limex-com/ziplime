@@ -202,31 +202,20 @@ class BarData:
         If the current simulation time is not a valid market time for an asset,
         we use the most recent market close instead.
         """
-        data = {}
         assets = frozenset(assets)
         fields = frozenset(fields)
         source = await self.resolve_data_source(data_source)
-        if not self._adjust_minutes:
-            return await source.get_spot_value(
-                assets=assets,
-                fields=fields,
-                dt=self._get_current_minute(),
-            )
-        else:
-            for field in fields:
-                series = pd.Series(data={
-                    asset: source.get_adjusted_value(
-                        asset,
-                        field,
-                        self._get_current_minute(),
-                        self.simulation_dt_func(),
-                        self.data_bundle.frequency
-                    )
-                    for asset in assets
-                }, index=assets, name=field)
-                data[field] = series
-
-        return pd.DataFrame(data=data)
+        # `_adjust_minutes` -- set while `before_trading_start` runs, which is not a market minute
+        # -- used to take a second branch here. That branch read `self.data_bundle`, an attribute
+        # this class does not have, and built a frame out of un-awaited coroutines, so it raised
+        # the moment it was reached. What it was trying to add is a price adjustment relative to
+        # the current instant; what actually matters, reading the previous market minute instead of
+        # a minute the calendar does not have, is already done by `_get_current_minute`.
+        return await source.get_spot_value(
+            assets=assets,
+            fields=fields,
+            dt=self._get_current_minute(),
+        )
 
     async def current_chain(self, continuous_future: ContinuousFuture,
                             data_source: str | None = None):
@@ -449,27 +438,9 @@ class BarData:
                                                          include_end_date=False
                                                          )
 
-        # df = self.exchanges[exchange_name].get_data_by_limit(assets=assets,
-        #                                                      end_date=self._get_current_minute(),
-        #                                                      limit=bar_count,
-        #                                                      frequency=frequency,
-        #                                                      fields=fields,
-        #                                                      include_end_date=False
-        #                                                      )
-        if self._adjust_minutes:
-            adjs = {
-                field: self.exchanges[exchange_name].get_adjustments(
-                    assets,
-                    field,
-                    self._get_current_minute(),
-                    self.simulation_dt_func()
-                )[0] for field in fields
-            }
-
-            df = {
-                field: df * adjs[field]
-                for field, df in df.items()
-            }
+        # See `current`: the `_adjust_minutes` branch that stood here referred to
+        # `self.exchanges[exchange_name]`, with no `exchange_name` in scope, and raised `NameError`
+        # whenever it was reached. `_get_current_minute` already answers for the non-market minute.
         return df
 
     @property

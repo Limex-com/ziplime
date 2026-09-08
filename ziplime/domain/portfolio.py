@@ -20,7 +20,12 @@ class Portfolio:
     positions_exposure: float
     # exchange_portfolios: dict[str, Self]
 
-    positions: dict[ExchangeAsset, Position] = field(default_factory=dict)
+    #: Nested exchange name -> trading account id -> asset -> position. **Not** the flat
+    #: `{asset: Position}` upstream zipline used: code ported from there subscripts this by asset
+    #: and gets a `KeyError`, which is how two trading controls came to be silently broken. Reach
+    #: for `get_asset_positions_amount` and its siblings instead, which answer zero for an
+    #: instrument that is not held.
+    positions: dict[str, dict[str, dict[ExchangeAsset, Position]]] = field(default_factory=dict)
 
     start_date: datetime.datetime | None = None
 

@@ -1364,7 +1364,13 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 raise SidsNotFound(sids=[sid])
             return asset
         except KeyError:
-            return self.retrieve_all(sids=[sid, ], default_none=default_none)[0]
+            # `retrieve_all` is a coroutine and this method is not, so subscripting its result
+            # raised `TypeError: 'coroutine' object is not subscriptable` -- an error about Python
+            # rather than about the asset that is missing. A caller that can miss the cache has to
+            # `await retrieve_all` itself.
+            if default_none:
+                return None
+            raise SidsNotFound(sids=[sid]) from None
 
     async def retrieve_all(self, sids: list[int], default_none: bool = False):
         """Retrieve all assets in `sids`.

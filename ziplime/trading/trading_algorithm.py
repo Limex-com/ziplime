@@ -1,5 +1,6 @@
 import datetime
 import importlib.util
+import inspect
 import sys
 import traceback
 import uuid
@@ -347,7 +348,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         with ZiplineAPI(self):
             await self._initialize(self, *args, **kwargs)
 
-    def before_trading_start(self, data):
+    async def before_trading_start(self, data):
+        """Run the algorithm's daily preparation hook.
+
+        Awaits the hook when it is `async def`. It is the one place zipline expects the day's data
+        to be read, and every read in this fork -- `data.history`, `data.current`,
+        `huggingface_dataset` -- is a coroutine, so an author writing the natural thing got a
+        coroutine that was built, dropped and never run. No exception, no warning in the output,
+        and a hook that silently did nothing all backtest.
+        """
         self.compute_eager_pipelines()
 
         if self._before_trading_start is None:
@@ -361,7 +370,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         with handle_non_market_minutes(
                 data
         ) if self.clock.emission_rate < datetime.timedelta(days=1) else ExitStack():
-            self._before_trading_start(self, data)
+            result = self._before_trading_start(self, data)
+            if inspect.isawaitable(result):
+                await result
 
         self._in_before_trading_start = False
 
@@ -415,7 +426,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         await self.metrics_tracker.handle_start_of_simulation()
         return self.transform()
 
-    def calculate_capital_changes(
+    async def calculate_capital_changes(
             self, dt: datetime.datetime, emission_rate: datetime.timedelta, is_interday: bool,
             portfolio_value_adjustment: float = 0.00
     ):
@@ -436,7 +447,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         except KeyError:
             return
 
-        self._sync_last_sale_prices()
+        # Both of these are coroutines and both were called without awaiting, so a target capital
+        # change was computed against unsynced prices and then applied to a portfolio that had not
+        # been updated. Nothing raised; the deposit was simply the wrong size.
+        await self._sync_last_sale_prices()
         if capital_change["type"] == "target":
             target = capital_change["value"]
             capital_change_amount = target - (
@@ -462,7 +476,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             return
 
         self.capital_change_deltas.update({dt: capital_change_amount})
-        self._ledger.capital_change(change_amount=capital_change_amount)
+        await self._ledger.capital_change(change_amount=capital_change_amount)
 
         yield {
             "capital_change": {
@@ -744,7 +758,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return asset
 
     @api_method
-    def symbols(self, *args, **kwargs):
+    async def symbols(self, *args, **kwargs):
         """Lookup multuple Equities as a list.
 
         Parameters
@@ -770,7 +784,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         --------
         :func:`ziplime.api.set_symbol_lookup_date`
         """
-        return [self.symbol(identifier, **kwargs) for identifier in args]
+        # `symbol` is a coroutine, so the list comprehension used to return a list of coroutines
+        # rather than a list of listings -- and nothing raised until the caller tried to order one.
+        return [await self.symbol(identifier, **kwargs) for identifier in args]
 
     @api_method
     async def symbols_universe(self, name: str, dt: datetime.date = None):
@@ -1164,7 +1180,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             await self._ledger.bond_book.load(self.asset_service, [asset.asset])
         # TODO: implement dynamic risk control
 
-        self.validate_order_params(asset=asset, amount=amount)
+        await self.validate_order_params(asset=asset, amount=amount)
         if exchange_name is None:
             exchange = await self.exchange_repository.get_default_exchange()
             exchange_name = exchange.name
@@ -1242,11 +1258,18 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.new_orders[order.id] = order
         return order
 
-    def validate_order_params(self, asset: ExchangeAsset, amount: int):
-        """
-        Helper method for validating parameters to the order API function.
+    async def validate_order_params(self, asset: ExchangeAsset, amount: int):
+        """Check an order against every registered trading control before it is placed.
 
-        Raises an UnsupportedOrderParameters if invalid arguments are found.
+        Every control's ``validate`` is ``async def`` -- `MaxPositionSize` reads the current price
+        to check a notional cap -- and this method used to be synchronous and call them without
+        awaiting. Each call built a coroutine, dropped it, and returned None, so
+        `set_max_position_size`, `set_max_order_size`, `set_max_order_count`, `set_long_only` and
+        `set_asset_restrictions` all accepted their arguments and then enforced nothing. These are
+        the fail-safes; a fail-safe that silently does not fire is worse than none.
+
+        Raises:
+            TradingControlViolation: if a control with ``on_error="fail"`` rejects the order.
         """
 
         if not self.initialized:
@@ -1255,7 +1278,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             )
 
         for control in self.trading_controls:
-            control.validate(
+            await control.validate(
                 asset=asset,
                 amount=amount,
                 portfolio=self.portfolio,
@@ -2322,7 +2345,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     def calculate_minute_capital_changes(self, dt: datetime.datetime):
         # process any capital changes that came between the last
-        # and current minutes
+        # and current minutes. An async generator: iterate it with `async for`.
         return self.calculate_capital_changes(dt, emission_rate=self.metrics_tracker.emission_rate,
                                               is_interday=False)
 
@@ -2335,7 +2358,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             handle_data,
     ):
         # print(f"dt_to_use: in every_bar: {dt_to_use}")
-        for capital_change in self.calculate_minute_capital_changes(dt_to_use):
+        async for capital_change in self.calculate_minute_capital_changes(dt_to_use):
             yield capital_change
 
         self.simulation_dt = dt_to_use
@@ -2413,7 +2436,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             asset_service,
     ):
         # process any capital changes that came overnight
-        for capital_change in self.calculate_capital_changes(
+        async for capital_change in self.calculate_capital_changes(
                 midnight_dt, emission_rate=self.metrics_tracker.emission_rate,
                 is_interday=True
         ):
@@ -2558,7 +2581,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                         self.simulation_dt = dt
                         # self.datetime = dt
                         # self.on_dt_changed(dt=dt)
-                        self.before_trading_start(data=self.current_data)
+                        await self.before_trading_start(data=self.current_data)
                     elif (action == SimulationEvent.EMISSION_RATE_END
                           and self.clock.emission_rate < datetime.timedelta(days=1)):
                         # Syncing sale prices to the ledger happens here for intraday rates and in

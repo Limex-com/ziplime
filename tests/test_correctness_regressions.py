@@ -6,6 +6,7 @@ them needs a futures contract, a bond or a data bundle to demonstrate.
 
 Each class names the bug it pins and what the wrong answer was.
 """
+import asyncio
 import dataclasses
 import datetime
 import unittest
@@ -19,12 +20,18 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
 from ziplime.finance.domain.ledger import Ledger
 from ziplime.finance.domain.position_tracker import PositionTracker
+from ziplime.finance.asset_restrictions import NoRestrictions, StaticRestrictions
+from ziplime.finance.controls.long_only import LongOnly
+from ziplime.finance.controls.max_position_size import MaxPositionSize
+from ziplime.finance.controls.restricted_list_order import RestrictedListOrder
 from ziplime.finance.domain.transaction import Transaction
 from ziplime.finance.execution import (
     LimitOrder, MarketOrder, StopLimitOrder, StopOrder, make_execution_style,
 )
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
 from ziplime.finance.slippage.no_slippage import NoSlippage
+from ziplime.domain.portfolio import Portfolio
+from ziplime.errors import TradingControlViolation
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 FAR_PAST = datetime.date(1900, 1, 1)
@@ -614,6 +621,116 @@ class VolumeCapSignTests(unittest.IsolatedAsyncioTestCase):
             for used in (0, 1, 50, 5_000):
                 quantity = await self.quantity_for(volume=volume, already_used=used)
                 self.assertGreaterEqual(quantity, 0, f"volume={volume} used={used}")
+
+
+def empty_portfolio() -> Portfolio:
+    """A portfolio holding nothing. `positions` is nested exchange -> account -> asset."""
+    return Portfolio(cash_flow=0.0, starting_cash=1e6, portfolio_value=1e6, pnl=0.0, returns=0.0,
+                     cash=1e6, positions_value=0.0, positions_exposure=0.0, positions={})
+
+
+class TradingControlTests(unittest.IsolatedAsyncioTestCase):
+    """The order-level fail-safes accepted their arguments and enforced nothing.
+
+    Three faults stacked. `validate_order_params` was synchronous and called each control's
+    `async def validate` without awaiting, so every check built a coroutine and dropped it.
+    Underneath that, `MaxPositionSize` and `LongOnly` read `portfolio.positions[asset]` -- the flat
+    dict upstream zipline had, not this fork's nested one -- which raises `KeyError` for every
+    instrument. And `Restrictions.is_restricted` tested `isinstance(assets, Asset)`, false for the
+    `ExchangeAsset` an order actually carries, so it fell into the vectorised branch and raised
+    `TypeError` on `pd.Index` of a single listing.
+
+    A fail-safe that silently does not fire is worse than no fail-safe: `set_max_position_size`
+    read as a guarantee and was not one.
+    """
+
+    def setUp(self):
+        self.asset = make_equity()
+        self.portfolio = empty_portfolio()
+
+    async def test_max_position_size_blocks_an_oversized_order(self):
+        control = MaxPositionSize(on_error="fail", asset=self.asset, max_shares=100)
+        with self.assertRaises(TradingControlViolation):
+            await control.validate(asset=self.asset, amount=100_000, portfolio=self.portfolio,
+                                   algo_datetime=SESSION, algo_current_data=None)
+
+    async def test_max_position_size_allows_an_order_within_the_cap(self):
+        """And does not raise `KeyError` on an instrument with no position yet."""
+        control = MaxPositionSize(on_error="fail", asset=self.asset, max_shares=100)
+        await control.validate(asset=self.asset, amount=50, portfolio=self.portfolio,
+                               algo_datetime=SESSION, algo_current_data=None)
+
+    async def test_long_only_blocks_a_short(self):
+        control = LongOnly(on_error="fail")
+        with self.assertRaises(TradingControlViolation):
+            await control.validate(asset=self.asset, amount=-10, portfolio=self.portfolio,
+                                   algo_datetime=SESSION, algo_current_data=None)
+
+    async def test_long_only_allows_a_buy(self):
+        control = LongOnly(on_error="fail")
+        await control.validate(asset=self.asset, amount=10, portfolio=self.portfolio,
+                               algo_datetime=SESSION, algo_current_data=None)
+
+    async def test_a_restricted_asset_cannot_be_ordered(self):
+        control = RestrictedListOrder(on_error="fail",
+                                      restrictions=StaticRestrictions([self.asset]))
+        with self.assertRaises(TradingControlViolation):
+            await control.validate(asset=self.asset, amount=1, portfolio=self.portfolio,
+                                   algo_datetime=SESSION, algo_current_data=None)
+
+    async def test_an_unrestricted_asset_can_be_ordered(self):
+        for restrictions in (StaticRestrictions([make_equity(sid=2, symbol="QQQ")]),
+                             NoRestrictions()):
+            control = RestrictedListOrder(on_error="fail", restrictions=restrictions)
+            await control.validate(asset=self.asset, amount=1, portfolio=self.portfolio,
+                                   algo_datetime=SESSION, algo_current_data=None)
+
+    def test_restrictions_answer_for_a_single_listing(self):
+        """`ExchangeAsset` wraps an `Asset` rather than subclassing it -- the isinstance trap."""
+        other = make_equity(sid=2, symbol="QQQ")
+        restrictions = StaticRestrictions([self.asset])
+        self.assertIs(restrictions.is_restricted(self.asset, SESSION), True)
+        self.assertIs(restrictions.is_restricted(other, SESSION), False)
+        self.assertIs(NoRestrictions().is_restricted(self.asset, SESSION), False)
+
+    def test_order_validation_is_a_coroutine(self):
+        """If this goes back to `def`, every control silently stops firing again."""
+        self.assertTrue(asyncio.iscoroutinefunction(TradingAlgorithm.validate_order_params))
+
+
+class BeforeTradingStartTests(unittest.IsolatedAsyncioTestCase):
+    """`before_trading_start` is where zipline expects the day's data to be read.
+
+    Every read in this fork is a coroutine, so the natural `async def before_trading_start` built
+    one, had it dropped by a synchronous call site, and never ran its body -- with no exception and
+    nothing in the output to say the hook had done nothing all backtest.
+    """
+
+    def algorithm(self, hook):
+        return SimpleNamespace(
+            compute_eager_pipelines=lambda: None,
+            _before_trading_start=hook,
+            _in_before_trading_start=False,
+            clock=SimpleNamespace(emission_rate=datetime.timedelta(days=1)),
+        )
+
+    async def test_an_async_hook_runs(self):
+        calls = []
+
+        async def hook(context, data):
+            calls.append(data)
+
+        await TradingAlgorithm.before_trading_start(self.algorithm(hook), data="bar-data")
+        self.assertEqual(calls, ["bar-data"])
+
+    async def test_a_sync_hook_still_runs(self):
+        calls = []
+        await TradingAlgorithm.before_trading_start(
+            self.algorithm(lambda context, data: calls.append(data)), data="bar-data")
+        self.assertEqual(calls, ["bar-data"])
+
+    async def test_no_hook_is_not_an_error(self):
+        await TradingAlgorithm.before_trading_start(self.algorithm(None), data="bar-data")
 
 
 if __name__ == "__main__":
