@@ -27,7 +27,7 @@ logger = structlog.get_logger(__name__)
 
 async def _run_simulation():
     tz = ZoneInfo("America/New_York")
-    start_date = datetime.datetime(year=2025, month=6, day=3, tzinfo=tz)
+    start_date = datetime.datetime(year=2010, month=6, day=3, tzinfo=tz)
     end_date = datetime.datetime(year=2025, month=6, day=9, hour=23, minute=59 , second=59, tzinfo=tz)
     start_auction_delta = datetime.timedelta(minutes=15)
     end_auction_delta = datetime.timedelta(minutes=15)

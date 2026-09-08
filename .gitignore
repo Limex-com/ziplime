@@ -331,3 +331,5 @@ envs/*.env
 static/
 .idea/
 dual_moving_average.py
+
+.qwen

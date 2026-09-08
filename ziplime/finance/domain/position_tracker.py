@@ -33,8 +33,14 @@ class PositionTracker:
 
     def __init__(self, data_frequency: datetime.timedelta):
 
-        # (exchange_id, asset, trading_account_id)
+        # (exchange_name, trading_account_id, asset)
         self.positions = OrderedDict()
+        # (exchange_name, trading_account_id)
+        self.positions_by_trading_account = {}
+        # (asset,)
+        self.positions_by_asset = {}
+        # (exchange_name,)
+        self.positions_by_exchange = {}
 
         self._unpaid_dividends = {}
         self._unpaid_stock_dividends = {}
@@ -48,6 +54,39 @@ class PositionTracker:
         self._logger = structlog.get_logger(__name__)
         self.position_trades = {}
 
+    def _register_position(
+            self,
+            position: Position,
+            position_key: tuple,
+            position_key_trading_account: tuple,
+            position_key_asset: tuple,
+            position_key_exchange: tuple,
+    ) -> None:
+        # Every index holds a reference to the very same Position object;
+        # only the keys are duplicated.
+        self.positions[position_key] = position
+        self.positions_by_trading_account.setdefault(
+            position_key_trading_account, set()
+        ).add(position)
+        self.positions_by_asset.setdefault(position_key_asset, set()).add(position)
+        self.positions_by_exchange.setdefault(position_key_exchange, set()).add(position)
+
+    def _unregister_position(self, position: Position) -> None:
+        del self.positions[
+            (position.exchange_name, position.trading_account_id, position.asset)
+        ]
+        for positions_by_key, key in (
+                (self.positions_by_trading_account, (position.exchange_name, position.trading_account_id)),
+                (self.positions_by_asset, (position.asset,)),
+                (self.positions_by_exchange, (position.exchange_name,))
+        ):
+            positions = positions_by_key.get(key)
+            if positions is None:
+                continue
+            positions.discard(position)
+            if not positions:
+                del positions_by_key[key]
+
     def update_position(
             self,
             asset: ExchangeAsset,
@@ -59,15 +98,13 @@ class PositionTracker:
             cost_basis=None,
     ) -> Position:
         self._dirty_stats = True
-        if exchange_name not in self.positions:
-            self.positions[exchange_name] = {}
-            self.position_trades[exchange_name] = {}
-        if trading_account_id not in self.positions[exchange_name]:
-            self.positions[exchange_name][trading_account_id] = {}
-            self.position_trades[exchange_name][trading_account_id] = []
 
+        position_key = (exchange_name, trading_account_id, asset)
+        position_key_trading_account = (exchange_name, trading_account_id)
+        position_key_asset = (asset,)
+        position_key_exchange = (exchange_name,)
 
-        if asset not in self.positions[exchange_name][trading_account_id]:
+        if position_key not in self.positions:
             position = Position(
                 asset=asset,
                 exchange_name=exchange_name,
@@ -77,9 +114,15 @@ class PositionTracker:
                 last_sale_price=float(0.0),
                 last_sale_date=None,
             )
-            self.positions[exchange_name][trading_account_id][asset] = position
+            self._register_position(
+                position=position,
+                position_key=position_key,
+                position_key_trading_account=position_key_trading_account,
+                position_key_asset=position_key_asset,
+                position_key_exchange=position_key_exchange,
+            )
         else:
-            position = self.positions[exchange_name][trading_account_id][asset]
+            position = self.positions[position_key]
 
         if amount is not None:
             position.amount = amount
@@ -123,15 +166,7 @@ class PositionTracker:
 
         self._update_position(position=position, txn=txn)
         if position.amount == 0:
-
-            del self.positions[position.exchange_name][position.trading_account_id][position.asset]
-            #
-            # try:
-            #     # if this position exists in our user-facing dictionary,
-            #     # remove it as well.
-            #     del self._positions_store[asset]
-            # except KeyError:
-            #     pass
+            self._unregister_position(position)
 
     def _update_position(self, position: Position, txn: Transaction):
         if position.asset != txn.asset:
@@ -167,9 +202,12 @@ class PositionTracker:
 
     def handle_commission(self, asset: ExchangeAsset, cost: float) -> None:
         # Adjust the cost basis of the stock if we own it
-        if asset in self.positions:
-            self._dirty_stats = True
-            self.adjust_commission_cost_basis(position=self.positions[asset], cost=cost)
+        positions = self.positions_by_asset.get((asset,))
+        if not positions:
+            return
+        self._dirty_stats = True
+        for position in positions:
+            self.adjust_commission_cost_basis(position=position, cost=cost)
 
     def adjust_commission_cost_basis(self, position: Position, cost: float):
         """
@@ -226,12 +264,11 @@ class PositionTracker:
         total_leftover_cash = 0
 
         for split in splits:
-            for exchange, accounts_dict in self.positions.items():
-                for account, positions_dict in accounts_dict.items():
-                    for exchange_asset, position in  positions_dict.items():
-                        if position.asset.asset.id == split.asset.id:
-                            leftover_cash = self.handle_split(position=position, asset=split.asset, ratio=split.ratio)
-                            total_leftover_cash += leftover_cash
+            for position in self.positions.values():
+                if position.asset.asset.id == split.asset.id:
+                    self._dirty_stats = True
+                    leftover_cash = self.handle_split(position=position, asset=split.asset, ratio=split.ratio)
+                    total_leftover_cash += leftover_cash
 
         # for split in splits:
         #     if split.asset in self.positions:
@@ -315,25 +352,35 @@ class PositionTracker:
             namedtuples.
         """
         for cash_dividend in cash_dividends:
-            self._dirty_stats = True  # only mark dirty if we pay a dividend
-
             # Store the earned dividends so that they can be paid on the
             # dividends' pay_dates.
-            for exchange, accounts_dict in self.positions.items():
-                for account, positions_dict in accounts_dict.items():
-                    for exchange_asset, position in  positions_dict.items():
-                        if position.asset.asset.id == cash_dividend.asset.id:
-                            div_owed = self.earn_dividend(position=position, dividend=cash_dividend)
+            divs_owed = [
+                self.earn_dividend(position=position, dividend=cash_dividend)
+                for position in self.positions.values()
+                if position.asset.asset.id == cash_dividend.asset.id
+            ]
+            if not divs_owed:
+                continue
+            self._dirty_stats = True  # only mark dirty if we pay a dividend
             try:
-                self._unpaid_dividends[cash_dividend.pay_date].append(div_owed)
+                self._unpaid_dividends[cash_dividend.pay_date].extend(divs_owed)
             except KeyError:
-                self._unpaid_dividends[cash_dividend.pay_date] = [div_owed]
+                self._unpaid_dividends[cash_dividend.pay_date] = divs_owed
 
         for stock_dividend in stock_dividends:
+            position = next(
+                (
+                    position
+                    for position in self.positions.values()
+                    if position.asset.asset.id == stock_dividend.asset.id
+                ),
+                None,
+            )
+            if position is None:
+                continue
             self._dirty_stats = True  # only mark dirty if we pay a dividend
 
-            div_owed = self.earn_stock_dividend(position=self.positions[stock_dividend.asset],
-                                                stock_dividend=stock_dividend)
+            div_owed = self.earn_stock_dividend(position=position, stock_dividend=stock_dividend)
             try:
                 self._unpaid_stock_dividends[stock_dividend.pay_date].append(
                     div_owed,
@@ -373,46 +420,44 @@ class PositionTracker:
         for stock_payment in stock_payments:
             payment_asset = stock_payment["payment_asset"]
             share_count = stock_payment["share_count"]
-            # note we create a Position for stock dividend if we don't
-            # already own the asset
-            if payment_asset in self.positions:
-                position = self.positions[payment_asset]
-            else:
-                position = self.positions[payment_asset] = Position(
-                    asset=payment_asset,
-                    amount=0,
-                    cost_basis=0.0,
-                    last_sale_price=0.0,
-                    last_sale_date=None
 
+            positions = self.positions_by_asset.get((payment_asset,))
+            if not positions:
+                self._logger.warning(
+                    "Not paying stock dividend of {} shares of {}: no open "
+                    "position for the payment asset".format(
+                        share_count,
+                        getattr(payment_asset, "asset_name", payment_asset)
+                    )
                 )
-
-            position.amount += share_count
+                continue
+            for position in positions:
+                position.amount += share_count
 
         return net_cash_payment
 
-    def maybe_create_close_position_transaction(self, asset: ExchangeAsset, dt: datetime.datetime):
-        if not self.positions.get(asset):
-            return None
+    def close_positions(self, asset: ExchangeAsset, dt: datetime.datetime) -> list[Transaction]:
+        """Create a closing transaction for every open position in ``asset``.
 
-        amount = self.positions.get(asset).amount
-        # TODO: check this
-        price = self.data_bundle.get_spot_value(assets=asset, field="price", dt=dt,
-                                                data_frequency=self._data_frequency)
-
-        # Get the last traded price if price is no longer available
-        if isnan(price):
-            price = self.positions.get(asset).last_sale_price
-
-        return Transaction(
-            id=uuid.uuid4().hex,
-            asset=asset,
-            amount=-amount,
-            dt=dt,
-            price=price,
-            order_id=None,
-            exchange_name=None
-        )
+        The position's last sale price is used as the close price, since the
+        tracker has no direct access to market data.
+        """
+        positions = self.positions_by_asset.get((asset,))
+        if not positions:
+            return []
+        return [
+            Transaction(
+                id=uuid.uuid4().hex,
+                asset=asset,
+                amount=-position.amount,
+                dt=dt,
+                price=position.last_sale_price,
+                order_id=None,
+                exchange_name=position.exchange_name,
+                trading_account_id=position.trading_account_id,
+            )
+            for position in positions
+        ]
 
     def get_positions(self):
         return self.positions
@@ -426,11 +471,9 @@ class PositionTracker:
 
     def get_position_list(self):
         return [
-            pos
-            for trading_account_values in self.positions.values()
-            for trading_account_positions in trading_account_values.values()
-            for pos in trading_account_positions.values()
-            if pos.amount != 0
+            position
+            for position in self.positions.values()
+            if position.amount != 0
         ]
 
     def sync_last_sale_prices(self, dt: datetime.datetime,
@@ -443,16 +486,18 @@ class PositionTracker:
         self._dirty_stats = True
 
         for (asset_sid, exchange), last_sale_price in prices.items():
-            for trading_account, asset_positions in self.positions[exchange.name].items():
-                for asset, position in asset_positions.items():
-                    if asset.sid == asset_sid:
-                        # for position in self.positions[(asset, exchange)].values():
-                        if last_sale_price is None:
-                            self._logger.warning(
-                                f"Error updating last sale price for {position.asset.asset_name} on {dt}. Price is None")
-                        else:
-                            position.last_sale_price = last_sale_price
-                            position.last_sale_date = dt
+            exchange_positions = self.positions_by_exchange.get((exchange.name,))
+            if not exchange_positions:
+                continue
+            for position in exchange_positions:
+                if position.asset.sid != asset_sid:
+                    continue
+                if last_sale_price is None:
+                    self._logger.warning(
+                        f"Error updating last sale price for {position.asset.asset_name} on {dt}. Price is None")
+                else:
+                    position.last_sale_price = last_sale_price
+                    position.last_sale_date = dt
         # for position in self.positions[()].values():
         #     # print("SYNCING")
         #     #last_sale_price = (await get_price(position.asset))["close"][0]
@@ -483,7 +528,8 @@ class PositionTracker:
         the stats may have changed.
         """
         if self._dirty_stats:
-            calculate_position_tracker_stats(self.positions, position_count=len(self.get_position_list()),
+            active_positions = self.get_position_list()
+            calculate_position_tracker_stats(active_positions, position_count=len(active_positions),
                                              stats=self._stats)
             self._dirty_stats = False
 

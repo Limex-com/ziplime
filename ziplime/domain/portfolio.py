@@ -20,7 +20,7 @@ class Portfolio:
     positions_exposure: float
     # exchange_portfolios: dict[str, Self]
 
-    positions: dict[ExchangeAsset, Position] = field(default_factory=dict)
+    positions: dict[str, dict[str, dict[ExchangeAsset, Position]]] = field(default_factory=dict)
 
     start_date: datetime.datetime | None = None
 

@@ -1,6 +1,7 @@
 import datetime
 import math
 from collections import OrderedDict, deque
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,7 @@ from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.domain.account import Account
+from ziplime.domain.position import Position
 from ziplime.domain.portfolio import Portfolio
 from ziplime.exchanges.exchange import Exchange
 from ziplime.exchanges.repositories.exchange_repository import ExchangeRepository
@@ -204,23 +206,28 @@ class Ledger:
             except KeyError:
                 self._payout_last_sale_prices[asset] = transaction.price
             else:
-                position = self.position_tracker.positions[asset]
-                amount = position.amount
-                price = transaction.price
-
-                self._cash_flow(
-                    self._calculate_payout(
-                        asset.price_multiplier,
-                        amount,
-                        old_price,
-                        price,
-                    ),
-                )
-
-                if amount + transaction.amount == 0:
+                positions = self.position_tracker.positions_by_asset.get((asset,))
+                position = next(iter(positions), None) if positions else None
+                if position is None:
+                    # stale payout price entry, the position no longer exists
                     del self._payout_last_sale_prices[asset]
                 else:
-                    self._payout_last_sale_prices[asset] = price
+                    amount = position.amount
+                    price = transaction.price
+
+                    self._cash_flow(
+                        self._calculate_payout(
+                            asset.price_multiplier,
+                            amount,
+                            old_price,
+                            price,
+                        ),
+                    )
+
+                    if amount + transaction.amount == 0:
+                        del self._payout_last_sale_prices[asset]
+                    else:
+                        self._payout_last_sale_prices[asset] = price
         else:
             self._cash_flow(-(transaction.price * transaction.amount))
         # print("LEVERAGE: BEFORE EXCEUTION", self.account.leverage, self.account.net_leverage)
@@ -327,11 +334,7 @@ class Ledger:
         # print(f"Commission 3 for {asset.asset_name} is {cost}", tr.account.leverage, tr.account.net_leverage)
 
     def close_position(self, asset: ExchangeAsset, dt: datetime.datetime):
-        txn = self.position_tracker.maybe_create_close_position_transaction(
-            asset=asset,
-            dt=dt,
-        )
-        if txn is not None:
+        for txn in self.position_tracker.close_positions(asset=asset, dt=dt):
             self.process_transaction(transaction=txn)
 
     async def process_dividends(self, next_session, asset_service):
@@ -345,9 +348,8 @@ class Ledger:
         # Earn dividends whose ex_date is the next trading day. We need to
         # check if we own any of these stocks so we know to pay them out when
         # the pay date comes.
-        held_sids = set(position_tracker.positions)
-        held_assets = [pos.asset.asset for pos in self.position_tracker.get_position_list()]
-        if held_sids:
+        held_assets = [pos.asset.asset for pos in position_tracker.get_position_list()]
+        if held_assets:
             cash_dividends = await asset_service.get_cash_dividends_with_ex_date(
                 assets=held_assets, date=next_session  # self.data_bundle.asset_repository
             )
@@ -424,13 +426,21 @@ class Ledger:
 
     @property
     def positions(self):
-        return self.position_tracker.get_position_list()
+        return [
+            replace(position)
+            for position in self.position_tracker.get_position_list()
+        ]
 
     def _get_payout_total(self, positions):
 
         total = 0
         for asset, old_price in self._payout_last_sale_prices.items():
-            position = positions[asset]
+            position = next(
+                (position for position in positions.values() if position.asset == asset),
+                None,
+            )
+            if position is None:
+                continue
             self._payout_last_sale_prices[asset] = price = position.last_sale_price
             amount = position.amount
             total += self._calculate_payout(
@@ -442,24 +452,45 @@ class Ledger:
 
         return total
 
+    @staticmethod
+    def _positions_by_exchange_and_account(position_tracker: PositionTracker) -> dict:
+        """Build the nested ``exchange -> trading_account -> asset -> Position``
+        view of the tracker's positions for the portfolio API."""
+        positions = {}
+        for position in position_tracker.positions.values():
+            accounts = positions.setdefault(position.exchange_name, {})
+            assets = accounts.setdefault(position.trading_account_id, {})
+            assets[position.asset] = Position(
+                asset=position.asset,
+                amount=position.amount,
+                cost_basis=position.cost_basis,
+                last_sale_price=position.last_sale_price,
+                last_sale_date=position.last_sale_date,
+            )
+        return positions
+
     def synchronize_exchange_portfolio(self, portfolio: Portfolio):
         # start_cash = sum(exchange.get_start_cash_balance() for exchange in exchange_repository.get_all_exchanges())
 
         pt = self.position_tracker
-        for asset, position in portfolio.positions.items():
-            pt.update_position(
-                asset=asset, exchange_name=position.exchange_name,
-                last_sale_price=position.last_sale_price,
-                last_sale_date=position.last_sale_date,
-                cost_basis=position.cost_basis,
-                amount=position.amount,
-                trading_account_id=position.trading_account_id,
-            )
+        for exchange_name, accounts in portfolio.positions.items():
+            for trading_account_id, assets in accounts.items():
+                for asset, position in assets.items():
+                    if position.amount == 0:
+                        continue
+                    pt.update_position(
+                        asset=asset, exchange_name=exchange_name,
+                        last_sale_price=position.last_sale_price,
+                        last_sale_date=position.last_sale_date,
+                        cost_basis=position.cost_basis,
+                        amount=position.amount,
+                        trading_account_id=trading_account_id,
+                    )
         self._portfolio.cash = portfolio.cash
         self._portfolio.starting_cash = portfolio.starting_cash
         self._portfolio.portfolio_value = portfolio.portfolio_value
 
-        self._portfolio.positions = pt.get_positions()
+        self._portfolio.positions = self._positions_by_exchange_and_account(pt)
         position_stats = pt.stats
 
         self._portfolio.positions_value = position_value = position_stats.net_value
@@ -492,7 +523,7 @@ class Ledger:
 
         pt = self.position_tracker
 
-        self._portfolio.positions = pt.get_positions()
+        self._portfolio.positions = self._positions_by_exchange_and_account(pt)
         position_stats = pt.stats
 
         self._portfolio.positions_value = position_value = position_stats.net_value

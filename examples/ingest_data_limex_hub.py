@@ -22,7 +22,7 @@ async def ingest_data_limex_hub():
 
     # STEP 1: Define symbols, date range and frequency of the data that we are going to ingest
     symbols = ["META", "AAPL", "AMZN", "NFLX", "GOOGL", "NVDA", "MSFT"]
-    start_date = datetime.datetime(year=2024, month=6, day=1, tzinfo=datetime.timezone.utc)
+    start_date = datetime.datetime(year=2010, month=6, day=1, tzinfo=datetime.timezone.utc)
     end_date = datetime.datetime(year=2026, month=1, day=20, tzinfo=datetime.timezone.utc)
     data_frequency = datetime.timedelta(minutes=1)
     # STEP 2: Initialize market data source and data bundle source - LimexHub

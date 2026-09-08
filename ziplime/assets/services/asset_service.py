@@ -162,3 +162,32 @@ class AssetService:
 
     async def get_cash_dividends_with_ex_date(self, assets, date):
         return await self._asset_repository.get_cash_dividends_with_ex_date(date=date, assets=assets)
+
+    async def get_exchange_assets_by_sids(self, sids: list[int]) -> list[ExchangeAsset]:
+        return await self._asset_repository.get_exchange_assets_by_sids(sids=sids)
+
+    async def get_all_dividends(self, assets: list[Asset]) -> list[DividendPayout]:
+        return await self._asset_repository.get_all_dividends(assets=assets)
+
+    async def get_all_splits(self, assets: list[Asset]) -> list[Split]:
+        return await self._asset_repository.get_all_splits(assets=assets)
+
+    async def get_dividends_by_assets_and_ex_date_between(self, assets: list[Asset], ex_date_from: datetime.date,
+                                                          ex_date_to: datetime.date) -> list[DividendPayout]:
+        return await self._asset_repository.get_dividends_by_assets_and_ex_date_between(
+            assets=assets, ex_date_from=ex_date_from, ex_date_to=ex_date_to)
+
+    async def get_splits_by_assets_and_effective_date_between(self, assets: list[Asset],
+                                                              effective_date_from: datetime.date,
+                                                              effective_date_to: datetime.date) -> list[Split]:
+        return await self._asset_repository.get_splits_by_assets_and_effective_date_between(
+            assets=assets, effective_date_from=effective_date_from, effective_date_to=effective_date_to)
+
+    async def preload_corporate_actions(self, assets: list[Asset],
+                                        date_from: datetime.date,
+                                        date_to: datetime.date) -> None:
+        await self._asset_repository.preload_corporate_actions(
+            assets=assets,
+            date_from=date_from,
+            date_to=date_to,
+        )

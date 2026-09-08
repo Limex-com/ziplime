@@ -2,12 +2,13 @@ import datetime
 import logging
 
 import numpy as np
+import polars as pl
 import structlog
 from pydantic import BaseModel
 
 from ziplime.config.base_algorithm_config import BaseAlgorithmConfig
 from ziplime.domain.bar_data import BarData
-from ziplime.finance.execution import MarketOrder
+from ziplime.finance.execution import MarketOrder, LimitOrder
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 logger = structlog.get_logger(__name__)
@@ -31,33 +32,39 @@ async def initialize(context: TradingAlgorithm):
         await context.symbol("NVDA"),
         await context.symbol("NFLX@XNGS")
     ]
-    context.q100us = await context.symbols_universe(name="Q100US", dt=None)
-    context.q500us = await context.symbols_universe(name="Q500US", dt=None)
-    context.q1000us = await context.symbols_universe(name="Q1500US", dt=None)
-    context.short_window = 50
-    context.long_window = 200
+    # read config file
+    logger.info("Algorithm config: ", config=context.algorithm.config)
+    context.i = 0
 
 
 async def handle_data(context: TradingAlgorithm, data: BarData):
-    asset = context.assets[0]
-    df = await data.history(assets=[asset], fields=["close"], bar_count=context.long_window)
-    df = await data.current(assets=[asset], fields=["close"])
+    num_assets = len(context.assets)
+    target_percent = 1.0 / num_assets
+    if context.i == 0:
+        await context.order_target_percent(asset=context.assets[0], style=MarketOrder(), target=1)
+    if context.i == 1:
+        await context.order_target_percent(asset=context.assets[0], style=MarketOrder(), target=0.5)
+    context.i+=1
 
-    prices = df["close"].to_numpy()
+    # print(context.portfolio)
+    # result = await context.order(exchange_name="grpc_exchange",
+    #               asset=context.assets[1],
+    #               style=MarketOrder(),
+    #               amount=-1,
+    #               ),
+    # await context.order_target(asset=context.assets[1], exchange_name="grpc_exchange",
+    #                      style=LimitOrder(limit_price=current_prices.filter(pl.col("symbol") == "GMKN")[0]["price"][0]), target=1)
+    # await context.order_target(asset=context.assets[1], exchange_name="grpc_exchange",
+    #                      style=LimitOrder(limit_price=current_prices.filter(pl.col("symbol") == "MGNT")[0]["price"][0]), target=2)
+    # await context.order_target(asset=context.assets[1], exchange_name="grpc_exchange",
+    #                      style=MarketOrder(), target=1)
 
-    asset_positions = await context.portfolio.get_asset_positions(asset=asset, exchange_name="LIME")
-    exchange_asset_positions = await context.portfolio.get_exchange_asset_positions(asset=asset, exchange_name="LIME")
-    exchange_asset_positions_amount = await context.portfolio.get_exchange_asset_positions_amount(asset=asset, exchange_name="LIME")
-    asset_positions_amount = await context.portfolio.get_asset_positions_amount(asset=asset, exchange_name="LIME")
+    # await context.order_target(asset=context.assets[1], exchange_name="grpc_exchange",
+    #                      style=MarketOrder(), target=1)
 
-    logger.info(f"asset_positions_amount={asset_positions_amount}")
-    for asset in context.assets:
-        order_buy = await context.order_target_percent(asset=asset, target=1.0, style=MarketOrder())
-        # order_sell = await context.order_target_percent(asset=asset, target=0.0, style=MarketOrder())
+    # for asset in context.assets:
+    #     print(f"Ordering asset={asset}, target_percent={target_percent}")
 
-    # order_sell = await context.order_target_percent(asset=asset, target=0.0, style=MarketOrder())
-    # if order_buy:
-    #     print(f"[{context.simulation_dt}]Buy order, quantity={order_buy.amount},  status={order_buy.status}, cash={context.portfolio.cash}")
-    # if order_sell:
-    #     print(f"[{context.simulation_dt}]Sell order, quantity={order_sell.amount}, status={order_sell.status}, cash={context.portfolio.cash}")
-    #
+    # open_orders = context.get_open_orders()
+    # for order in open_orders:
+    # await context.cancel_all_orders_for_asset(asset=context.assets[0], exchange_name="grpc_exchange")

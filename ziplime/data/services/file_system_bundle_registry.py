@@ -21,8 +21,8 @@ class FileSystemBundleRegistry(BundleRegistry):
         os.makedirs(self._base_data_path, exist_ok=True)
         os.makedirs(self.get_bundle_registry_path(), exist_ok=True)
 
-
-    async def get_bundle_metadata(self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool) -> dict[str, Any]:
+    async def get_bundle_metadata(self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool) -> dict[
+        str, Any]:
         frequency_seconds = None
         frequency_text = None
         if type(data_bundle.frequency) is datetime.timedelta:
@@ -42,6 +42,8 @@ class FileSystemBundleRegistry(BundleRegistry):
             #
             # "adjustment_repository_class": f"{data_bundle.adjustment_repository.__class__.__module__}.{data_bundle.adjustment_repository.__class__.__name__}",
             # "adjustment_repository_data": data_bundle.adjustment_repository.to_json(),
+            "start_date": data_bundle.start_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end_date": data_bundle.end_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "trading_calendar_name": data_bundle.trading_calendar.name,
             "frequency_seconds": frequency_seconds,
             "frequency_text": frequency_text,
@@ -57,8 +59,25 @@ class FileSystemBundleRegistry(BundleRegistry):
             bundle_version = bundles[0]["version"]
 
         bundle_metadata_path = Path(self.get_bundle_registry_path(), f"{bundle_name}_{bundle_version}.json")
+        if not await aiofiles.os.path.exists(bundle_metadata_path):
+            return None
         async with aiofiles.open(bundle_metadata_path, mode="rb") as f:
-            return orjson.loads(await f.read())
+            metadata_json = orjson.loads(await f.read())
+
+        metadata_json["start_date"] = datetime.datetime.strptime(metadata_json["start_date"], "%Y-%m-%dT%H:%M:%SZ")
+        metadata_json["end_date"] = datetime.datetime.strptime(metadata_json["end_date"], "%Y-%m-%dT%H:%M:%SZ")
+        metadata_json["timestamp"] = datetime.datetime.strptime(metadata_json["timestamp"], "%Y-%m-%dT%H:%M:%SZ")
+        return metadata_json
+        # name= metadata["name"]
+        # version = metadata["version"]
+        # trading_calendar_name = metadata["trading_calendar_name"]
+        #
+        # BundleMetadata(
+        #
+        # start_date=
+        # end_date: datetime.datetime
+        # frequency: datetime.timedelta
+        # )
 
     def get_bundle_registry_path(self) -> Path:
         return Path(self._base_data_path, "bundle_registry")

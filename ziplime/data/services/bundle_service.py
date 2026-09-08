@@ -1,10 +1,10 @@
 import datetime
 import time
-from typing import Any
+from typing import Any, AsyncIterator
 
 import polars as pl
 import structlog
-from exchange_calendars import ExchangeCalendar, get_calendar
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.services.asset_service import AssetService
@@ -18,6 +18,7 @@ from ziplime.utils.class_utils import load_class
 from ziplime.utils.date_utils import period_to_timedelta
 from ziplime.utils.data_utils import backfill_sid_data
 from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.utils.calendar_utils import get_calendar
 
 
 class BundleService:
@@ -48,6 +49,135 @@ class BundleService:
                 metadata.
         """
         return await self._bundle_registry.list_bundles()
+
+    async def load_bundle_definition(
+            self,
+            bundle_name: str,
+            bundle_version: str | None = None,
+    ) -> tuple[DataBundle, BundleStorage]:
+        metadata = await self._bundle_registry.load_bundle_metadata(
+            bundle_name=bundle_name, bundle_version=bundle_version
+        )
+        if metadata is None:
+            raise ValueError(f"Bundle {bundle_name} not found.")
+
+        storage_class: type[BundleStorage] = load_class(
+            module_name=".".join(metadata["bundle_storage_class"].split(".")[:-1]),
+            class_name=metadata["bundle_storage_class"].split(".")[-1],
+        )
+        storage = await storage_class.from_json(metadata["bundle_storage_data"])
+        calendar = get_calendar(
+            metadata["trading_calendar_name"],
+            start=metadata["start_date"],
+            end=metadata["start_date"],
+        )
+        frequency = (
+            datetime.timedelta(seconds=int(metadata["frequency_seconds"]))
+            if metadata["frequency_seconds"] is not None
+            else metadata["frequency_text"]
+        )
+        bundle = DataBundle(
+            name=bundle_name,
+            version=metadata["version"],
+            start_date=metadata["start_date"].replace(tzinfo=calendar.tz),
+            end_date=metadata["end_date"].replace(tzinfo=calendar.tz),
+            trading_calendar=calendar,
+            frequency=frequency,
+            original_frequency=frequency,
+            data_type=DataType(metadata["data_type"]),
+            timestamp=metadata["timestamp"].replace(tzinfo=calendar.tz),
+        )
+        if bundle.data_type != DataType.MARKET_DATA:
+            raise ValueError(f"Bundle {bundle_name} is not MARKET_DATA.")
+        return bundle, storage
+
+    async def iter_bundle_batches(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+            batch_days: int | None = 30,
+            batch_assets: int | None = 100,
+            sids: list[int] | None = None,
+    ) -> AsyncIterator[pl.DataFrame]:
+        async for batch in bundle_storage.iter_data_bundle_batches(
+                data_bundle=data_bundle,
+                batch_days=batch_days,
+                batch_assets=batch_assets,
+                sids=sids,
+        ):
+            yield batch
+
+    async def get_bundle_sids(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+    ) -> list[int]:
+        return await bundle_storage.get_data_bundle_sids(data_bundle)
+
+    async def load_bundle_before(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+            sid: int,
+            date: datetime.datetime | datetime.date,
+            columns: list[str],
+    ) -> pl.DataFrame:
+        return await bundle_storage.load_data_bundle_before(
+            data_bundle=data_bundle,
+            sid=sid,
+            date=date,
+            columns=columns,
+        )
+
+    async def initialize_adjustment_columns(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+            adjusted_columns: dict[str, str],
+            adjusted_flag_column: str = "adjusted",
+            sids: list[int] | None = None,
+    ) -> None:
+        await bundle_storage.initialize_adjustment_columns(
+            data_bundle=data_bundle,
+            adjusted_columns=adjusted_columns,
+            adjusted_flag_column=adjusted_flag_column,
+            sids=sids,
+        )
+
+    async def register_bundle(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+            merge: bool = False,
+    ) -> None:
+        await self._bundle_registry.register_bundle(
+            data_bundle=data_bundle,
+            bundle_storage=bundle_storage,
+            merge=merge,
+        )
+
+    async def store_bundle(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+            merge: bool,
+            merge_columns: list[str] | None = None,
+    ) -> None:
+        await bundle_storage.store_bundle(
+            data_bundle=data_bundle,
+            merge=merge,
+            merge_columns=merge_columns,
+        )
+
+    async def load_bundle_metadata(
+            self,
+            bundle_name: str,
+            bundle_version: str | None = None,
+    ) -> dict[str, Any] | None:
+        return await self._bundle_registry.load_bundle_metadata(
+            bundle_name=bundle_name,
+            bundle_version=bundle_version,
+        )
 
     async def ingest_custom_data_bundle(self, name: str,
                                         bundle_version: str,
@@ -194,12 +324,23 @@ class BundleService:
                                  version=bundle_version,
                                  data_type=DataType.CUSTOM
                                  )
-
-        await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage,
-                                                    merge=merge)
+        existing_bundle_metadata = await self._bundle_registry.load_bundle_metadata(bundle_name=name,
+                                                                                    bundle_version=bundle_version)
+        if not existing_bundle_metadata:
+            await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage,
+                                                        merge=merge)
         await bundle_storage.store_bundle(data_bundle=data_bundle, merge=merge,
                                           merge_columns=merge_columns)
-
+        if existing_bundle_metadata:
+            # We need to update start/end date
+            new_start_date = min(date_start, existing_bundle_metadata["start_date"].replace(tzinfo=trading_calendar.tz))
+            new_end_date = max(date_end, existing_bundle_metadata["end_date"].replace(tzinfo=trading_calendar.tz))
+            data_bundle.start_date = new_start_date
+            data_bundle.end_date = new_end_date
+            await self._bundle_registry.register_bundle(
+                data_bundle=data_bundle, bundle_storage=bundle_storage,
+                merge=merge
+            )
         self._logger.info(f"Finished ingesting custom bundle_name={name}, bundle_version={bundle_version}")
 
         return data_bundle
@@ -356,9 +497,25 @@ class BundleService:
                                  version=bundle_version,
                                  data_type=DataType.MARKET_DATA
                                  )
-        await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage, merge=merge)
+
+        existing_bundle_metadata = await self._bundle_registry.load_bundle_metadata(bundle_name=name,
+                                                                                    bundle_version=bundle_version)
+        if not existing_bundle_metadata:
+            await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage,
+                                                        merge=merge)
         await bundle_storage.store_bundle(data_bundle=data_bundle,
                                           merge=merge, merge_columns=["sid", "date"])
+        if existing_bundle_metadata:
+            # We need to update start/end date
+            new_start_date = min(date_start, existing_bundle_metadata["start_date"].replace(tzinfo=trading_calendar.tz))
+            new_end_date = max(date_end, existing_bundle_metadata["end_date"].replace(tzinfo=trading_calendar.tz))
+            data_bundle.start_date = new_start_date
+            data_bundle.end_date = new_end_date
+            await self._bundle_registry.register_bundle(
+                data_bundle=data_bundle, bundle_storage=bundle_storage,
+                merge=merge
+            )
+
         duration = time.time() - start_duration
         self._logger.info(f"Finished ingesting market data bundle_name={name}, bundle_version={bundle_version}."
                           f"Total duration: {duration:.2f} seconds", duration=duration)
@@ -434,6 +591,13 @@ class BundleService:
             class_name=bundle_metadata["bundle_storage_class"].split(".")[-1])
 
         bundle_storage = await bundle_storage_class.from_json(bundle_metadata["bundle_storage_data"])
+        tc =  get_calendar(bundle_metadata["trading_calendar_name"],
+                           start=bundle_metadata["start_date"],
+                           end=bundle_metadata["start_date"])
+        if start_date is None:
+            start_date = bundle_metadata["start_date"].replace(tzinfo=tc.tz)
+        if end_date is None:
+            end_date = bundle_metadata["end_date"].replace(tzinfo=tc.tz)
 
         trading_calendar = get_calendar(bundle_metadata["trading_calendar_name"],
                                         start=start_date.date() - datetime.timedelta(days=30))
@@ -441,8 +605,7 @@ class BundleService:
         frequency_timedelta = datetime.timedelta(seconds=int(bundle_metadata["frequency_seconds"])) if bundle_metadata[
                                                                                                            "frequency_seconds"] is not None else None
         frequency_text = bundle_metadata.get("frequency_text", None)
-        timestamp = datetime.datetime.strptime(bundle_metadata["timestamp"], "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=trading_calendar.tz)
+        timestamp = bundle_metadata["timestamp"].replace(tzinfo=trading_calendar.tz)
         data_type = DataType(bundle_metadata["data_type"])
         bundle_frequency = frequency_timedelta or frequency_text
 
@@ -475,7 +638,7 @@ class BundleService:
                                                      assets=assets,
                                                      start_date=start_date,
                                                      end_date=end_date + datetime.timedelta(days=1),
-                                                     frequency=frequency,
+                                                     frequency=frequency or bundle_frequency,
                                                      start_auction_delta=start_auction_delta,
                                                      end_auction_delta=end_auction_delta,
                                                      aggregations=aggregations
@@ -483,7 +646,7 @@ class BundleService:
 
         missing_data = await self.check_for_missing_data(data=data,
                                                          assets=assets,
-                                                         frequency=frequency,
+                                                         frequency=frequency or bundle_frequency,
                                                          trading_calendar=trading_calendar,
                                                          start_date=start_date, end_date=end_date)
 
@@ -513,9 +676,10 @@ class BundleService:
                                      frequency: datetime.timedelta | Period,
                                      start_date: datetime.datetime,
                                      end_date: datetime.datetime,
-                                     assets: list[ExchangeAsset],
+                                     assets: list[ExchangeAsset] | None,
                                      ) -> dict[ExchangeAsset, tuple[datetime.datetime, datetime.datetime]]:
-
+        if assets is None:
+            return {}
         all_bars = [
             s for s in pl.from_pandas(
                 trading_calendar.sessions_minutes(start=start_date.replace(tzinfo=None).date(),
@@ -527,6 +691,7 @@ class BundleService:
             index_column="date", every=frequency
         ).agg()
         missing_data_per_symbol = {}
+
         for asset in assets:
             symbol_data = data.filter(sid=asset.sid).with_columns(pl.col("date"))
             missing_sessions = sorted(set(required_sessions["date"]) - set(symbol_data["date"]))

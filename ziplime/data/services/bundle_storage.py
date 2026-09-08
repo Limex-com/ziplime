@@ -2,7 +2,7 @@ import datetime
 
 import polars as pl
 from abc import abstractmethod
-from typing import Any, Self
+from typing import Any, AsyncIterator, Self
 
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.constants.period import Period
@@ -74,6 +74,44 @@ class BundleStorage:
         Raises:
             NotImplementedError: Must be raised if this method is called directly from an abstract class.
         """
+        ...
+
+    @abstractmethod
+    async def iter_data_bundle_batches(
+            self,
+            data_bundle: DataBundle,
+            batch_days: int | None = 30,
+            batch_assets: int | None = 100,
+            sids: list[int] | None = None,
+    ) -> AsyncIterator[pl.DataFrame]:
+        """Yield bounded data batches without loading the complete bundle."""
+        ...
+
+    @abstractmethod
+    async def get_data_bundle_sids(self, data_bundle: DataBundle) -> list[int]:
+        """Return the distinct sids contained in a data bundle."""
+        ...
+
+    @abstractmethod
+    async def load_data_bundle_before(
+            self,
+            data_bundle: DataBundle,
+            sid: int,
+            date: datetime.datetime | datetime.date,
+            columns: list[str],
+    ) -> pl.DataFrame:
+        """Load the latest row for a sid strictly before a date."""
+        ...
+
+    @abstractmethod
+    async def initialize_adjustment_columns(
+            self,
+            data_bundle: DataBundle,
+            adjusted_columns: dict[str, str],
+            adjusted_flag_column: str = "adjusted",
+            sids: list[int] | None = None,
+    ) -> None:
+        """Add adjustment columns and initialize them from the original values."""
         ...
 
     @classmethod

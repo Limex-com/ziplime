@@ -1,4 +1,5 @@
 import datetime
+import asyncio
 from collections import deque
 from functools import partial
 from operator import attrgetter
@@ -102,6 +103,18 @@ class SqlAlchemyAssetRepository(AssetRepository):
             future_chain_predicates if future_chain_predicates is not None else {}
         )
         self._ordered_contracts = {}
+        self._cached_dividends_by_asset_date: dict[
+            tuple[int, datetime.date], list[DividendPayout]
+        ] = {}
+        self._cached_splits_by_asset_date: dict[
+            tuple[int, datetime.date], list[Split]
+        ] = {}
+        self._cached_corporate_action_ranges: list[
+            tuple[frozenset[int], datetime.date, datetime.date]
+        ] = []
+        self._loaded_corporate_action_ranges: set[
+            tuple[frozenset[int], datetime.date, datetime.date]
+        ] = set()
 
         # Populated on first call to `lifetimes`.
         self._asset_lifetimes = {}
@@ -642,6 +655,14 @@ class SqlAlchemyAssetRepository(AssetRepository):
         return None
 
     async def get_cash_dividends_with_ex_date(self, assets: list[Asset], date: datetime.date) -> list[DividendPayout]:
+        asset_ids = {asset.id for asset in assets}
+        if self._has_cached_corporate_actions(asset_ids=asset_ids, date=date):
+            return [
+                dividend
+                for asset_id in asset_ids
+                for dividend in self._cached_dividends_by_asset_date.get((asset_id, date), [])
+            ]
+
         async with self.session_maker() as session:
             all_assets = await self.get_all_assets()
             q_dividends = select(
@@ -666,6 +687,14 @@ class SqlAlchemyAssetRepository(AssetRepository):
             for d in dividends_r]
 
     async def get_splits(self, assets: list[Asset], date: datetime.date) -> list[Split]:
+        asset_ids = {asset.id for asset in assets}
+        if self._has_cached_corporate_actions(asset_ids=asset_ids, date=date):
+            return [
+                split
+                for asset_id in asset_ids
+                for split in self._cached_splits_by_asset_date.get((asset_id, date), [])
+            ]
+
         async with self.session_maker() as session:
             all_assets = await self.get_all_assets()
             q_splits = select(
@@ -676,6 +705,189 @@ class SqlAlchemyAssetRepository(AssetRepository):
             )
             splits_r: list[SplitModel] = list((await session.execute(q_splits)).scalars())
 
+        return [
+            Split(
+                asset=all_assets[s.asset_id],
+                effective_date=s.effective_date,
+                ratio=s.ratio,
+                id=s.id
+            )
+            for s in splits_r]
+
+    @cached(cache=Cache.MEMORY)
+    async def _load_corporate_actions_for_range(
+            self,
+            asset_ids: frozenset[int],
+            date_from: datetime.date,
+            date_to: datetime.date,
+    ) -> tuple[list[DividendPayout], list[Split]]:
+        assets = await self.get_assets_by_ids(ids=list(asset_ids))
+        return await asyncio.gather(
+            self.get_dividends_by_assets_and_ex_date_between(
+                assets=assets,
+                ex_date_from=date_from,
+                ex_date_to=date_to,
+            ),
+            self.get_splits_by_assets_and_effective_date_between(
+                assets=assets,
+                effective_date_from=date_from,
+                effective_date_to=date_to,
+            ),
+        )
+
+    async def preload_corporate_actions(self, assets: list[Asset],
+                                        date_from: datetime.date,
+                                        date_to: datetime.date) -> None:
+        if date_from > date_to or not assets:
+            return
+
+        asset_ids = frozenset(asset.id for asset in assets)
+        cache_key = (asset_ids, date_from, date_to)
+        if cache_key in self._loaded_corporate_action_ranges:
+            return
+
+        dividends, splits = await self._load_corporate_actions_for_range(
+            asset_ids=asset_ids,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+        dividends_by_key: dict[tuple[int, datetime.date], list[DividendPayout]] = {}
+        for dividend in dividends:
+            dividends_by_key.setdefault((dividend.asset.id, dividend.ex_date), []).append(dividend)
+        self._cached_dividends_by_asset_date.update(dividends_by_key)
+
+        splits_by_key: dict[tuple[int, datetime.date], list[Split]] = {}
+        for split in splits:
+            splits_by_key.setdefault((split.asset.id, split.effective_date), []).append(split)
+        self._cached_splits_by_asset_date.update(splits_by_key)
+
+        self._cached_corporate_action_ranges.append((asset_ids, date_from, date_to))
+        self._loaded_corporate_action_ranges.add(cache_key)
+
+    def _has_cached_corporate_actions(self, asset_ids: set[int], date: datetime.date) -> bool:
+        return any(
+            asset_ids.issubset(cached_asset_ids)
+            and date_from <= date <= date_to
+            for cached_asset_ids, date_from, date_to in self._cached_corporate_action_ranges
+        )
+
+    async def get_exchange_assets_by_sids(self, sids: list[int]) -> list[ExchangeAsset]:
+        results: list[ExchangeAssetModel] = []
+        for chunk in group_into_chunks(sids):
+            async with self.session_maker() as session:
+                q = select(
+                    ExchangeAssetModel
+                ).where(
+                    ExchangeAssetModel.sid.in_(chunk)
+                )
+                results.extend((await session.execute(q)).scalars())
+
+        all_assets = await self.get_all_assets()
+        return [
+            ExchangeAsset(
+                sid=result.sid,
+                symbol=result.symbol,
+                exchange=await self.get_exchange_by_mic(mic=result.mic),
+                start_date=result.start_date,
+                end_date=result.end_date,
+                first_traded=result.first_traded,
+                auto_close_date=result.auto_close_date,
+                external_id=result.external_id,
+                asset=all_assets[result.asset_id],
+                quote=all_assets[result.quote_id]
+            )
+            for result in results
+        ]
+
+    async def get_all_dividends(self, assets: list[Asset]) -> list[DividendPayout]:
+        dividends_r: list[DividendPayoutModel] = []
+        for chunk in group_into_chunks([asset.id for asset in assets]):
+            async with self.session_maker() as session:
+                q_dividends = select(
+                    DividendPayoutModel
+                ).where(
+                    DividendPayoutModel.asset_id.in_(chunk)
+                )
+                dividends_r.extend((await session.execute(q_dividends)).scalars())
+
+        all_assets = await self.get_all_assets()
+        return [
+            DividendPayout(
+                asset=all_assets[d.asset_id],
+                amount=d.amount,
+                pay_date=d.pay_date,
+                declared_date=d.declared_date,
+                record_date=d.record_date,
+                ex_date=d.ex_date,
+                currency=None
+            )
+            for d in dividends_r]
+
+    async def get_all_splits(self, assets: list[Asset]) -> list[Split]:
+        splits_r: list[SplitModel] = []
+        for chunk in group_into_chunks([asset.id for asset in assets]):
+            async with self.session_maker() as session:
+                q_splits = select(
+                    SplitModel
+                ).where(
+                    SplitModel.asset_id.in_(chunk)
+                )
+                splits_r.extend((await session.execute(q_splits)).scalars())
+
+        all_assets = await self.get_all_assets()
+        return [
+            Split(
+                asset=all_assets[s.asset_id],
+                effective_date=s.effective_date,
+                ratio=s.ratio,
+                id=s.id
+            )
+            for s in splits_r]
+
+    async def get_dividends_by_assets_and_ex_date_between(self, assets: list[Asset], ex_date_from: datetime.date,
+                                                          ex_date_to: datetime.date) -> list[DividendPayout]:
+        dividends_r: list[DividendPayoutModel] = []
+        for chunk in group_into_chunks([asset.id for asset in assets]):
+            async with self.session_maker() as session:
+                q_dividends = select(
+                    DividendPayoutModel
+                ).where(
+                    DividendPayoutModel.asset_id.in_(chunk),
+                    DividendPayoutModel.ex_date >= ex_date_from,
+                    DividendPayoutModel.ex_date <= ex_date_to
+                )
+                dividends_r.extend((await session.execute(q_dividends)).scalars())
+
+        all_assets = await self.get_all_assets()
+        return [
+            DividendPayout(
+                asset=all_assets[d.asset_id],
+                amount=d.amount,
+                pay_date=d.pay_date,
+                declared_date=d.declared_date,
+                record_date=d.record_date,
+                ex_date=d.ex_date,
+                currency=None
+            )
+            for d in dividends_r]
+
+    async def get_splits_by_assets_and_effective_date_between(self, assets: list[Asset],
+                                                              effective_date_from: datetime.date,
+                                                              effective_date_to: datetime.date) -> list[Split]:
+        splits_r: list[SplitModel] = []
+        for chunk in group_into_chunks([asset.id for asset in assets]):
+            async with self.session_maker() as session:
+                q_splits = select(
+                    SplitModel
+                ).where(
+                    SplitModel.asset_id.in_(chunk),
+                    SplitModel.effective_date >= effective_date_from,
+                    SplitModel.effective_date <= effective_date_to
+                )
+                splits_r.extend((await session.execute(q_splits)).scalars())
+
+        all_assets = await self.get_all_assets()
         return [
             Split(
                 asset=all_assets[s.asset_id],

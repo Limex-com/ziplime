@@ -32,7 +32,7 @@ class MaxPositionSize(TradingControl):
         if self.asset is not None and self.asset != asset:
             return
 
-        current_share_count = portfolio.positions[asset].amount
+        current_share_count = await portfolio.get_exchange_asset_positions_amount(asset=asset)
         shares_post_order = current_share_count + amount
 
         too_many_shares = (

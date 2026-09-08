@@ -108,7 +108,7 @@ from ziplime.utils.math_utils import (
     round_if_near_integer,
 )
 from ziplime.sources.benchmark_source import BenchmarkSource
-import polars as pl
+
 
 # For creating and storing pipeline instances
 AttachedPipeline = namedtuple("AttachedPipeline", "pipe chunks eager")
@@ -399,6 +399,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     raise ZeroCapitalError()
             await self.initialize()
             self.initialized = True
+            assets = getattr(self, "assets", None)
+            if assets:
+                await self.asset_service.preload_corporate_actions(
+                    assets=list({asset.asset for asset in assets}),
+                    date_from=self.clock.start_session,
+                    date_to=self.clock.end_session,
+                )
         await self.metrics_tracker.handle_start_of_simulation()
         return self.transform()
 
@@ -1106,10 +1113,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             )
 
         else:
-            chunks = []
-            for exchange_name, trading_accounts in self._ledger.position_tracker.positions.items():
-                exchange = await self.exchange_repository.get_exchange_by_mic(mic=exchange_name)
-                assets = [asset for tr in trading_accounts.values() for asset in tr]
+            price_by_asset = {}
+            for exchange_name, exchange_positions in self._ledger.position_tracker.positions_by_exchange.items():
+                exchange = await self.exchange_repository.get_exchange_by_mic(mic=exchange_name[0])
+                assets = [position.asset for position in exchange_positions]
 
                 chunk = await exchange.get_spot_value(
                     fields=frozenset(["close"]),
@@ -1117,13 +1124,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     assets=frozenset(assets),
                     # data_frequency=self.data_frequency
                 )
-                chunks.append(chunk)
-
-            prices = pl.concat(chunks) if chunks else pl.DataFrame()
-        price_by_asset = {
-            (row["sid"], exchange): row["close"]
-            for row in prices.select(["sid", "close"]).to_dicts()
-        }
+                price_by_asset.update({
+                    (row["sid"], exchange): row["close"]
+                    for row in chunk.select(["sid", "close"]).to_dicts()
+                })
 
         self._ledger.sync_last_sale_prices(dt=dt, prices=price_by_asset)
 

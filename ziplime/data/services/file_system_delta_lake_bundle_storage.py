@@ -2,7 +2,8 @@ import datetime
 
 import aiofiles.os
 from pathlib import Path
-from typing import Any, Sequence, Literal, Self
+from typing import Any, AsyncIterator, Sequence, Literal, Self
+from zoneinfo import ZoneInfo
 
 import structlog
 from polars import CredentialProviderFunction, Expr
@@ -177,6 +178,166 @@ class FileSystemDeltaLakeBundleStorage(BundleStorage):
                         field not in ('sid', 'date')
                     )
         return pl_parquet.collect()
+
+    async def iter_data_bundle_batches(
+            self,
+            data_bundle: DataBundle,
+            batch_days: int | None = 30,
+            batch_assets: int | None = 100,
+            sids: list[int] | None = None,
+    ) -> AsyncIterator[pl.DataFrame]:
+        """Yield bounded batches from a Delta bundle without collecting it all."""
+        if batch_days is not None and batch_days <= 0:
+            raise ValueError("batch_days must be positive when provided.")
+        if batch_assets is not None and batch_assets <= 0:
+            raise ValueError("batch_assets must be positive when provided.")
+        if batch_days is None and batch_assets is None:
+            raise ValueError("At least one of batch_days or batch_assets must be provided.")
+        if data_bundle.data_type != DataType.MARKET_DATA:
+            raise ValueError(f"Bundle {data_bundle.name} is not MARKET_DATA.")
+
+        bundle_path = self.get_data_bundle_path(data_bundle=data_bundle)
+        source = pl.scan_delta(bundle_path)
+        schema = source.collect_schema()
+
+        bundle_sids = (
+            source.select("sid")
+            .unique()
+            .sort("sid")
+            .collect()
+            .get_column("sid")
+            .to_list()
+        )
+        if sids is not None:
+            sids = sorted(set(sids).intersection(bundle_sids))
+        iteration_sids = bundle_sids if sids is None else sids
+        asset_groups = (
+            [iteration_sids[i:i + batch_assets] for i in range(0, len(iteration_sids), batch_assets)]
+            if batch_assets is not None
+            else [iteration_sids]
+        )
+
+        date_dtype = schema["date"]
+        source_tz = date_dtype.time_zone if isinstance(date_dtype, pl.Datetime) else None
+
+        def normalize_boundary(value: datetime.datetime) -> datetime.datetime | datetime.date:
+            if isinstance(date_dtype, pl.Date):
+                return value.date()
+            if source_tz is None:
+                return value.replace(tzinfo=None)
+            return value.astimezone(ZoneInfo(source_tz))
+
+        start = data_bundle.start_date
+        end = data_bundle.end_date
+        current = normalize_boundary(start)
+        final = normalize_boundary(end)
+        while current <= final:
+            window_end = (
+                min(current + datetime.timedelta(days=batch_days - 1), final)
+                if batch_days is not None else final
+            )
+            for sid_group in asset_groups:
+                filters = [
+                    pl.col("date") >= current,
+                    pl.col("date") < window_end + datetime.timedelta(days=1),
+                ]
+                if sids is not None:
+                    filters.append(pl.col("sid").is_in(sid_group))
+                batch = (
+                    source
+                    .filter(*filters)
+                    .sort(["sid", "date"])
+                    .collect()
+                )
+                if not batch.is_empty():
+                    yield batch
+            if batch_days is None:
+                break
+            current = window_end + datetime.timedelta(days=1)
+
+    async def get_data_bundle_sids(self, data_bundle: DataBundle) -> list[int]:
+        if data_bundle.data_type != DataType.MARKET_DATA:
+            raise ValueError(f"Bundle {data_bundle.name} is not MARKET_DATA.")
+        source = pl.scan_delta(self.get_data_bundle_path(data_bundle))
+        schema = source.collect_schema()
+        return (
+            source.select("sid")
+            .unique()
+            .sort("sid")
+            .collect()
+            .get_column("sid")
+            .to_list()
+        )
+
+    async def load_data_bundle_before(
+            self,
+            data_bundle: DataBundle,
+            sid: int,
+            date: datetime.datetime | datetime.date,
+            columns: list[str],
+    ) -> pl.DataFrame:
+        source = pl.scan_delta(self.get_data_bundle_path(data_bundle))
+        schema = source.collect_schema()
+        if data_bundle.data_type != DataType.MARKET_DATA or any(
+                column not in schema for column in columns
+        ):
+            return pl.DataFrame()
+
+        date_dtype = schema["date"]
+        if isinstance(date_dtype, pl.Date):
+            date = date.date() if isinstance(date, datetime.datetime) else date
+        elif isinstance(date_dtype, pl.Datetime):
+            if date_dtype.time_zone is None:
+                date = date.replace(tzinfo=None) if isinstance(date, datetime.datetime) else date
+            elif isinstance(date, datetime.datetime):
+                date = date.astimezone(ZoneInfo(date_dtype.time_zone))
+        return (
+            source
+            .filter((pl.col("sid") == sid) & (pl.col("date") < date))
+            .select(columns)
+            .sort("date", descending=True)
+            .limit(1)
+            .collect()
+        )
+
+    async def initialize_adjustment_columns(
+            self,
+            data_bundle: DataBundle,
+            adjusted_columns: dict[str, str],
+            adjusted_flag_column: str = "adjusted",
+            sids: list[int] | None = None,
+    ) -> None:
+        bundle_path = self.get_data_bundle_path(data_bundle)
+        source = pl.scan_delta(bundle_path)
+        schema = source.collect_schema()
+        selected = pl.col("sid").is_in(sids) if sids is not None else pl.lit(True)
+        expressions = []
+        for adjusted_column, source_column in adjusted_columns.items():
+            if source_column not in schema:
+                continue
+            if adjusted_column in schema and sids is not None:
+                expression = pl.when(selected).then(pl.col(source_column)).otherwise(
+                    pl.col(adjusted_column)
+                )
+            else:
+                expression = pl.col(source_column)
+            expressions.append(expression.alias(adjusted_column))
+        if adjusted_flag_column in schema and sids is not None:
+            flag_expression = pl.when(selected).then(pl.lit(False)).otherwise(
+                pl.col(adjusted_flag_column)
+            )
+        else:
+            flag_expression = pl.lit(False)
+        expressions.append(flag_expression.alias(adjusted_flag_column))
+        (
+            source
+            .with_columns(expressions)
+            .sink_delta(
+                target=bundle_path,
+                mode="overwrite",
+                delta_write_options={"schema_mode": "overwrite"},
+            )
+        )
 
     @classmethod
     async def from_json(cls, data: dict[str, Any]) -> Self:
