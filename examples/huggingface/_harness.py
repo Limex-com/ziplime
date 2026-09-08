@@ -16,10 +16,10 @@ from exchange_calendars import get_calendar
 sys.path.insert(0, str(Path(__file__).parent))
 
 from hf_config import (  # noqa: E402
-    ASSET_DB_PATH, CONGRESS_END, CONGRESS_START, CONGRESS_UNIVERSE, END, EQUITY_MIC,
-    EQUITY_TICKERS, FUNDAMENTALS_END, FUNDAMENTALS_START, FUNDAMENTALS_UNIVERSE, INSIDER10_END,
-    INSIDER10_START, INSIDER10_UNIVERSE, INSIDER_END, INSIDER_START, START, STARTING_CASH,
-    TRADING_CALENDAR,
+    ASSET_DB_PATH, CONGRESS_END, CONGRESS_START, CONGRESS_UNIVERSE, EARNINGS_END, EARNINGS_START,
+    EARNINGS_UNIVERSE, END, EQUITY_MIC, EQUITY_TICKERS, FUNDAMENTALS_END, FUNDAMENTALS_START,
+    FUNDAMENTALS_UNIVERSE, INSIDER10_END, INSIDER10_START, INSIDER10_UNIVERSE, INSIDER_END,
+    INSIDER_START, START, STARTING_CASH, TRADING_CALENDAR,
 )
 
 from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
@@ -69,6 +69,10 @@ def load_strategy_info(path: Path) -> dict:
         info.setdefault("equities", FUNDAMENTALS_UNIVERSE)
         info.setdefault("start", FUNDAMENTALS_START)
         info.setdefault("end", FUNDAMENTALS_END)
+    elif window == "earnings":
+        info.setdefault("equities", EARNINGS_UNIVERSE)
+        info.setdefault("start", EARNINGS_START)
+        info.setdefault("end", EARNINGS_END)
     elif window == "insider10":
         info.setdefault("equities", INSIDER10_UNIVERSE)
         info.setdefault("start", INSIDER10_START)
@@ -94,7 +98,7 @@ def load_strategy_info(path: Path) -> dict:
 
 
 def list_strategies() -> list[dict]:
-    return [load_strategy_info(p) for p in sorted(STRATEGY_DIR.glob("[hifm][0-9][0-9]_*.py"))]
+    return [load_strategy_info(p) for p in sorted(STRATEGY_DIR.glob("[hifme][0-9][0-9]_*.py"))]
 
 
 async def load_listings(asset_service, universe: list[tuple[str, str]]):

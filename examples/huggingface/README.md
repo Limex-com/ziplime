@@ -35,6 +35,10 @@ The equities are priced from Yahoo Finance. The datasets come from the Hub.
 | `m01_next_bar_after_filing` | insider `pit`, one-minute bars | acting in the first bar an acceptance timestamp allows — five filings in six wait for the next open |
 | `m02_act_at_the_open` | insider `pit`, five-minute bars | the same decision executed 30 minutes after the open |
 | `m03_act_at_the_close` | insider `pit`, five-minute bars | the same decision executed 30 minutes before the close |
+| `e01_drift_on_growth` | `ZipLime/earnings-calendar` | post-announcement drift, entered on the first bar the acceptance timestamp allows |
+| `e02_growth_pre_market` | earnings `pit` | the same rule, releases that landed before the open only |
+| `e03_growth_after_close` | earnings `pit` | the same rule, releases that landed after the close only |
+| `e04_step_out_of_results` | earnings `pit` | flat into a company's *expected* results — a date the dataset does not have |
 
 ## The results, before anything else
 
@@ -319,6 +323,69 @@ calendar.
 This is a property of the strategies, not of the scheduler, and it was invisible while the
 rebalance day was an emergent side effect of a day counter. Read every concentrated number in the
 tables below as one sample from a spread of this width.
+
+## An announcement, timed to the second
+
+`ZipLime/earnings-calendar` answers something no other dataset here can: the instant the market
+learned a company's results. Every one of its 454 611 acceptance timestamps is read from the
+filing's own SGML header — `acceptance_source` is `filing_header` on every row, with no fallback —
+rather than from EDGAR's bulk feed, whose `acceptanceDateTime` carries a `Z` while holding Eastern
+local time for 94% of pre-2021 filings. Four hours of error is enough to move a release from one
+side of the close to the other.
+
+The four strategies run on the same 230 names and the same 13.5 years as the fundamentals suite,
+so **`f00` is already the right control**: same universe, same decade, same survivorship bias,
+reading no filing at all.
+
+```
+f00_fundamentals_control     2653 +512.19%  sharpe 0.80  dd -39.79%   the control
+e01_drift_on_growth         20605 +817.81%  sharpe 0.76  dd -54.74%
+e02_growth_pre_market       13104 +829.40%  sharpe 0.74  dd -56.01%
+e03_growth_after_close      21892 +792.65%  sharpe 0.72  dd -55.85%
+e04_step_out_of_results      8753 +494.08%  sharpe 0.79  dd -38.54%
+```
+
+The familiar shape: buying the growers beats the control by 300 points of return and loses to it
+on Sharpe, having paid for the difference in drawdown.
+
+**`e02` against `e03` is the one this dataset makes possible, and the honest reading is that it
+shows nothing.** A release before the open is public in time for that day's close; one after the
+close is not, and opens a session later. The gap is 37 points over 13.5 years — well inside the
+171-point spread the same suite produces from *choosing a different weekday to rebalance on*. The
+split is worth having; this particular difference is not worth a sentence about entry timing.
+
+**`e04` gave up 18 points of return and bought back 1.25 points of drawdown**, ending at a Sharpe
+of 0.79 against the control's 0.80. Stepping out of earnings is close to free and close to
+worthless here — which is the answer, and it follows from something worth stating: this is not a
+forward calendar. A row appears when the 8-K was accepted, so a strategy that wants to be flat
+into results has to predict the date. Measured over 12 311 consecutive gaps, "the last release
+plus 91 days" has a **median absolute error of 7 days** and lands within a week 56.1% of the time.
+A narrower exclusion window would flatter the strategy by pretending the prediction is better than
+it is.
+
+### What was checked rather than believed
+
+The README's claims hold: the session split is 227 742 / 138 647 / 88 222 against its stated
+227 741 / 138 647 / 88 219, 80.6% outside market hours to the decimal, 56.9% pairing, a median of
+4 days from announcement to statement. And one design decision is better than the obvious one: a
+year-on-year change divides by the **absolute value** of the base, so a company going from -0.67 to
++0.20 a share reads +1.30 rather than -1.30. The naive formula flips the sign on the 25.6% of rows
+whose year-ago figure is negative, and would have this suite systematically shorting recoveries.
+
+Three things did not hold, and the strategies work around all three:
+
+* **`session` is computed against fixed 09:30 and 16:00 boundaries**, not the exchange calendar.
+  On NYSE half days 37 releases that arrived after the 13:00 close are labelled `market_hours`.
+* **`is_trading_day` is `true` on all 454 611 rows**, including 599 releases across 25 days that
+  were not sessions — 303 of them during Hurricane Sandy, when EDGAR was open and the exchange
+  was not, and the rest on Good Fridays.
+* **18 releases carry an `eps_diluted` in the millions** — a filer having tagged the total into
+  the per-share field. `earnings.load_releases` discards them, which is why these strategies rank
+  on revenue growth: a rank puts a number like that at the *top* of a book, not in the middle.
+
+`data/events` — 4 382 182 corporate events, including 315 589 director-or-officer changes — is not
+used here because it cannot be: the config carries `filed_date` and no knowledge column, and the
+adapter refuses such a config rather than risk a look-ahead.
 
 ## Minutes, and what a daily bar cannot say
 

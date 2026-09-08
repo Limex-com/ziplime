@@ -279,3 +279,17 @@ FUNDAMENTALS_UNIVERSE = [
     ("FOR", "XNYS"), ("ONB", "XNGS"), ("INVA", "XNGS"), ("ETD", "XNYS"),
     ("RPM", "XNYS"), ("AR", "XNYS"),
 ]
+
+# ---------------------------------------------------------------------------------------------
+# The earnings suite (e01-e03), on ZipLime/earnings-calendar.
+# ---------------------------------------------------------------------------------------------
+
+EARNINGS_DATASET = "ZipLime/earnings-calendar"
+
+#: The same 230 names and the same window as the fundamentals suite, deliberately. The earnings
+#: calendar keys on the issuer CIK and has no ticker column, so it needs `CIK_TO_TICKER` exactly
+#: as the fundamentals do -- and sharing the universe means `f00` is already the right control:
+#: same names, same decade, same survivorship bias, reading no filing at all.
+EARNINGS_UNIVERSE = FUNDAMENTALS_UNIVERSE
+EARNINGS_START = FUNDAMENTALS_START
+EARNINGS_END = FUNDAMENTALS_END
