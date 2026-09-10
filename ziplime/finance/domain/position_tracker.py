@@ -541,8 +541,14 @@ class PositionTracker:
                 if position.asset.sid != asset_sid:
                     continue
                 if last_sale_price is None:
-                    self._logger.warning(
-                        f"Error updating last sale price for {position.asset.asset_name} on {dt}. Price is None")
+                    # An instrument that did not trade in this bar. Never happens on daily
+                    # bars, which is why this branch raised AttributeError on a field
+                    # `ExchangeAsset` does not have until an intraday run reached it. The
+                    # position keeps its previous mark, which is the right answer: no
+                    # trade is not a price of zero.
+                    self._logger.debug(
+                        "No trade in this bar; last sale price left as it was",
+                        asset=str(position.asset), dt=dt)
                 else:
                     position.last_sale_price = last_sale_price
                     position.last_sale_date = dt

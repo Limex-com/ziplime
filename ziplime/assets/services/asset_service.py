@@ -198,12 +198,27 @@ class AssetService:
         """
         asset_types = ([asset_type] if isinstance(asset_type, AssetType)
                        else list(asset_type))
+
+        # One query per asset type, not one per symbol. The repository already resolves a whole
+        # list in a single statement; calling it once per symbol turned a mount of a Hugging Face
+        # dataset into twelve thousand round trips and 57 seconds of the minute it took.
+        indexes = {}
+        for candidate in asset_types:
+            by_symbol_and_mic, by_symbol = {}, {}
+            for listing in await self._asset_repository.get_exchange_assets_by_symbols_of_type(
+                    symbols=symbols, asset_type=candidate):
+                by_symbol_and_mic.setdefault((listing.symbol, listing.mic), listing)
+                # A request with no MIC matches any exchange, and takes the first listing in the
+                # repository's own order -- which is what the per-symbol path returned.
+                by_symbol.setdefault(listing.symbol, listing)
+            indexes[candidate] = (by_symbol_and_mic, by_symbol)
+
         resolved = []
         for symbol in symbols:
             matches = {}
-            for candidate in asset_types:
-                found = await self.get_exchange_asset_by_symbol(symbol=symbol,
-                                                                asset_type=candidate)
+            for candidate, (by_symbol_and_mic, by_symbol) in indexes.items():
+                found = (by_symbol_and_mic.get((symbol.symbol, symbol.mic)) if symbol.mic
+                         else by_symbol.get(symbol.symbol))
                 if found is not None:
                     matches[candidate] = found
             if len(matches) > 1:

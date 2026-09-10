@@ -1,0 +1,36 @@
+{
+  "name": "congress_trading",
+  "version": "1.0.0",
+  "data_type": "PIT_DATA",
+  "bundle_storage_class": "ziplime.data.services.file_system_delta_lake_bundle_storage.FileSystemDeltaLakeBundleStorage",
+  "bundle_storage_data": {
+    "table_uri": "data/pit/congress_trading.delta"
+  },
+  "entity_domain": "us_equities",
+  "schema": {
+    "representative": "Utf8",
+    "chamber": "Utf8",
+    "transaction_type": "Utf8",
+    "asset_ticker": "Utf8",
+    "amount_low": "Float64",
+    "amount_high": "Float64",
+    "disclosure_lag_days": "Int64"
+  },
+  "pit": {
+    "knowledge_lag_model": "stock_act_statutory_45d",
+    "statutory_lag_days": 45,
+    "model_knowledge_cutoff": null,
+    "append_only": true
+  },
+  "source": {
+    "recipe": "recipe/",
+    "recipe_hash": "sha256:b8c71e7a1950b0c5087e5291fe1e230538989cc3f4ded9fee8180ff64cd1c266",
+    "origin": "US House Clerk (disclosures-clerk.house.gov) and Senate eFD (efdsearch.senate.gov) periodic transaction reports and annual financial disclosures, STOCK Act",
+    "license": "US Government work — public domain (House); Senate eFD terms apply",
+    "schedule": "0 8 * * *"
+  },
+  "rows": 178755,
+  "generated_at": "2026-08-27T20:59:10.880359+00:00",
+  "trading_calendar_name": null,
+  "frequency_seconds": null
+}

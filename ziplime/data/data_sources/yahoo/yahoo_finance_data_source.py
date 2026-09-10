@@ -80,8 +80,19 @@ class YahooFinanceDataSource(DataBundleSource):
                        frequency: datetime.timedelta,
                        date_from: datetime.datetime,
                        date_to: datetime.datetime,
+                       auto_adjust: bool = True,
                        **kwargs
                        ) -> pl.DataFrame:
+        """Daily or intraday bars for ``symbols``.
+
+        Args:
+            auto_adjust: Back-adjust prices for splits and dividends, which is what a return
+                series needs. Pass ``False`` for prices that can be multiplied by a share count:
+                a filing reports the shares that existed then, and a later split divides the
+                adjusted price without dividing that number, so ``price x shares`` on adjusted
+                prices understates the market value by the split factor. This argument used to be
+                swallowed by ``**kwargs`` and the download was always adjusted.
+        """
         # multi_level_index=True so one symbol and many come back the same shape. With it False,
         # a single-symbol download collapses the columns to the ticker name repeated five times --
         # the OHLCV level disappears -- and converting that to polars raises on the duplicate
@@ -89,7 +100,7 @@ class YahooFinanceDataSource(DataBundleSource):
         yfinance_data_raw = yf.download(tickers=symbols, threads=1,
                                         interval=self._get_frequency(frequency=frequency),
                                         start=date_from, end=date_to, group_by="Ticker",
-                                        progress=True, auto_adjust=True,
+                                        progress=True, auto_adjust=auto_adjust,
                                         multi_level_index=True)
         final = pl.DataFrame()
         for symbol in symbols:

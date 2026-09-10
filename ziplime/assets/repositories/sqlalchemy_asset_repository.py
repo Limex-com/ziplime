@@ -1019,6 +1019,26 @@ class SqlAlchemyAssetRepository(AssetRepository):
             case _:
                 raise ValueError(f"Invalid asset type: {asset_type}")
 
+    async def get_exchange_assets_by_symbols_of_type(self, symbols: list[AssetSymbol],
+                                                     asset_type: AssetType) -> list[ExchangeAsset]:
+        """Batch form of :meth:`get_exchange_asset_by_symbol`: one query for all the symbols.
+
+        Each of the per-type methods below already resolves a whole list in a single statement.
+        This exposes that to callers who know the type only at runtime, so resolving ten thousand
+        tickers is one round trip rather than ten thousand.
+        """
+        match asset_type:
+            case AssetType.EQUITY:
+                return await self.get_exchange_equities_by_symbols(symbols=symbols)
+            case AssetType.BOND:
+                return await self.get_exchange_bonds_by_symbols(symbols=symbols)
+            case AssetType.FUTURES_CONTRACT:
+                return await self.get_exchange_futures_contracts_by_symbols(symbols=symbols)
+            case AssetType.CURRENCY:
+                return await self.get_exchange_currencies_by_symbols(symbols=symbols)
+            case _:
+                raise ValueError(f"Invalid asset type: {asset_type}")
+
     async def get_asset_by_sid(self, sid: int) -> AssetModel | None:
         assets_by_sid = await self.get_all_assets()
         return assets_by_sid.get(sid, None)
@@ -1556,7 +1576,13 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 raise SidsNotFound(sids=[sid])
             return asset
         except KeyError:
-            return self.retrieve_all(sids=[sid, ], default_none=default_none)[0]
+            # `retrieve_all` is a coroutine and this method is not, so subscripting its result
+            # raised `TypeError: 'coroutine' object is not subscriptable` -- an error about Python
+            # rather than about the asset that is missing. A caller that can miss the cache has to
+            # `await retrieve_all` itself.
+            if default_none:
+                return None
+            raise SidsNotFound(sids=[sid]) from None
 
     async def retrieve_all(self, sids: list[int], default_none: bool = False):
         """Retrieve all assets in `sids`.

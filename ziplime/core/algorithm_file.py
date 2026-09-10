@@ -43,6 +43,15 @@ class AlgorithmFile:
         def noop(*args, **kwargs):
             pass
 
+        async def async_noop(*args, **kwargs):
+            """The default for the two hooks the engine awaits.
+
+            An algorithm that schedules all of its work with ``schedule_function`` defines no
+            module-level ``handle_data`` -- that is the ordinary zipline shape -- and a plain
+            ``def`` here returns ``None``, which the engine then awaits on the first bar.
+            """
+            pass
+
         with open(algorithm_file, "r") as f:
             self.algorithm_text = f.read()
 
@@ -60,8 +69,8 @@ class AlgorithmFile:
         else:
             raise Exception(f"No module found: {algorithm_file}")
         self._logger = logger
-        self.initialize = module.__dict__.get("initialize", noop)
-        self.handle_data = module.__dict__.get("handle_data", noop)
+        self.initialize = module.__dict__.get("initialize", async_noop)
+        self.handle_data = module.__dict__.get("handle_data", async_noop)
         self.before_trading_start = module.__dict__.get("before_trading_start", noop)
         # Optional analyze function, gets called after run
         self.analyze = module.__dict__.get("analyze", noop)

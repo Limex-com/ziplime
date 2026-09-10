@@ -1,5 +1,5 @@
 import datetime
-from typing import Callable
+from typing import Awaitable, Callable
 
 import pandas as pd
 import polars as pl
@@ -14,6 +14,11 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.constants.period import Period
 from ziplime.data.domain.data_bundle import DataBundle
 from ziplime.data.services.data_source import DataSource
+
+
+def _as_date(value: datetime.date | datetime.datetime) -> datetime.date:
+    """The calendar day of a listing bound, which may be stored either way."""
+    return value.date() if isinstance(value, datetime.datetime) else value
 
 
 @contextmanager
@@ -55,7 +60,8 @@ class BarData:
                  data_sources: dict[str, DataSource],
                  simulation_dt_func: Callable,
                  trading_calendar: ExchangeCalendar,
-                 restrictions):
+                 restrictions,
+                 data_source_resolver: Callable[[str], Awaitable[DataSource]] | None = None):
         # self.data_bundle = data_bundle
         self.simulation_dt_func = simulation_dt_func
 
@@ -67,8 +73,47 @@ class BarData:
         self._is_restricted = restrictions.is_restricted
         self.data_sources = data_sources
         self.default_data_source = data_sources[list(data_sources.keys())[0]]
+        # Mounts a source named by a strategy that was never registered up front -- a dataset
+        # address such as "hf://owner/name/config". Supplied by TradingAlgorithm, which is what
+        # holds the asset database and the simulation window a mount needs.
+        self._data_source_resolver = data_source_resolver
         # first_exchange = exchanges[list(exchanges.keys())[0]]
         # self.default_exchange = first_exchange
+
+    async def resolve_data_source(self, data_source) -> DataSource:
+        """Return the source a read is addressed to, mounting it on demand.
+
+        Accepts the three things a strategy may pass as ``data_source``:
+
+        * ``None`` -- the default source, which is the market data the simulation runs on;
+        * a :class:`~ziplime.data.services.data_source.DataSource` -- used as given, so a source
+          built in ``initialize`` can be handed straight back;
+        * a name -- an already-registered source, or an address such as
+          ``hf://ZipLime/congress-trading/features``, which is mounted the first time it is asked
+          for and reused for the rest of the run.
+
+        The mount happens once per address per run. It is deliberately not done eagerly: a
+        strategy that never reads a dataset never downloads it.
+        """
+        if data_source is None:
+            return self.default_data_source
+        if isinstance(data_source, DataSource):
+            # Register it too, so a later read by name finds the same materialised instance
+            # rather than mounting a second copy of the same data.
+            self.data_sources.setdefault(data_source.name, data_source)
+            return data_source
+        if data_source in self.data_sources:
+            return self.data_sources[data_source]
+        if self._data_source_resolver is None:
+            raise KeyError(
+                f"No data source named {data_source!r}. Registered: "
+                f"{', '.join(sorted(self.data_sources))}.")
+        resolved = await self._data_source_resolver(data_source)
+        self.data_sources[resolved.name] = resolved
+        # Also under the name that was asked for, so an address and the source's own name both
+        # hit the cache on the next bar.
+        self.data_sources[data_source] = resolved
+        return resolved
 
     def _get_current_minute(self):
         """Internal utility method to get the current simulation time.
@@ -157,32 +202,20 @@ class BarData:
         If the current simulation time is not a valid market time for an asset,
         we use the most recent market close instead.
         """
-        data = {}
         assets = frozenset(assets)
         fields = frozenset(fields)
-        if data_source is None:
-            data_source = self.default_data_source.name
-        if not self._adjust_minutes:
-            return await self.data_sources[data_source].get_spot_value(
-                assets=assets,
-                fields=fields,
-                dt=self._get_current_minute(),
-            )
-        else:
-            for field in fields:
-                series = pd.Series(data={
-                    asset: self.data_sources[data_source].get_adjusted_value(
-                        asset,
-                        field,
-                        self._get_current_minute(),
-                        self.simulation_dt_func(),
-                        self.data_bundle.frequency
-                    )
-                    for asset in assets
-                }, index=assets, name=field)
-                data[field] = series
-
-        return pd.DataFrame(data=data)
+        source = await self.resolve_data_source(data_source)
+        # `_adjust_minutes` -- set while `before_trading_start` runs, which is not a market minute
+        # -- used to take a second branch here. That branch read `self.data_bundle`, an attribute
+        # this class does not have, and built a frame out of un-awaited coroutines, so it raised
+        # the moment it was reached. What it was trying to add is a price adjustment relative to
+        # the current instant; what actually matters, reading the previous market minute instead of
+        # a minute the calendar does not have, is already done by `_get_current_minute`.
+        return await source.get_spot_value(
+            assets=assets,
+            fields=fields,
+            dt=self._get_current_minute(),
+        )
 
     async def current_chain(self, continuous_future: ContinuousFuture,
                             data_source: str | None = None):
@@ -264,45 +297,52 @@ class BarData:
         ]
         return pd.Series(data=tradeable, index=assets, dtype=bool)
 
-    def _can_trade_for_asset(self, asset: ExchangeAsset, dt: datetime.datetime, adjusted_dt: datetime.datetime) -> bool:
-        session_label = None
-        dt_to_use_for_exchange_check = None
+    def _can_trade_for_asset(self, asset: ExchangeAsset, dt: datetime.datetime,
+                             adjusted_dt: datetime.datetime) -> bool:
+        """Whether ``asset`` is listed, unrestricted and on an open venue at ``dt``.
 
-        if self._is_restricted(assets=frozenset({asset}), dt=adjusted_dt):
+        The method this replaces could not run at all. It called `asset.is_alive_for_session` and
+        `asset.is_exchange_open`, which an `ExchangeAsset` does not have, read `self.data_portal`
+        and `self.data_frequency`, which this object does not have, and tested a pandas Series for
+        truth. Every one of those raises, so `can_trade` raised for every asset it was ever asked
+        about.
+
+        **The price condition is not checked here.** `can_trade`'s docstring lists a third
+        requirement -- that a last price is known -- and testing it means reading the bundle, which
+        is asynchronous, while this method and its caller are not. Rather than make `can_trade`
+        async and break every strategy that calls it, the two conditions that can be answered from
+        the listing and the calendar are answered, and the price is left to the caller: reading it
+        with `data.current` is how a strategy finds out anyway, since it needs the number.
+        """
+        restricted = self._is_restricted(assets=[asset], dt=adjusted_dt)
+        if bool(restricted.iloc[0] if hasattr(restricted, "iloc") else restricted):
             return False
 
         session_label = self._trading_calendar.minute_to_session(minute=dt)
+        session = session_label.date() if hasattr(session_label, "date") else session_label
 
-        if not asset.is_alive_for_session(session_label=session_label):
-            # asset isn't alive
+        # Listed and not yet delisted. A dataset may carry rows for a name years before it lists
+        # -- an insider filing predates the ticker's first session -- so this is what stops a
+        # strategy ordering something that does not trade yet.
+        if asset.start_date and session < _as_date(asset.start_date):
+            return False
+        if asset.end_date and session > _as_date(asset.end_date):
+            return False
+        if asset.auto_close_date and session > _as_date(asset.auto_close_date):
             return False
 
-        if asset.auto_close_date and session_label > asset.auto_close_date:
-            return False
+        # The simulation's calendar, not the listing's own: a listing carries its venue but not
+        # that venue's schedule, and `can_trade` documents the simulation calendar as the answer
+        # when the asset's own is unavailable.
+        if self._trading_calendar.is_open_on_minute(minute=dt):
+            return True
+        return self._trading_calendar.is_session(session_label)
 
-        # TODO: check this
-        _daily_mode = False
-        if not _daily_mode:
-            # Find the next market minute for this calendar, and check if this
-            # asset's exchange is open at that minute.
-            if self._trading_calendar.is_open_on_minute(minute=dt):
-                dt_to_use_for_exchange_check = dt
-            else:
-                dt_to_use_for_exchange_check = self._trading_calendar.next_open(minute=dt)
-
-            if not asset.is_exchange_open(dt_minute=dt_to_use_for_exchange_check):
-                return False
-        # is there a last price?
-        return not np.isnan(
-            self.data_portal.get_spot_value(
-                assets=frozenset({asset}), field="price", dt=adjusted_dt, data_frequency=self.data_frequency
-            )
-        )
-
-    async def history(self, assets: list[Asset], bar_count: int,
+    async def history(self, assets: list[Asset], bar_count: int | None = None,
                 frequency: datetime.timedelta | Period = datetime.timedelta(days=1),
                 fields: list[str] | None=None,
-                data_source: str | None = None
+                data_source: str | None = None,
+                since: datetime.timedelta | None = None,
                 ) -> pl.DataFrame:
         """Returns a trailing window of length ``bar_count`` with data for
         the given assets, fields, and frequency, adjusted for splits, dividends,
@@ -358,14 +398,39 @@ class BarData:
               - ``asset``
 
         If the current simulation time is not a valid market time, we use the last market close instead.
+
+        Counting rows or counting time
+        ------------------------------
+
+        Pass **either** ``bar_count`` or ``since``, not both.
+
+        ``bar_count`` asks for a number of rows. On bar data that is a number of sessions, which is
+        almost always what a strategy means.
+
+        ``since`` asks for a span of calendar time -- ``since=datetime.timedelta(days=90)`` is
+        "everything filed in the last quarter", however many rows that turns out to be. This is the
+        one to use on **event data**, where rows do not arrive on a schedule: thirty rows of
+        congressional disclosures for one ticker can span four years, so ``bar_count=30`` there is
+        a question about how often that company's insiders file rather than about time.
+
+        Both return the same shape, so they are interchangeable at the call site.
         """
         assets = frozenset(assets)
         fields = frozenset(fields) if fields else None
 
-        if data_source is None:
-            data_source = self.default_data_source.name
+        if (bar_count is None) == (since is None):
+            raise ValueError(
+                "history() needs exactly one of bar_count or since: bar_count for a number of "
+                "rows, since for a span of calendar time. Event data usually wants since.")
 
-        df = await self.data_sources[data_source].get_data_by_limit(assets=assets,
+        source = await self.resolve_data_source(data_source)
+
+        if since is not None:
+            return await source.get_data_by_window(
+                assets=assets, since=since, end_date=self._get_current_minute(),
+                frequency=frequency, fields=fields, include_end_date=False)
+
+        df = await source.get_data_by_limit(assets=assets,
                                                          end_date=self._get_current_minute(),
                                                          limit=bar_count,
                                                          frequency=frequency,
@@ -373,27 +438,9 @@ class BarData:
                                                          include_end_date=False
                                                          )
 
-        # df = self.exchanges[exchange_name].get_data_by_limit(assets=assets,
-        #                                                      end_date=self._get_current_minute(),
-        #                                                      limit=bar_count,
-        #                                                      frequency=frequency,
-        #                                                      fields=fields,
-        #                                                      include_end_date=False
-        #                                                      )
-        if self._adjust_minutes:
-            adjs = {
-                field: self.exchanges[exchange_name].get_adjustments(
-                    assets,
-                    field,
-                    self._get_current_minute(),
-                    self.simulation_dt_func()
-                )[0] for field in fields
-            }
-
-            df = {
-                field: df * adjs[field]
-                for field, df in df.items()
-            }
+        # See `current`: the `_adjust_minutes` branch that stood here referred to
+        # `self.exchanges[exchange_name]`, with no `exchange_name` in scope, and raised `NameError`
+        # whenever it was reached. `_get_current_minute` already answers for the non-market minute.
         return df
 
     @property

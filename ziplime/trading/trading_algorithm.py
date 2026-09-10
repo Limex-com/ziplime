@@ -1,5 +1,6 @@
 import datetime
 import importlib.util
+import inspect
 import sys
 import traceback
 import uuid
@@ -302,7 +303,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             simulation_dt_func=self.get_datetime,
             trading_calendar=self.clock.trading_calendar,
             restrictions=self.restrictions,
-            data_sources=data_sources
+            data_sources=data_sources,
+            data_source_resolver=self._resolve_named_data_source,
         )
 
         # We don't have a datetime for the current snapshot until we
@@ -346,7 +348,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         with ZiplineAPI(self):
             await self._initialize(self, *args, **kwargs)
 
-    def before_trading_start(self, data):
+    async def before_trading_start(self, data):
+        """Run the algorithm's daily preparation hook.
+
+        Awaits the hook when it is `async def`. It is the one place zipline expects the day's data
+        to be read, and every read in this fork -- `data.history`, `data.current`,
+        `huggingface_dataset` -- is a coroutine, so an author writing the natural thing got a
+        coroutine that was built, dropped and never run. No exception, no warning in the output,
+        and a hook that silently did nothing all backtest.
+        """
         self.compute_eager_pipelines()
 
         if self._before_trading_start is None:
@@ -354,10 +364,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
         self._in_before_trading_start = True
 
+        # `before_trading_start` fires 46 minutes before the open, which is not a market minute at
+        # any intraday rate -- not only at one minute. Testing for equality left every other
+        # intraday rate reading data at a minute the calendar does not have.
         with handle_non_market_minutes(
                 data
-        ) if self.clock.emission_rate == datetime.timedelta(minutes=1) else ExitStack():
-            self._before_trading_start(self, data)
+        ) if self.clock.emission_rate < datetime.timedelta(days=1) else ExitStack():
+            result = self._before_trading_start(self, data)
+            if inspect.isawaitable(result):
+                await result
 
         self._in_before_trading_start = False
 
@@ -418,7 +433,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         await self.metrics_tracker.handle_start_of_simulation()
         return self.transform()
 
-    def calculate_capital_changes(
+    async def calculate_capital_changes(
             self, dt: datetime.datetime, emission_rate: datetime.timedelta, is_interday: bool,
             portfolio_value_adjustment: float = 0.00
     ):
@@ -439,7 +454,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         except KeyError:
             return
 
-        self._sync_last_sale_prices()
+        # Both of these are coroutines and both were called without awaiting, so a target capital
+        # change was computed against unsynced prices and then applied to a portfolio that had not
+        # been updated. Nothing raised; the deposit was simply the wrong size.
+        await self._sync_last_sale_prices()
         if capital_change["type"] == "target":
             target = capital_change["value"]
             capital_change_amount = target - (
@@ -465,7 +483,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             return
 
         self.capital_change_deltas.update({dt: capital_change_amount})
-        self._ledger.capital_change(change_amount=capital_change_amount)
+        await self._ledger.capital_change(change_amount=capital_change_amount)
 
         yield {
             "capital_change": {
@@ -539,9 +557,12 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         date_rule = date_rule or date_rules.every_day()
         time_rule = (
             (time_rule or time_rules.every_minute())
-            if self.clock.emission_rate == datetime.timedelta(minutes=1)
+            if self.clock.emission_rate < datetime.timedelta(days=1)
             else
-            # If we are in daily mode the time_rule is ignored.
+            # A daily simulation has one bar per session, so there is no time of day to schedule
+            # against and the time rule is ignored. Any intraday rate does have one: this used to
+            # test for exactly one minute, which silently discarded `market_open(minutes=30)` on a
+            # five-minute run and fired the function on every bar instead.
             time_rules.every_minute()
         )
 
@@ -744,7 +765,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return asset
 
     @api_method
-    def symbols(self, *args, **kwargs):
+    async def symbols(self, *args, **kwargs):
         """Lookup multuple Equities as a list.
 
         Parameters
@@ -770,7 +791,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         --------
         :func:`ziplime.api.set_symbol_lookup_date`
         """
-        return [self.symbol(identifier, **kwargs) for identifier in args]
+        # `symbol` is a coroutine, so the list comprehension used to return a list of coroutines
+        # rather than a list of listings -- and nothing raised until the caller tried to order one.
+        return [await self.symbol(identifier, **kwargs) for identifier in args]
 
     @api_method
     async def symbols_universe(self, name: str, dt: datetime.date = None):
@@ -902,6 +925,73 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         """
         return await self.symbol(symbol=symbol, mic=mic,
                                  asset_type=AssetType.FUTURES_CONTRACT)
+
+    async def _resolve_named_data_source(self, name: str):
+        """Mount a data source a strategy named but never registered.
+
+        Today that means a Hugging Face dataset address. It is resolved here rather than in
+        :class:`~ziplime.domain.bar_data.BarData` because a mount needs the asset database, to
+        turn the dataset's tickers into sids, and the simulation window, to avoid downloading
+        years the run cannot reach -- and this object holds both.
+        """
+        from ziplime.data.data_sources.huggingface.huggingface_data_source import (
+            HuggingFaceDataSource, is_address,
+        )
+        if not is_address(name):
+            raise KeyError(
+                f"No data source named {name!r}. Register it with "
+                f"run_simulation(custom_data_sources=[...]), or name a Hugging Face dataset as "
+                f"hf://owner/name/config.")
+        return await HuggingFaceDataSource.mount(
+            name, asset_service=self.asset_service,
+            start_date=self.clock.start_session, end_date=self.clock.end_session,
+            session_timezone=str(self.clock.trading_calendar.tz))
+
+    @api_method
+    async def huggingface_dataset(self, repo_id: str, config: str | None = None,
+                                  revision: str | None = None,
+                                  fields: list[str] | None = None,
+                                  start_date: datetime.date | None = None,
+                                  end_date: datetime.date | None = None,
+                                  name: str | None = None):
+        """Mount a point-in-time dataset from the Hugging Face Hub.
+
+        The explicit form of ``data.history(data_source="hf://owner/name/config")``. Use it when
+        the defaults are not what you want -- above all to **pin a revision**, so a result can be
+        reproduced after the dataset has grown:
+
+            context.congress = await context.huggingface_dataset(
+                "ZipLime/congress-trading", config="features", revision="67c335f5")
+
+        Then read it like any other source::
+
+            df = await data.history(assets=[apple], bar_count=30,
+                                    data_source=context.congress)
+
+        Args:
+            repo_id: ``owner/name`` on the Hub, or a full ``hf://owner/name/config`` address.
+            config: Table to mount. Defaults to the dataset's ``features`` table if it has one.
+            revision: Branch, tag or commit. Defaults to the default branch, resolved to the
+                commit it points at now and reported, so the run can be repeated exactly.
+            fields: Columns to keep besides ``date`` and ``sid``. All of them by default.
+            start_date, end_date: Window to fetch. Defaults to the simulation's own, which is
+                what keeps a long dataset from being downloaded in full.
+            name: What to call the source. Defaults to its address.
+
+        Returns:
+            The mounted source. Nothing is downloaded until it is first read.
+        """
+        from ziplime.data.data_sources.huggingface.huggingface_data_source import (
+            HuggingFaceDataSource,
+        )
+        source = await HuggingFaceDataSource.mount(
+            repo_id, config=config, revision=revision, asset_service=self.asset_service,
+            start_date=start_date or self.clock.start_session,
+            end_date=end_date or self.clock.end_session,
+            fields=fields, name=name,
+            session_timezone=str(self.clock.trading_calendar.tz))
+        self.current_data.data_sources[source.name] = source
+        return source
 
     @api_method
     async def futures_chain(self, root_symbol: str, mic: str = None) -> list[ExchangeAsset]:
@@ -1097,7 +1187,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             await self._ledger.bond_book.load(self.asset_service, [asset.asset])
         # TODO: implement dynamic risk control
 
-        self.validate_order_params(asset=asset, amount=amount)
+        await self.validate_order_params(asset=asset, amount=amount)
         if exchange_name is None:
             exchange = await self.exchange_repository.get_default_exchange()
             exchange_name = exchange.name
@@ -1175,11 +1265,18 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.new_orders[order.id] = order
         return order
 
-    def validate_order_params(self, asset: ExchangeAsset, amount: int):
-        """
-        Helper method for validating parameters to the order API function.
+    async def validate_order_params(self, asset: ExchangeAsset, amount: int):
+        """Check an order against every registered trading control before it is placed.
 
-        Raises an UnsupportedOrderParameters if invalid arguments are found.
+        Every control's ``validate`` is ``async def`` -- `MaxPositionSize` reads the current price
+        to check a notional cap -- and this method used to be synchronous and call them without
+        awaiting. Each call built a coroutine, dropped it, and returned None, so
+        `set_max_position_size`, `set_max_order_size`, `set_max_order_count`, `set_long_only` and
+        `set_asset_restrictions` all accepted their arguments and then enforced nothing. These are
+        the fail-safes; a fail-safe that silently does not fire is worse than none.
+
+        Raises:
+            TradingControlViolation: if a control with ``on_error="fail"`` rejects the order.
         """
 
         if not self.initialized:
@@ -1188,7 +1285,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             )
 
         for control in self.trading_controls:
-            control.validate(
+            await control.validate(
                 asset=asset,
                 amount=amount,
                 portfolio=self.portfolio,
@@ -2252,7 +2349,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     def calculate_minute_capital_changes(self, dt: datetime.datetime):
         # process any capital changes that came between the last
-        # and current minutes
+        # and current minutes. An async generator: iterate it with `async for`.
         return self.calculate_capital_changes(dt, emission_rate=self.metrics_tracker.emission_rate,
                                               is_interday=False)
 
@@ -2265,7 +2362,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             handle_data,
     ):
         # print(f"dt_to_use: in every_bar: {dt_to_use}")
-        for capital_change in self.calculate_minute_capital_changes(dt_to_use):
+        async for capital_change in self.calculate_minute_capital_changes(dt_to_use):
             yield capital_change
 
         self.simulation_dt = dt_to_use
@@ -2343,7 +2440,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             asset_service,
     ):
         # process any capital changes that came overnight
-        for capital_change in self.calculate_capital_changes(
+        async for capital_change in self.calculate_capital_changes(
                 midnight_dt, emission_rate=self.metrics_tracker.emission_rate,
                 is_interday=True
         ):
@@ -2488,9 +2585,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                         self.simulation_dt = dt
                         # self.datetime = dt
                         # self.on_dt_changed(dt=dt)
-                        self.before_trading_start(data=self.current_data)
-                    elif action == SimulationEvent.EMISSION_RATE_END and self.clock.emission_rate == datetime.timedelta(
-                            minutes=1):
+                        await self.before_trading_start(data=self.current_data)
+                    elif (action == SimulationEvent.EMISSION_RATE_END
+                          and self.clock.emission_rate < datetime.timedelta(days=1)):
+                        # Syncing sale prices to the ledger happens here for intraday rates and in
+                        # the session-end branch for daily ones. Testing for exactly one minute
+                        # meant a five-minute run did neither, and carried a portfolio value that
+                        # never moved between sessions.
                         # await self._ledger.sync_last_sale_prices(dt=dt, handle_non_market_minutes=False)
                         await self.sync_last_sale_prices_to_ledger(dt=dt,
                                                                    handle_non_market_minutes=False)  # TODO : remove
