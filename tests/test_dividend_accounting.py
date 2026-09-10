@@ -149,7 +149,6 @@ class PositionTrackerDividendTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(tracker.pay_dividends(self.pay_date), 10.0)
 
-    @unittest.expectedFailure
     def test_positions_across_accounts_are_aggregated(self):
         tracker = self.tracker_with_position(10)
         tracker.update_position(

@@ -25,6 +25,7 @@ FAR_FUTURE = datetime.date(2099, 1, 1)
 
 EXCHANGE = ExchangeInfo(mic="XNYS", name="NYSE", canonical_name="NYSE",
                         country_code="US")
+ACCOUNT = "account-1"
 USD = Currency(id=1, isin=None, asset_name="USD", start_date=FAR_PAST, end_date=FAR_FUTURE,
                first_traded=FAR_PAST, auto_close_date=FAR_FUTURE)
 
@@ -124,13 +125,17 @@ def trade(ledger: Ledger, asset: ExchangeAsset, amount: int, price: float,
     ledger.process_transaction(Transaction(
         id=f"{asset.symbol}-{amount}-{price}-{when.date()}",
         amount=amount, dt=when, price=price, exchange_name=EXCHANGE.mic,
-        trading_account_id="account-1", asset=asset))
+        trading_account_id=ACCOUNT, asset=asset))
     if commission:
         ledger.process_commission(Commission(asset=asset, order=None, amount=commission), tr=None)
-    position = ledger.position_tracker.get_position(asset)
+    position = ledger.position_tracker.get_position(
+        asset=asset,
+        exchange_name=EXCHANGE.mic,
+        trading_account_id=ACCOUNT,
+    )
     if position is not None:
         ledger.position_tracker.update_position(
-            asset=asset, exchange_name=EXCHANGE.mic, trading_account_id="account-1",
+            asset=asset, exchange_name=EXCHANGE.mic, trading_account_id=ACCOUNT,
             last_sale_price=price, last_sale_date=when)
 
 
@@ -140,7 +145,7 @@ def mark(ledger: Ledger, asset: ExchangeAsset, price: float,
     when = dt if isinstance(dt, datetime.datetime) else datetime.datetime.combine(
         dt, datetime.time.min, tzinfo=datetime.timezone.utc)
     ledger.position_tracker.update_position(
-        asset=asset, exchange_name=EXCHANGE.mic, trading_account_id="account-1",
+        asset=asset, exchange_name=EXCHANGE.mic, trading_account_id=ACCOUNT,
         last_sale_price=price, last_sale_date=when)
     ledger._dirty_portfolio = True
 

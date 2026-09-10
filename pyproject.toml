@@ -40,6 +40,8 @@ yfinance = "^0.2.65"
 pandas-stubs = "~=2.3.3"
 deltalake = "^1.6.1"
 httpx = {extras = ["http2"], version = "^0.28.1"}
+pytest = "^9.1.1"
+pytest-asyncio = "^1.4.0"
 
 [tool.poetry.group.vectorbt]
 optional = true

@@ -64,12 +64,13 @@ class NestedPositionLookupTests(unittest.TestCase):
         asset = make_equity()
         tracker = make_tracker(asset, amount=100, price=50.0)
 
-        self.assertIsNotNone(tracker.get_position(asset))
-        self.assertEqual(tracker.get_position(asset).amount, 100)
+        self.assertIsNotNone(tracker.get_position(asset, EXCHANGE.mic, ACCOUNT))
+        self.assertEqual(tracker.get_position(asset, EXCHANGE.mic, ACCOUNT).amount, 100)
 
     def test_an_unheld_asset_returns_none(self):
         tracker = make_tracker(make_equity(sid=1), amount=100, price=50.0)
-        self.assertIsNone(tracker.get_position(make_equity(sid=2, symbol="QQQ")))
+        self.assertIsNone(tracker.get_position(
+            make_equity(sid=2, symbol="QQQ"), EXCHANGE.mic, ACCOUNT))
 
     def test_commission_reaches_the_cost_basis(self):
         # The whole bug in one assertion: 100 shares at 50.00 with 25.00 of commission break even
@@ -79,7 +80,8 @@ class NestedPositionLookupTests(unittest.TestCase):
 
         tracker.handle_commission(asset=asset, cost=25.0)
 
-        self.assertAlmostEqual(tracker.get_position(asset).cost_basis, 50.25)
+        self.assertAlmostEqual(
+            tracker.get_position(asset, EXCHANGE.mic, ACCOUNT).cost_basis, 50.25)
 
     def test_commission_on_a_short_lowers_the_break_even(self):
         asset = make_equity()
@@ -87,12 +89,14 @@ class NestedPositionLookupTests(unittest.TestCase):
 
         tracker.handle_commission(asset=asset, cost=25.0)
 
-        self.assertAlmostEqual(tracker.get_position(asset).cost_basis, 49.75)
+        self.assertAlmostEqual(
+            tracker.get_position(asset, EXCHANGE.mic, ACCOUNT).cost_basis, 49.75)
 
     def test_commission_on_an_unheld_asset_is_ignored(self):
         tracker = make_tracker(make_equity(sid=1), amount=100, price=50.0)
         tracker.handle_commission(asset=make_equity(sid=2, symbol="QQQ"), cost=25.0)
-        self.assertAlmostEqual(tracker.get_position(make_equity(sid=1)).cost_basis, 50.0)
+        self.assertAlmostEqual(
+            tracker.get_position(make_equity(sid=1), EXCHANGE.mic, ACCOUNT).cost_basis, 50.0)
 
 
 class PositionSnapshotTests(unittest.TestCase):
@@ -144,24 +148,27 @@ class PositionSnapshotTests(unittest.TestCase):
             asset=asset, exchange_name=EXCHANGE.mic, trading_account_id=ACCOUNT,
             amount=100, last_sale_price=50.0, last_sale_date=SESSION)
 
-        self.assertIsNot(ledger.positions[0], ledger.position_tracker.get_position(asset))
+        self.assertIsNot(
+            ledger.positions[0],
+            ledger.position_tracker.get_position(asset, EXCHANGE.mic, ACCOUNT),
+        )
 
 
 class ClosePositionTests(unittest.TestCase):
     """Auto-close never closed anything.
 
-    `maybe_create_close_position_transaction` looked the position up by asset in the nested dict,
-    so it always returned `None`. A listing past its auto-close date stayed on the books at a
-    stale mark for the rest of the run, still counted in exposure and leverage.
+    Closing returns one transaction per exchange/account position. A listing past its auto-close
+    date must not stay on the books at a stale mark or remain in exposure and leverage.
     """
 
     def test_a_held_position_produces_a_closing_trade(self):
         asset = make_equity()
         tracker = make_tracker(asset, amount=100, price=50.0)
 
-        txn = tracker.maybe_create_close_position_transaction(asset=asset, dt=SESSION)
+        transactions = tracker.close_positions(asset=asset, dt=SESSION)
 
-        self.assertIsNotNone(txn, "nothing was ever closed")
+        self.assertEqual(len(transactions), 1, "nothing was ever closed")
+        txn = transactions[0]
         self.assertEqual(txn.amount, -100)
         self.assertAlmostEqual(txn.price, 50.0)
 
@@ -170,15 +177,17 @@ class ClosePositionTests(unittest.TestCase):
         asset = make_equity()
         tracker = make_tracker(asset, amount=100, price=50.0)
 
-        txn = tracker.maybe_create_close_position_transaction(asset=asset, dt=SESSION)
+        transactions = tracker.close_positions(asset=asset, dt=SESSION)
 
+        self.assertEqual(len(transactions), 1)
+        txn = transactions[0]
         self.assertEqual(txn.exchange_name, EXCHANGE.mic)
         self.assertEqual(txn.trading_account_id, ACCOUNT)
 
     def test_an_unheld_asset_produces_nothing(self):
         tracker = make_tracker(make_equity(sid=1), amount=100, price=50.0)
         other = make_equity(sid=2, symbol="QQQ")
-        self.assertIsNone(tracker.maybe_create_close_position_transaction(asset=other, dt=SESSION))
+        self.assertEqual(tracker.close_positions(asset=other, dt=SESSION), [])
 
     def test_closing_removes_the_position_from_the_book(self):
         asset = make_equity()
@@ -194,7 +203,8 @@ class ClosePositionTests(unittest.TestCase):
 
         ledger.close_position(asset=asset, dt=SESSION)
 
-        self.assertIsNone(ledger.position_tracker.get_position(asset))
+        self.assertIsNone(
+            ledger.position_tracker.get_position(asset, EXCHANGE.mic, ACCOUNT))
 
 
 class NoSlippageTests(unittest.IsolatedAsyncioTestCase):

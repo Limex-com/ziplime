@@ -416,9 +416,7 @@ class PositionTracker:
         """
         for event in bond_events:
             held = sum(position.amount
-                       for accounts in self.positions.values()
-                       for positions in accounts.values()
-                       for position in positions.values()
+                       for position in self.positions.values()
                        if isinstance(position.asset.asset, Bond)
                        and position.asset.asset.id == event.asset.id)
             if held == 0:
@@ -426,7 +424,7 @@ class PositionTracker:
             self._dirty_stats = True
             owed = held * event.value
             self._unpaid_bond_payments[event.date] = (
-                self._unpaid_bond_payments.get(event.date, 0.0) + owed)
+                    self._unpaid_bond_payments.get(event.date, 0.0) + owed)
 
     def pay_bond_payments(self, session: datetime.date) -> float:
         """Cash from every coupon and amortization instalment due on or before ``session``.
@@ -562,6 +560,14 @@ class PositionTracker:
         #     else:  # last_sale_price == last_sale_price:
         #         position.last_sale_price = last_sale_price
         #         position.last_sale_date = dt
+
+    def get_position(
+            self,
+            asset: ExchangeAsset,
+            exchange_name: str,
+            trading_account_id: str,
+    ) -> Position | None:
+        return self.positions.get((exchange_name, trading_account_id, asset))
 
     @property
     def stats(self):

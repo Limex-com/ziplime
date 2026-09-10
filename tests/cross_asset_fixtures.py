@@ -111,7 +111,11 @@ def mark(ledger: Ledger, asset: ExchangeAsset, price: float,
          dt: datetime.date = SESSION) -> None:
     """Move a position's mark to ``price`` as of ``dt`` (what a new bar does)."""
     when = datetime.datetime.combine(dt, datetime.time.min, tzinfo=datetime.timezone.utc)
-    if ledger.position_tracker.get_position(asset) is None:
+    if ledger.position_tracker.get_position(
+        asset=asset,
+        exchange_name=EXCHANGE.mic,
+        trading_account_id=ACCOUNT,
+    ) is None:
         return
     ledger.position_tracker.update_position(
         asset=asset, exchange_name=EXCHANGE.mic, trading_account_id=ACCOUNT,

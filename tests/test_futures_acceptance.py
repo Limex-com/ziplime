@@ -6,7 +6,7 @@ futures backtest can run cleanly end to end and still be financially meaningless
 import datetime
 import unittest
 
-from futures_fixtures import make_equity, make_future, make_ledger, mark, settle, trade
+from futures_fixtures import ACCOUNT, EXCHANGE, make_equity, make_future, make_ledger, mark, settle, trade
 
 
 class MultiplierAndExposureTests(unittest.IsolatedAsyncioTestCase):
@@ -200,7 +200,8 @@ class AutoCloseLiquidationTests(unittest.IsolatedAsyncioTestCase):
         dt = datetime.datetime(2023, 12, 21, tzinfo=datetime.timezone.utc)
         ledger.close_position(asset=future, dt=dt)
 
-        self.assertIsNone(ledger.position_tracker.get_position(future))
+        self.assertIsNone(ledger.position_tracker.get_position(
+            future, EXCHANGE.mic, ACCOUNT))
 
     async def test_liquidation_settles_the_remaining_variation(self):
         ledger = make_ledger()

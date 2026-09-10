@@ -12,7 +12,7 @@ import datetime
 import unittest
 
 from bond_fixtures import (
-    EXCHANGE, StubBondService, load_schedule, make_amortization_events, make_bond,
+    ACCOUNT, EXCHANGE, StubBondService, load_schedule, make_amortization_events, make_bond,
     make_coupon_events, make_ledger, make_zero_coupon_bond, mark, settle, trade,
 )
 
@@ -376,7 +376,8 @@ class RedemptionTests(unittest.IsolatedAsyncioTestCase):
 
         await ledger.redeem_matured_bonds(listing.asset.maturity_date, service)
 
-        self.assertIsNone(ledger.position_tracker.get_position(listing))
+        self.assertIsNone(ledger.position_tracker.get_position(
+            listing, EXCHANGE.mic, ACCOUNT))
 
     async def test_redemption_ignores_a_stale_quote(self):
         # A bond that last printed 95 still repays 100% of face. Closing it at the last bar --
@@ -432,7 +433,8 @@ class RedemptionTests(unittest.IsolatedAsyncioTestCase):
         await ledger.redeem_matured_bonds(datetime.date(2025, 12, 31), service)
 
         self.assertAlmostEqual(ledger.portfolio.cash, cash_before)
-        self.assertIsNotNone(ledger.position_tracker.get_position(listing))
+        self.assertIsNotNone(ledger.position_tracker.get_position(
+            listing, EXCHANGE.mic, ACCOUNT))
 
     async def test_a_zero_coupon_bond_returns_the_discount_at_maturity(self):
         # The whole return of a discount bond: bought at 92, repaid at 100.
@@ -588,7 +590,8 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
 
         trade(ledger, listing, amount=10, price=100.0, dt=coupon_date, commission=30.0)
 
-        position = ledger.position_tracker.get_position(listing)
+        position = ledger.position_tracker.get_position(
+            listing, EXCHANGE.mic, ACCOUNT)
         # 30 roubles over ten bonds is 3 roubles each, which is 0.3% of a 1000 nominal.
         self.assertAlmostEqual(position.cost_basis, 100.3)
 

@@ -22,6 +22,7 @@ FAR_PAST = datetime.date(1900, 1, 1)
 FAR_FUTURE = datetime.date(2099, 1, 1)
 
 EXCHANGE = ExchangeInfo(mic="XCME", name="CME", canonical_name="CME", country_code="US")
+ACCOUNT = "account-1"
 USD = Currency(id=1, isin=None, asset_name="USD", start_date=FAR_PAST, end_date=FAR_FUTURE,
                first_traded=FAR_PAST, auto_close_date=FAR_FUTURE)
 UNDERLYING = Commodity(id=2, isin=None, asset_name="CL", start_date=FAR_PAST, end_date=FAR_FUTURE,
@@ -83,21 +84,26 @@ def trade(ledger: Ledger, asset: ExchangeAsset, amount: int, price: float,
         id=f"{asset.symbol}-{amount}-{price}",
         amount=amount,
         dt=dt or datetime.datetime(2023, 6, 1, tzinfo=datetime.timezone.utc),
-        price=price, exchange_name="XCME", trading_account_id="account-1", asset=asset))
+        price=price, exchange_name=EXCHANGE.mic, trading_account_id=ACCOUNT, asset=asset))
     if commission:
         ledger.process_commission(
             Commission(asset=asset, order=None, amount=commission), tr=None)
-    position = ledger.position_tracker.get_position(asset)
+    position = ledger.position_tracker.get_position(
+        asset=asset,
+        exchange_name=EXCHANGE.mic,
+        trading_account_id=ACCOUNT,
+    )
     if position is not None:
         ledger.position_tracker.update_position(
-            asset=asset, exchange_name="XCME", trading_account_id="account-1",
+            asset=asset, exchange_name=EXCHANGE.mic, trading_account_id=ACCOUNT,
             last_sale_price=price)
 
 
 def mark(ledger: Ledger, asset: ExchangeAsset, price: float) -> None:
     """Move a position's mark to ``price`` (what a new bar does)."""
     ledger.position_tracker.update_position(
-        asset=asset, exchange_name="XCME", trading_account_id="account-1", last_sale_price=price)
+        asset=asset, exchange_name=EXCHANGE.mic, trading_account_id=ACCOUNT,
+        last_sale_price=price)
     ledger._dirty_portfolio = True
 
 

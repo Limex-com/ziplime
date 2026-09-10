@@ -5,7 +5,7 @@ Numbered to match the acceptance checklist.
 import datetime
 import unittest
 
-from futures_fixtures import make_future, make_ledger, settle, trade
+from futures_fixtures import ACCOUNT, EXCHANGE, make_future, make_ledger, settle, trade
 
 from ziplime.finance.commission import PerContract
 from ziplime.finance.slippage.volatility_volume_share import VolatilityVolumeShare
@@ -271,10 +271,12 @@ class CommissionCostBasisTests(unittest.IsolatedAsyncioTestCase):
         future = make_future(sid=1, multiplier=1000.0)
         trade(ledger, future, amount=10, price=70.0)
         await settle(ledger)
-        basis_before = ledger.position_tracker.get_position(future).cost_basis
+        basis_before = ledger.position_tracker.get_position(
+            future, EXCHANGE.mic, ACCOUNT).cost_basis
 
         ledger.process_commission(Commission(asset=future, order=None, amount=15.0), tr=None)
-        basis_after = ledger.position_tracker.get_position(future).cost_basis
+        basis_after = ledger.position_tracker.get_position(
+            future, EXCHANGE.mic, ACCOUNT).cost_basis
 
         self.assertNotAlmostEqual(basis_before, basis_after,
                                   msg="commission never reached the cost basis")

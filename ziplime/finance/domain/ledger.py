@@ -370,7 +370,7 @@ class Ledger:
         that is worth saying rather than letting it look like ordinary housekeeping.
         """
         instrument = asset.asset
-        if getattr(asset, "is_deliverable", False):
+        if getattr(instrument, "is_deliverable", False):
             self.logger.warning(
                 "Closing a deliverable futures position to avoid delivery",
                 symbol=asset.symbol, notice_date=str(getattr(instrument, "notice_date", None)),
@@ -713,7 +713,7 @@ class Ledger:
         self._portfolio.positions_value = position_value = position_stats.net_value
         self._portfolio.positions_exposure = position_stats.net_exposure
         payout_total = self._get_payout_total(pt.positions)
-        if payout_total > 0:
+        if payout_total != 0:
             # Variation margin settles in both directions. Applying only gains -- while
             # _get_payout_total has already advanced each position's mark to the new price --
             # dropped every losing day on the floor, so a long futures position could not lose.
