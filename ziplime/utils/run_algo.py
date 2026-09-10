@@ -1,3 +1,4 @@
+from ziplime.finance.margin import FuturesMarginModel
 import datetime
 import sys
 
@@ -57,6 +58,7 @@ async def run_algorithm(
         benchmark_returns: pl.Series | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
+        futures_margin_model: FuturesMarginModel | None = None,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
 ) -> TradingAlgorithmExecutionResult:
     """Run a backtest for the given algorithm.
@@ -69,6 +71,7 @@ async def run_algorithm(
                                   benchmark_asset_mic=benchmark_asset_mic,
                                   benchmark_returns=benchmark_returns,
                                   max_leverage=max_leverage, same_bar_execution=same_bar_execution,
+                                  futures_margin_model=futures_margin_model,
                                   exchange_repository=exchange_repository,
                                   price_used_in_order_execution=price_used_in_order_execution)
     trading_algorithm_executor = TradingAlgorithmExecutor()
@@ -95,6 +98,7 @@ async def run_algorithm_iter(
         benchmark_returns: pl.Series | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
+        futures_margin_model: FuturesMarginModel | None = None,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
 ) -> AsyncIterator[TradingAlgorithmExecutionStatus]:
     """Run a backtest for the given algorithm.
@@ -105,6 +109,7 @@ async def run_algorithm_iter(
                                   clock=clock, custom_data_sources=custom_data_sources, stop_on_error=stop_on_error,
                                   benchmark_asset_symbol=benchmark_asset_symbol, benchmark_returns=benchmark_returns,
                                   max_leverage=max_leverage, same_bar_execution=same_bar_execution,
+                                  futures_margin_model=futures_margin_model,
                                   price_used_in_order_execution=price_used_in_order_execution,
                                   exchange_repository=exchange_repository)
     trading_algorithm_executor = TradingAlgorithmExecutor()
@@ -131,6 +136,7 @@ async def _prepare_algorithm(
         benchmark_returns: pl.Series | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
+        futures_margin_model: FuturesMarginModel | None = None,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
 ) -> TradingAlgorithmExecutionResult:
     """Run a backtest for the given algorithm.
@@ -218,7 +224,10 @@ async def _prepare_algorithm(
         benchmark_fields=frozenset({"close"}),
         precalculated_series=benchmark_precalculated_series
     )
-    await benchmark_source.validate_benchmark(benchmark_asset=benchmark_asset)
+    if benchmark_asset is not None:
+        # Running without a benchmark is supported -- the zero-returns series above is built for
+        # exactly that case -- but validation used to run anyway and fail on the missing asset.
+        await benchmark_source.validate_benchmark(benchmark_asset=benchmark_asset)
 
     for exchange in reversed(await exchange_repository.get_all_exchanges()):
         custom_data_sources.insert(0, exchange)
@@ -235,6 +244,7 @@ async def _prepare_algorithm(
         stop_on_error=stop_on_error,
         custom_data_sources=custom_data_sources,
         same_bar_execution=same_bar_execution,
+        futures_margin_model=futures_margin_model,
     )
 
     orders_by_exchange = {}

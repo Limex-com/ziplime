@@ -71,12 +71,26 @@ class InMemoryBlotter(Blotter):
         return order.id
 
     def order_cancelled(self, order: Order) -> None:
-        asset_orders = self.open_orders[order.exchange_name][order.asset.sid]
-        asset_orders.pop(order.id, None)
+        # Keyed by the listing, matching `save_order`. Reading by `order.asset.sid` looked up a key
+        # that is never written, and because `open_orders` is a defaultdict the miss created an
+        # empty entry instead of raising -- so a cancelled order was never removed and stayed
+        # visible as open for the rest of the simulation.
+        self._forget_order(order)
 
     def order_rejected(self, order: Order) -> None:
-        asset_orders = self.open_orders[order.exchange_name][order.asset.sid]
+        self._forget_order(order)
+
+    def _forget_order(self, order: Order) -> None:
+        """Drop ``order`` from the open orders, and the listing too once it has none left."""
+        exchange_orders = self.open_orders.get(order.exchange_name)
+        if exchange_orders is None:
+            return
+        asset_orders = exchange_orders.get(order.asset)
+        if asset_orders is None:
+            return
         asset_orders.pop(order.id, None)
+        if not asset_orders:
+            exchange_orders.pop(order.asset, None)
 
     def get_order_by_id(self, order_id: str, exchange_name: str) -> Order | None:
         return self.orders.get(exchange_name, {}).get(order_id, None)

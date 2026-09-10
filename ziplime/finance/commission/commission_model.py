@@ -1,5 +1,6 @@
 from abc import abstractmethod
 
+from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
@@ -19,7 +20,7 @@ class CommissionModel(metaclass=FinancialModelMeta):
     """
 
     # Asset types that are compatible with the given model.
-    allowed_asset_types = (Equity, FuturesContract)
+    allowed_asset_types = (Equity, Bond, FuturesContract)
 
     @abstractmethod
     def calculate(self, order, transaction):

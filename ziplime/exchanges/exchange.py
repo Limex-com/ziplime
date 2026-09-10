@@ -123,6 +123,19 @@ class Exchange(DataSource, ABC):
     # @abstractmethod
     # async def current(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt: datetime.datetime = None): ...
 
+    async def current_contract(self, continuous_future, dt: datetime.datetime):
+        """Return the contract a continuous future holds at ``dt``.
+
+        Exchanges sit in front of the data bundle in ``BarData.data_sources``, so continuous-future
+        lookups reach them first and are forwarded to the bundle that can answer them.
+        """
+        return await self.data_source.current_contract(continuous_future=continuous_future, dt=dt)
+
+    async def get_current_future_chain(self, continuous_future, dt: datetime.datetime):
+        """Return the active contracts of a chain at ``dt``, front contract first."""
+        return await self.data_source.get_current_future_chain(
+            continuous_future=continuous_future, dt=dt)
+
     async def get_data_by_limit(self, fields: frozenset[str],
                                 limit: int,
                                 end_date: datetime.datetime,

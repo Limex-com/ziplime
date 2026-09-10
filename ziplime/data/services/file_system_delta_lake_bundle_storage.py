@@ -124,10 +124,14 @@ class FileSystemDeltaLakeBundleStorage(BundleStorage):
         if assets is not None:
             # TODO: update to require AssetSymbol instead of str
             filters.append(pl.col("sid").is_in([asset.sid for asset in assets]))
+        # Compare against the timezone-aware bounds, not their bare dates. `date` is stored in UTC,
+        # so `>= start_date.date()` becomes ">= midnight UTC" and silently drops the first session
+        # for any exchange east of UTC -- a Moscow session stamped 00:00 MSK is 21:00 UTC the day
+        # before. Exchanges west of UTC are unaffected either way.
         if start_date is not None:
-            filters.append(pl.col("date") >= start_date.date())
+            filters.append(pl.col("date") >= start_date)
         if end_date is not None:
-            filters.append(pl.col("date") <= end_date.date())
+            filters.append(pl.col("date") <= end_date)
 
         if filters:
             pl_parquet = pl_parquet.filter(*filters)

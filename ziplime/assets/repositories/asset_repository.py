@@ -9,6 +9,8 @@ from aiocache import Cache
 from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.assets.entities.bond import Bond
+from ziplime.assets.entities.bond_event import BondEvent
 from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
@@ -18,6 +20,8 @@ from ziplime.assets.models.asset_router import AssetRouter
 from ziplime.assets.entities.commodity import Commodity
 from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.equity import Equity
+from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.futures_root import FuturesRoot
 from ziplime.assets.models.currency_model import CurrencyModel
 from ziplime.assets.models.equity_model import EquityModel
 from ziplime.assets.models.futures_contract_model import FuturesContractModel
@@ -27,9 +31,39 @@ from ziplime.trading.models.trading_pair import TradingPair
 class AssetRepository:
 
     async def save_equities(self, equities: list[Equity]) -> list[Equity]: ...
+
+    async def save_bonds(self, bonds: list[Bond]) -> list[Bond]: ...
+
+    async def save_bond_events(self, bond_events: list[BondEvent]) -> list[BondEvent]: ...
+
+    async def get_bond_events(self, bonds: list[Bond]) -> dict[int, list[BondEvent]]: ...
+
+    async def get_exchange_bonds_by_symbols(self, symbols: list[AssetSymbol]) -> list[ExchangeAsset]: ...
+
+    async def get_exchange_bond_by_symbol(self, symbol: AssetSymbol) -> ExchangeAsset | None: ...
+
+    async def get_all_bond_listings(self, mic: str | None = None) -> list[ExchangeAsset]: ...
+
+    async def get_bonds_by_isins(self, isins: list[str]) -> list[Bond]: ...
     async def save_symbol_universe(self, symbol_universe: SymbolsUniverse): ...
 
-    async def save_commodities(self, commodities: list[Commodity]) -> None: ...
+    async def save_commodities(self, commodities: list[Commodity]) -> list[Commodity]: ...
+
+    async def save_futures_roots(self, futures_roots: list[FuturesRoot]) -> list[FuturesRoot]: ...
+
+    async def save_futures_contracts(self, futures_contracts: list[FuturesContract]) -> list[FuturesContract]: ...
+
+    async def get_futures_roots(self) -> dict[str, FuturesRoot]: ...
+
+    async def get_ordered_contracts(self, root_symbol: str, mic: str | None = None): ...
+
+    async def create_continuous_future(self, root_symbol: str, offset: int, roll_style: str,
+                                       adjustment: str | None): ...
+
+    async def get_exchange_futures_contract_by_symbol(self, symbol: AssetSymbol) -> ExchangeAsset | None: ...
+
+    async def get_exchange_futures_contracts_by_root(self, root_symbol: str,
+                                                     mic: str | None = None) -> list[ExchangeAsset]: ...
 
     async def save_asset_routers(self, asset_routers: list[AssetRouter]) -> None: ...
 
@@ -79,18 +113,20 @@ class AssetRepository:
         match asset_type:
             case AssetType.EQUITY:
                 return await self.get_exchange_equity_by_symbol(symbol=symbol)
+            case AssetType.BOND:
+                return await self.get_exchange_bond_by_symbol(symbol=symbol)
             case AssetType.FUTURES_CONTRACT:
-                return await self.get_futures_contract_by_symbol(symbol=symbol, exchange_name=exchange_name)
+                return await self.get_exchange_futures_contract_by_symbol(symbol=symbol)
             case AssetType.CURRENCY:
                 return await self.get_exchange_currency_by_symbol(symbol=symbol)
             case AssetType.COMMODITY:
-                return await self.get_commodity_by_symbol(symbol=symbol, exchange_name=exchange_name)
+                return await self.get_commodity_by_symbol(symbol=symbol, exchange_name=symbol.mic)
             # case AssetType.OPTIONS_CONTRACT:
             #     return await self.get_options_contract_by_symbol(symbol=symbol, exchange_name=exchange_name)
             case _:
                 raise ValueError(f"Unsupported asset type: {asset_type}")
 
-    async def get_futures_contract_by_symbol(self, symbol: str, exchange_name: str) -> FuturesContractModel | None: ...
+    async def get_futures_contract_by_symbol(self, symbol: str, mic: str | None = None) -> FuturesContract | None: ...
 
     async def get_currency_by_symbol(self, symbol: str) -> Currency | None: ...
     # async def get_exchange_currency_by_symbol(self, symbol: AssetSymbol) -> ExchangeAsset | None: ...

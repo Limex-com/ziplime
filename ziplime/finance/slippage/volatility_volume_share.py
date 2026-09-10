@@ -72,7 +72,7 @@ class VolatilityVolumeShare(MarketImpactBase):
             volatility,
     ):
         try:
-            eta = self._eta[order.asset.root_symbol]
+            eta = self._eta[order.asset.asset.root_symbol]
         except Exception:
             eta = DEFAULT_ETA
 
@@ -85,6 +85,5 @@ class VolatilityVolumeShare(MarketImpactBase):
         # convert from % to fraction.
         return (current_price * market_impact) / 10000
 
-    def get_txn_volume(self, data, order):
-        volume = data.current(order.asset, "volume")
+    def get_txn_volume(self, volume: float, order):
         return volume * self.volume_limit

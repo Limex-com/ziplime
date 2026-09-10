@@ -7,6 +7,16 @@ import structlog
 from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from typing import Sequence
+
+from ziplime.assets.domain.asset_type import AssetType
+
+
+def _asset_type_names(asset_type: "AssetType | Sequence[AssetType]") -> str:
+    """Render one or several asset types for an error message."""
+    if isinstance(asset_type, AssetType):
+        return asset_type.value
+    return " / ".join(candidate.value for candidate in asset_type)
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.constants.data_type import DataType
 from ziplime.constants.period import Period
@@ -359,7 +369,9 @@ class BundleService:
                                         bundle_storage: BundleStorage,
                                         asset_service: AssetService,
                                         forward_fill_missing_ohlcv_data: bool,
-                                        merge: bool
+                                        merge: bool,
+                                        asset_type: AssetType | Sequence[AssetType] = AssetType.EQUITY,
+                                        assets: list[ExchangeAsset] | None = None,
                                         ):
 
         """
@@ -382,6 +394,19 @@ class BundleService:
             bundle_storage (BundleStorage): The storage component to persist the ingested and processed market data bundle.
             asset_service (AssetService): The service to retrieve asset metadata such as equities by symbols and exchange mapping.
             forward_fill_missing_ohlcv_data (bool): If True, fills missing OHLCV data forward.
+            assets (list[ExchangeAsset] | None): Listings the symbols refer to, already resolved.
+                Preferred over ``asset_type``, and required in practice for a bundle spanning
+                asset classes: a ticker is unique only within a class, and 168 of them in a
+                database holding both equities and futures exist under two. Passing the listings
+                says exactly which instrument each symbol is instead of asking the database to
+                guess.
+            asset_type (AssetType | Sequence[AssetType]): Which kind of asset the symbols name,
+                used only when ``assets`` is not given. Several may be passed, but a symbol that
+                resolves under more than one raises rather than being guessed at. Symbol lookup is
+                type-scoped because the same ticker on the same exchange can belong to more than
+                one asset -- the same ticker can be both an equity row and a futures
+                contract, and resolving futures bars as equities silently files them under the
+                wrong sid.
 
         Raises:
             ValueError:
@@ -443,15 +468,21 @@ class BundleService:
             index_column="date", every=frequency
         ).agg()
 
-        equities_by_exchange = data.select(
+        assets_by_exchange = data.select(
             "symbol", "mic"
         ).group_by("mic").agg(pl.col("symbol").unique())
-        for row in equities_by_exchange.iter_rows(named=True):
+        for row in assets_by_exchange.iter_rows(named=True):
             exchange_mic = row["mic"]
             symbols = row["symbol"]
-            equities = await asset_service.get_exchange_equities_by_symbols(
-                symbols=[AssetSymbol(mic=exchange_mic, symbol=symbol) for symbol in symbols])
-            symbol_to_sid = {e.symbol: e.sid for e in equities}
+            if assets is not None:
+                # The caller already knows which instrument each symbol is. Nothing to resolve,
+                # and nothing to get wrong.
+                symbol_to_sid = {a.symbol: a.sid for a in assets if a.mic == exchange_mic}
+            else:
+                exchange_assets = await asset_service.get_exchange_assets_by_symbols(
+                    symbols=[AssetSymbol(mic=exchange_mic, symbol=symbol) for symbol in symbols],
+                    asset_type=asset_type)
+                symbol_to_sid = {a.symbol: a.sid for a in exchange_assets if a is not None}
 
             for symbol in symbols:
                 symbol_data = data.filter(symbol=symbol).with_columns(pl.col("date"))
@@ -466,7 +497,9 @@ class BundleService:
                     data = pl.concat([data, new_rows_df], how="diagonal")
             missing_symbols = set(symbols) - set(symbol_to_sid)
             if missing_symbols:
-                raise ValueError(f"Symbols are missing in asset database: {missing_symbols}@{exchange_mic}")
+                raise ValueError(
+                    f"Symbols are missing in asset database as "
+                    f"{_asset_type_names(asset_type)}: {missing_symbols}@{exchange_mic}")
 
             data = data.with_columns(
                 pl.when(
@@ -529,7 +562,9 @@ class BundleService:
                           frequency: datetime.timedelta | Period | None = None,
                           start_auction_delta: datetime.timedelta = None,
                           end_auction_delta: datetime.timedelta = None,
-                          aggregations: list[pl.Expr] = None
+                          aggregations: list[pl.Expr] = None,
+                          asset_service: AssetService | None = None,
+                          roll_finder_settings: dict[str, dict] | None = None
                           ) -> tuple[DataBundle, dict[ExchangeAsset, tuple[datetime.datetime, datetime.datetime]]]:
         """
         Asynchronously loads a data bundle based on specified parameters and validates the configuration
@@ -566,6 +601,12 @@ class BundleService:
                   1 hour before closing time
             aggregations (list[pl.Expr]):
                 List of aggregations to apply on the data. If not specified default aggregations will be used.
+            asset_service (AssetService | None):
+                Required only to trade continuous futures: the bundle needs it to resolve a
+                continuous future to the contract it held on a given date.
+            roll_finder_settings (dict[str, dict] | None):
+                Per-roll-style overrides, e.g. ``{"calendar": {"roll_offset_days": 10}}`` to roll
+                ten days before auto close, or ``{"volume": {"grace_period_days": 3}}``.
 
         Returns:
             DataBundle: An initialized `DataBundle` instance containing data and metadata for the specified
@@ -630,7 +671,9 @@ class BundleService:
                                  original_frequency=bundle_frequency,
                                  timestamp=timestamp,
                                  version=bundle_metadata["version"],
-                                 data_type=data_type
+                                 data_type=data_type,
+                                 asset_service=asset_service,
+                                 roll_finder_settings=roll_finder_settings
                                  )
         bundle_data_load_start = time.time()
 

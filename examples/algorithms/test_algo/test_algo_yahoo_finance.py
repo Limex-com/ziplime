@@ -26,11 +26,12 @@ class AlgorithmConfig(BaseAlgorithmConfig):
 
 async def initialize(context: TradingAlgorithm):
     # context.asset = await context.symbol("AAPL")
+    # No hardcoded MIC: the same ticker sits on a different exchange depending on which asset
+    # database you ingested, and leaving it out resolves the symbol wherever it is listed.
     context.assets = [
-        # await context.symbol("NVDA"),
-        await context.symbol("AAPL", mic="XNMS"),
-        await context.symbol("NVDA"),
-        await context.symbol("NFLX@XNMS")
+        await context.symbol("AAPL"),
+        await context.symbol("META"),
+        await context.symbol("NFLX"),
     ]
     # read config file
     logger.info("Algorithm config: ", config=context.algorithm.config)

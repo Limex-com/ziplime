@@ -1,4 +1,5 @@
 import datetime
+from typing import Sequence
 import os
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from scipy.constants import micro
 from ziplime.assets.models.exchange_asset_model import ExchangeAssetModel
 from ziplime.utils.calendar_utils import get_calendar
 
+from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES
 from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.equity import Equity
@@ -179,6 +181,8 @@ async def ingest_market_data(
         merge: bool = False,
         forward_fill_missing_ohlcv_data: bool = True,
         bundle_storage_path: str = str(Path(Path.home(), ".ziplime", "data")),
+        asset_type: AssetType | Sequence[AssetType] = AssetType.EQUITY,
+        assets: list = None,
 ):
     """
     Ingests market data into a specified bundle for a given time period, using
@@ -200,6 +204,12 @@ async def ingest_market_data(
             Open-High-Low-Close-Volume (OHLCV) data in the ingested bundle. Defaults to True.
         bundle_storage_path (str, optional): The path where the data bundle should be stored.
             Defaults to the directory ".ziplime/data" within the user's home path.
+        asset_type (AssetType | Sequence[AssetType]): Which kind of asset the symbols name, used
+            to resolve them to sids when ``assets`` is not given. Pass AssetType.FUTURES_CONTRACT
+            when ingesting futures.
+        assets (list[ExchangeAsset] | None): The listings themselves, already resolved. Preferred,
+            and effectively required for a bundle spanning asset classes -- a ticker is unique only
+            within a class, so resolving one by name alone can return the wrong instrument.
 
     Raises:
         Exception: May raise exceptions related to data retrieval, storage processes, or configuration
@@ -233,6 +243,8 @@ async def ingest_market_data(
         asset_service=asset_service,
         merge=merge,
         forward_fill_missing_ohlcv_data=forward_fill_missing_ohlcv_data,
+        asset_type=asset_type,
+        assets=assets,
     )
 
 
