@@ -43,6 +43,22 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 logger = structlog.get_logger(__name__)
 
 
+def benchmark_bucket(emission_rate: datetime.timedelta) -> datetime.timedelta:
+    """How wide a benchmark bar is, given the rate the simulation emits at.
+
+    Not simply the emission rate. `SimulationClock` emits one bar per *session* for any rate of a
+    day or more -- a weekly run still steps session by session -- so bucketing the benchmark by
+    the raw rate built 52 rows against the ledger's 245, and `AlphaBeta` sliced both by the same
+    session index until the shorter one ran out:
+
+        ValueError: operands could not be broadcast together with shapes (26,1) () (25,1)
+
+    which names neither the benchmark nor the emission rate. Below a day the two already agree,
+    so this only ever clamps.
+    """
+    return min(emission_rate, datetime.timedelta(days=1))
+
+
 async def run_algorithm(
         algorithm: AlgorithmFile,
         asset_service: AssetService,
@@ -202,7 +218,7 @@ async def _prepare_algorithm(
                 clock.trading_calendar.tz)
         )
         benchmark_precalculated_series = pl.DataFrame({"date": all_bars, "close": 0.00}).group_by_dynamic(
-            index_column="date", every=clock.emission_rate
+            index_column="date", every=benchmark_bucket(clock.emission_rate)
         ).agg(pl.col("close").sum())
     else:
         all_bars = pl.from_pandas(
@@ -210,7 +226,7 @@ async def _prepare_algorithm(
                 clock.trading_calendar.tz)
         )
         benchmark_precalculated_series = pl.DataFrame({"date": all_bars, "close": 0.00}).group_by_dynamic(
-            index_column="date", every=clock.emission_rate
+            index_column="date", every=benchmark_bucket(clock.emission_rate)
         ).agg(pl.col("close").sum())
 
     benchmark_source = BenchmarkSource(
@@ -317,14 +333,15 @@ async def _initialize_precalculated_series(
         trading_calendar.sessions_minutes(start=sessions[0], end=sessions[-1]).tz_convert(
             trading_calendar.tz)
     )
+    bucket = benchmark_bucket(emission_rate)
     limit = all_bars.to_frame("date").group_by_dynamic(
-        index_column="date", every=emission_rate
+        index_column="date", every=bucket
     ).agg()["date"].len()
 
     benchmark_series = await exchange.get_data_by_limit(
         fields=benchmark_fields,
         limit=limit,
-        frequency=emission_rate,
+        frequency=bucket,
         end_date=all_bars[-1],
         assets=frozenset({asset}),
         include_end_date=True

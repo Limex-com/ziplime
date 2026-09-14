@@ -97,7 +97,10 @@ class AssetService:
             root_symbol=root_symbol, offset=offset, roll_style=roll_style, adjustment=adjustment)
 
     async def save_commodities(self, commodities: list[Commodity]) -> list[Commodity]:
-        await self._asset_repository.save_commodities(commodities=commodities)
+        # The `return` was missing, so this alone among the save_* methods declared a list and
+        # handed back None -- and the caller that needs it is anyone storing a futures contract,
+        # which cannot be built without the root asset the database just assigned an id to.
+        return await self._asset_repository.save_commodities(commodities=commodities)
 
     async def save_currencies(self, currencies: list[Currency]) -> list[Currency]:
         return await self._asset_repository.save_currencies(currencies=currencies)

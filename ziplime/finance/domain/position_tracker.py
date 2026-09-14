@@ -484,28 +484,44 @@ class PositionTracker:
 
         return net_cash_payment
 
-    def close_positions(self, asset: ExchangeAsset, dt: datetime.datetime) -> list[Transaction]:
+    def close_positions(self, asset: ExchangeAsset, dt: datetime.datetime,
+                        price: float | None = None) -> list[Transaction]:
         """Create a closing transaction for every open position in ``asset``.
 
-        The position's last sale price is used as the close price, since the
-        tracker has no direct access to market data.
+        Args:
+            price: What to liquidate at. Defaults to each position's own last mark, which is the
+                right answer when the instrument simply stopped trading. An expiring option passes
+                its **settlement** price instead -- see
+                :meth:`ziplime.finance.domain.ledger.Ledger.close_position`.
+
+        A position that has never been marked, and for which no ``price`` is supplied, contributes
+        no transaction rather than one priced NaN: a NaN trade posts to the ledger and quietly
+        turns the whole portfolio value into NaN from that bar on.
         """
         positions = self.positions_by_asset.get((asset,))
         if not positions:
             return []
-        return [
-            Transaction(
+        transactions = []
+        for position in positions:
+            if position.amount == 0:
+                continue
+            mark = position.last_sale_price if price is None else price
+            if mark is None or isnan(mark):
+                self._logger.warning(
+                    "Cannot close a position: it has never been marked",
+                    symbol=asset.symbol, dt=str(dt))
+                continue
+            transactions.append(Transaction(
                 id=uuid.uuid4().hex,
                 asset=asset,
                 amount=-position.amount,
                 dt=dt,
-                price=position.last_sale_price,
+                price=mark,
                 order_id=None,
                 exchange_name=position.exchange_name,
                 trading_account_id=position.trading_account_id,
-            )
-            for position in positions
-        ]
+            ))
+        return transactions
 
     def get_positions(self):
         return self.positions

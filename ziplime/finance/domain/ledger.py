@@ -638,18 +638,29 @@ class Ledger:
 
     @staticmethod
     def _positions_by_exchange_and_account(position_tracker: PositionTracker) -> dict:
-        """Build the nested ``exchange -> trading_account -> asset -> Position``
-        view of the tracker's positions for the portfolio API."""
+        """Build the ``(exchange, trading account, asset) -> Position`` map the portfolio exposes.
+
+        Flat, and keyed exactly as :class:`~ziplime.finance.domain.position_tracker.PositionTracker`
+        keys its own positions, because that is what :class:`~ziplime.domain.portfolio.Portfolio`
+        declares and what its accessors iterate. It used to build a nested
+        ``exchange -> account -> asset -> Position`` dict instead, which left every one of those
+        accessors reading a dict where it expected a position -- ``get_asset_positions_amount``
+        raised ``AttributeError: 'dict' object has no attribute 'asset'`` the moment a strategy
+        asked how much of something it held.
+
+        The projected positions carry ``exchange_name`` and ``trading_account_id``: the accessors
+        filter on both, and a projection without them silently matches nothing.
+        """
         positions = {}
-        for position in position_tracker.positions.values():
-            accounts = positions.setdefault(position.exchange_name, {})
-            assets = accounts.setdefault(position.trading_account_id, {})
-            assets[position.asset] = Position(
+        for key, position in position_tracker.positions.items():
+            positions[key] = Position(
                 asset=position.asset,
                 amount=position.amount,
                 cost_basis=position.cost_basis,
                 last_sale_price=position.last_sale_price,
                 last_sale_date=position.last_sale_date,
+                exchange_name=position.exchange_name,
+                trading_account_id=position.trading_account_id,
             )
         return positions
 
@@ -657,19 +668,17 @@ class Ledger:
         # start_cash = sum(exchange.get_start_cash_balance() for exchange in exchange_repository.get_all_exchanges())
 
         pt = self.position_tracker
-        for exchange_name, accounts in portfolio.positions.items():
-            for trading_account_id, assets in accounts.items():
-                for asset, position in assets.items():
-                    if position.amount == 0:
-                        continue
-                    pt.update_position(
-                        asset=asset, exchange_name=exchange_name,
-                        last_sale_price=position.last_sale_price,
-                        last_sale_date=position.last_sale_date,
-                        cost_basis=position.cost_basis,
-                        amount=position.amount,
-                        trading_account_id=trading_account_id,
-                    )
+        for (exchange_name, trading_account_id, asset), position in portfolio.positions.items():
+            if position.amount == 0:
+                continue
+            pt.update_position(
+                asset=asset, exchange_name=exchange_name,
+                last_sale_price=position.last_sale_price,
+                last_sale_date=position.last_sale_date,
+                cost_basis=position.cost_basis,
+                amount=position.amount,
+                trading_account_id=trading_account_id,
+            )
         self._portfolio.cash = portfolio.cash
         self._portfolio.starting_cash = portfolio.starting_cash
         self._portfolio.portfolio_value = portfolio.portfolio_value

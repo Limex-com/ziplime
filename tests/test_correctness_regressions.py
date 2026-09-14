@@ -528,6 +528,9 @@ class CanTradeTests(unittest.TestCase):
         calendar.is_session.return_value = True
         source = Mock()
         source.name = "test"
+        # A source with no opinion about where its bars stop. `can_trade` also refuses an asset
+        # whose prices have run out, and a bare Mock would answer that question with a Mock.
+        source.last_available_bar.return_value = None
         return BarData(data_sources={"test": source},
                        simulation_dt_func=lambda: SESSION,
                        trading_calendar=calendar,
@@ -568,6 +571,7 @@ class CanTradeTests(unittest.TestCase):
         calendar.is_open_on_minute.return_value = True
         source = Mock()
         source.name = "test"
+        source.last_available_bar.return_value = None
         bar_data = BarData(data_sources={"test": source}, simulation_dt_func=lambda: SESSION,
                            trading_calendar=calendar,
                            restrictions=StaticRestrictions([asset]))

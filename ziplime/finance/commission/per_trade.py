@@ -45,4 +45,7 @@ class PerTrade(CommissionModel):
             return 0.0
 
     def calculate_for_asset(self, asset: ExchangeAsset, quantity: int, transaction_amount: float) -> float:
-        raise self.cost
+        # `raise self.cost` until now, which is a TypeError rather than a commission: a float is
+        # not an exception. Nothing reached it while the only caller was the event-driven blotter,
+        # which goes through `calculate`; the vector kernel prices every fill through this one.
+        return self.cost

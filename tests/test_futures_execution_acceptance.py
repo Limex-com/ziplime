@@ -116,6 +116,22 @@ class TickSizeTests(unittest.TestCase):
         self.assertLessEqual(rounded, 5000.13)
 
 
+def _bare_algorithm():
+    """Just enough of a `TradingAlgorithm` for `_can_order_asset`, which reads a listing's
+    lifecycle dates, the calendar, and the market data -- an order is also refused when the
+    prices for a listing have run out, and here they have not."""
+    from ziplime.trading.trading_algorithm import TradingAlgorithm
+
+    algorithm = TradingAlgorithm.__new__(TradingAlgorithm)
+    algorithm._logger = type("L", (), {"warning": lambda *a, **k: None})()
+    calendar = type("C", (), {"minute_to_session": staticmethod(lambda dt: dt)})()
+    algorithm.clock = type("K", (), {"trading_calendar": calendar})()
+    algorithm._data_delistings = {}
+    algorithm.current_data = type("B", (), {
+        "has_stopped_trading": staticmethod(lambda asset, session: False)})()
+    return algorithm
+
+
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):
     """#6: expiration, notice and auto-close dates are ordered and enforced."""
 
@@ -135,10 +151,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         # session is a trading session -- while the day after it must be refused.
         from ziplime.trading.trading_algorithm import TradingAlgorithm
         future = make_future(sid=1, expiration=datetime.date(2023, 12, 20))
-        algorithm = TradingAlgorithm.__new__(TradingAlgorithm)
-        algorithm._logger = type("L", (), {"warning": lambda *a, **k: None})()
-        calendar = type("C", (), {"minute_to_session": staticmethod(lambda dt: dt)})()
-        algorithm.clock = type("K", (), {"trading_calendar": calendar})()
+        algorithm = _bare_algorithm()
 
         for day, expected in ((datetime.date(2023, 12, 19), True),
                               (datetime.date(2023, 12, 20), True),
@@ -157,10 +170,7 @@ class TradableVersusExistsTests(unittest.IsolatedAsyncioTestCase):
                              expiration=datetime.date(2024, 12, 20))
         self.assertIsNotNone(future.asset, "the contract exists in metadata")
 
-        algorithm = TradingAlgorithm.__new__(TradingAlgorithm)
-        algorithm._logger = type("L", (), {"warning": lambda *a, **k: None})()
-        calendar = type("C", (), {"minute_to_session": staticmethod(lambda dt: dt)})()
-        algorithm.clock = type("K", (), {"trading_calendar": calendar})()
+        algorithm = _bare_algorithm()
         algorithm.simulation_dt = type("D", (), {
             "date": staticmethod(lambda: datetime.date(2025, 1, 3))})()
         self.assertFalse(TradingAlgorithm._can_order_asset(algorithm, asset=future),
