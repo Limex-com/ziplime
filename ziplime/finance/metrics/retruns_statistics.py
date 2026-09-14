@@ -19,6 +19,11 @@ class ReturnsStatistic:
         The name of the field. If not provided, it will be
         ``function.__name__``.
     """
+    #: This metric's ``end_of_bar`` only writes into the packet it is handed -- it carries nothing
+    #: from one bar to the next -- so a run that is not emitting intraday packets can skip it.
+    #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
+    packet_only = True
+
 
     def __init__(self, function, field_name=None):
         if field_name is None:

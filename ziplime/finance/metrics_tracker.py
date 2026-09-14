@@ -44,6 +44,7 @@ class MetricsTracker:
             ledger: Ledger,
             metrics,
             benchmark_source: BenchmarkSource,
+            intraday_metrics: bool = False,
     ):
         self.emission_rate = emission_rate
         self._benchmark_source = benchmark_source
@@ -80,6 +81,23 @@ class MetricsTracker:
         self._end_of_bar_metrics = [
             metric for metric in self._metrics if getattr(metric, "end_of_bar", None)
         ]
+        # At an intraday rate `end_of_bar` fires on every bar of the run -- 390 times a session at
+        # one minute -- and in the default set all but one of those metrics do nothing except fill
+        # the minute packet, which `TradingAlgorithmExecutor` discards: the performance table it
+        # builds has one row per session. Computing a cumulative Sharpe ratio, alpha and beta on
+        # every minute to throw all but the last away was 86% of an intraday run.
+        #
+        # So unless intraday packets were asked for, only the metrics that carry something from
+        # one bar to the next run there -- `MaxLeverage` and its running maximum, which would
+        # otherwise miss every intraday peak. A metric claims to be skippable by setting
+        # `packet_only`; anything that does not is assumed to keep state and keeps running, so an
+        # unfamiliar metric is slow rather than silently wrong.
+        self.intraday_metrics = intraday_metrics
+        self._every_bar_metrics = (
+            self._end_of_bar_metrics if intraday_metrics
+            else [metric for metric in self._end_of_bar_metrics
+                  if not getattr(metric, "packet_only", False)]
+        )
 
         if emission_rate == DataFrequency.MINUTE:
 
@@ -133,7 +151,7 @@ class MetricsTracker:
         }
         ledger = self._ledger
         ledger.end_of_bar(session_ix=self._session_count)
-        for metric in self._end_of_bar_metrics:
+        for metric in self._every_bar_metrics:
             metric.end_of_bar(
                 packet=packet,
                 ledger=ledger,

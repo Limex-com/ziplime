@@ -59,7 +59,43 @@ class DataBundle(DataSource):
             **(roll_finder_settings or {}),
         }
         self._roll_finders = {}
+        #: Memoised answers from :meth:`last_available_bar`, keyed by sid (``None`` for the bundle
+        #: as a whole). Asked once per instrument per session otherwise, over the whole frame.
+        self._last_bars: dict[int | None, datetime.datetime | None] = {}
         self._logger = structlog.get_logger(__name__)
+
+    def last_available_bar(self, sid: int | None = None) -> datetime.datetime | None:
+        """The date of the last bar this bundle carries for ``sid``, or for any instrument.
+
+        See :meth:`ziplime.data.services.data_source.DataSource.last_available_bar`. ``None`` here
+        means the bundle holds no bar for that sid at all, which is not the same as the sid having
+        stopped trading -- it may simply not be in this bundle.
+        """
+        if sid in self._last_bars:
+            return self._last_bars[sid]
+        if self.data is None:
+            # Loading assigns `data` after construction, so an answer given before then says
+            # nothing about the bundle and must not be remembered as if it did.
+            return None
+        last = self._compute_last_available_bar(sid)
+        self._last_bars[sid] = last
+        return last
+
+    def _compute_last_available_bar(self, sid: int | None) -> datetime.datetime | None:
+        df = self.get_dataframe()
+        if df is None or df.is_empty() or "date" not in df.columns:
+            return None
+        if sid is None:
+            return df["date"].max()
+        span = (self.sid_indexes or {}).get(sid)
+        if span is not None:
+            # Rows are grouped by sid and ordered by date, which is exactly what sid_indexes
+            # indexes -- so the slice is the instrument's own block and its last date is its last
+            # bar, without scanning the frame.
+            dates = df[span[0]:span[1]]["date"]
+        else:
+            dates = df.filter(pl.col("sid") == sid)["date"]
+        return None if dates.is_empty() else dates.max()
 
     def get_roll_finder(self, roll_style: str):
         """Return (and memoise) the roll finder for ``roll_style``.
@@ -260,13 +296,12 @@ class DataBundle(DataSource):
         asset_sid = assets_list[0].sid
 
         total_bar_count = limit
-        if end_date > self.end_date:
-            raise ValueError(f"Requested end date {end_date} is greater than end date {self.end_date} of the bundle.")
-            return self.get_missing_data_by_limit(frequency=frequency, assets=assets, fields=fields,
-                                                  limit=limit, include_end_date=include_end_date,
-                                                  end_date=end_date
-                                                  )  # pl.DataFrame() # we have missing data
-
+        # A read past the bundle's own end is answered with the bars that exist, and deliberately
+        # not refused. It used to raise, which cost the whole run: the raise was caught per bar,
+        # but it happened in the session-end branch before the performance row was recorded, so no
+        # row was recorded for that session or for any after it -- a backtest that stopped months
+        # early and still reported a full set of metrics. Instruments stop trading; what that means
+        # is worked out from the bars themselves, in `BarData.has_stopped_trading`.
         if self.frequency_td < frequency_td:
             multiplier = int(frequency_td / self.frequency_td)
             total_bar_count = limit * multiplier

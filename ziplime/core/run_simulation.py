@@ -62,7 +62,8 @@ async def run_simulation(
         same_bar_execution: bool = True,
         futures_margin_model: FuturesMarginModel | None = None,
         print_algo: bool = True,
-        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
+        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
+        intraday_metrics: bool = False,
 ) -> TradingAlgorithmExecutionResult:
     """
     Run a trading algorithm simulation within a defined time period and trading environment.
@@ -94,6 +95,15 @@ async def run_simulation(
                           If not specified, ziplime.finance.commission.PerContract model is used with a default
                           cost per contract of 0.85 and minimum cost of trade 0.00
 
+
+        intraday_metrics (bool): Compute the whole metric set on every intraday bar rather than
+                          only at each session's close. Off by default, and a run reports the same
+                          numbers either way -- the performance table has one row per session, and
+                          the intraday packets this fills are discarded on the way to it. What it
+                          costs is most of an intraday run: a cumulative Sharpe ratio, alpha and
+                          beta recomputed every minute and then thrown away, measured at 86% of a
+                          run over minute bars. Turn it on only for something that consumes the
+                          intraday packets themselves.
 
     Returns:
         Coroutine: The coroutine to execute the simulation and produce output results.
@@ -164,7 +174,8 @@ async def run_simulation(
         same_bar_execution=same_bar_execution,
         futures_margin_model=futures_margin_model,
         price_used_in_order_execution=price_used_in_order_execution,
-        exchange_repository=exchange_repository
+        exchange_repository=exchange_repository,
+        intraday_metrics=intraday_metrics,
     )
 
 

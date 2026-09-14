@@ -77,6 +77,8 @@ class BarData:
         # address such as "hf://owner/name/config". Supplied by TradingAlgorithm, which is what
         # holds the asset database and the simulation window a mount needs.
         self._data_source_resolver = data_source_resolver
+        #: Memoised `sid -> session of its last bar`, see :meth:`last_bar_session`.
+        self._last_bar_sessions: dict[int, datetime.date | None] = {}
         # first_exchange = exchanges[list(exchanges.keys())[0]]
         # self.default_exchange = first_exchange
 
@@ -114,6 +116,42 @@ class BarData:
         # hit the cache on the next bar.
         self.data_sources[data_source] = resolved
         return resolved
+
+    def last_bar_session(self, asset: Asset) -> datetime.date | None:
+        """The session of the last bar the loaded market data carries for ``asset``.
+
+        ``None`` when nothing can say: a live feed, or an instrument no source carries. Read that
+        as "no opinion", never as "it stopped trading" -- an asset absent from the bundle is not a
+        delisted asset, and treating it as one would silently stop a strategy from trading it.
+        """
+        sid = getattr(asset, "sid", None)
+        if sid is None:
+            return None
+        if sid in self._last_bar_sessions:
+            return self._last_bar_sessions[sid]
+        instants = [source.last_available_bar(sid) for source in self.data_sources.values()]
+        instants = [instant for instant in instants if instant is not None]
+        # The bar's own calendar day is its session. Bundles stamp a daily bar either at the
+        # session close or at midnight of the session, and both give the same date in the
+        # calendar's timezone; converting through `minute_to_session` instead would push a
+        # midnight-stamped bar back onto the previous session.
+        session = max(instants).date() if instants else None
+        self._last_bar_sessions[sid] = session
+        return session
+
+    def has_stopped_trading(self, asset: Asset, session: datetime.date) -> bool:
+        """Whether ``asset``'s bars have run out by ``session``.
+
+        This is how a delisting reaches the engine. Reference data does not carry it: a delisted
+        listing keeps its row and an ``end_date`` decades away, so `auto_close_date` never fires
+        and the position stays on the book at the last mark it ever got -- counted in exposure, in
+        leverage and in the returns, for the rest of the run. What actually ends is the data.
+
+        The last session with a bar is *not* stopped: that bar is a real price and is tradeable.
+        Only the sessions after it are.
+        """
+        last = self.last_bar_session(asset)
+        return last is not None and session > last
 
     def _get_current_minute(self):
         """Internal utility method to get the current simulation time.
@@ -329,6 +367,11 @@ class BarData:
         if asset.end_date and session > _as_date(asset.end_date):
             return False
         if asset.auto_close_date and session > _as_date(asset.auto_close_date):
+            return False
+
+        # Delisted according to the data rather than to the reference data, which for an equity is
+        # the only place it is recorded. See `has_stopped_trading`.
+        if self.has_stopped_trading(asset=asset, session=session):
             return False
 
         # The simulation's calendar, not the listing's own: a listing carries its venue but not

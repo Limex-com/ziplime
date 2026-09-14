@@ -7,6 +7,11 @@ from ziplime.finance.domain.ledger import Ledger
 
 class Returns:
     """Tracks the daily and cumulative returns of the algorithm."""
+    #: This metric's ``end_of_bar`` only writes into the packet it is handed -- it carries nothing
+    #: from one bar to the next -- so a run that is not emitting intraday packets can skip it.
+    #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
+    packet_only = True
+
 
     # def _end_of_period(field, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
     #                    data_bundle: BundleData):

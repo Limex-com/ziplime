@@ -207,8 +207,16 @@ class SimulationExchange(Exchange):
     async def get_transactions_by_order_ids(self, order_ids: list[str]):
         pass
 
-    async def cancel_order(self, order_param):
-        pass
+    async def cancel_order(self, order_id: str) -> None:
+        """Cancel an order at the venue. A simulated venue has nothing to tell, so this is a no-op.
+
+        The parameter is named to match :meth:`ziplime.exchanges.exchange.Exchange.cancel_order`,
+        which is how the blotter calls it. It used to be ``order_param``, so every call raised
+        ``TypeError: got an unexpected keyword argument 'order_id'`` -- reached whenever an order
+        was still open on a contract that expired, which is routine on any option book and never
+        happens on an equity one.
+        """
+        return None
 
     def get_last_traded_dt(self, asset):
         pass

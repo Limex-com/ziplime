@@ -36,6 +36,18 @@ class Exchange(DataSource, ABC):
         self.is_default = is_default
         self.data_source = data_source
 
+    def last_available_bar(self, sid: int | None = None) -> datetime.datetime | None:
+        """Where the market data behind this venue stops. Delegated to the data source.
+
+        A live venue has no bundle behind it and answers ``None``, which callers read as "no
+        opinion" -- a live run learns that an instrument stopped trading from the venue, not by
+        inspecting a frame.
+        """
+        data_source = getattr(self, "data_source", None)
+        if data_source is None:
+            return None
+        return data_source.last_available_bar(sid)
+
     def get_start_cash_balance(self):
         pass
 

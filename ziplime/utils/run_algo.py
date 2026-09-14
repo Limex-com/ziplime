@@ -74,8 +74,9 @@ async def run_algorithm(
         benchmark_returns: pl.Series | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
+        intraday_metrics: bool = False,
         futures_margin_model: FuturesMarginModel | None = None,
-        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
+        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
 ) -> TradingAlgorithmExecutionResult:
     """Run a backtest for the given algorithm.
     This is shared between the cli and :func:`ziplime.run_algo`.
@@ -89,7 +90,8 @@ async def run_algorithm(
                                   max_leverage=max_leverage, same_bar_execution=same_bar_execution,
                                   futures_margin_model=futures_margin_model,
                                   exchange_repository=exchange_repository,
-                                  price_used_in_order_execution=price_used_in_order_execution)
+                                  price_used_in_order_execution=price_used_in_order_execution,
+                                  intraday_metrics=intraday_metrics)
     trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
     result = await trading_algorithm_executor.run_algorithm(trading_algorithm=tr)
@@ -115,7 +117,8 @@ async def run_algorithm_iter(
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
         futures_margin_model: FuturesMarginModel | None = None,
-        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
+        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
+        intraday_metrics: bool = False,
 ) -> AsyncIterator[TradingAlgorithmExecutionStatus]:
     """Run a backtest for the given algorithm.
     This is shared between the cli and :func:`ziplime.run_algo`.
@@ -127,7 +130,8 @@ async def run_algorithm_iter(
                                   max_leverage=max_leverage, same_bar_execution=same_bar_execution,
                                   futures_margin_model=futures_margin_model,
                                   price_used_in_order_execution=price_used_in_order_execution,
-                                  exchange_repository=exchange_repository)
+                                  exchange_repository=exchange_repository,
+                                  intraday_metrics=intraday_metrics)
     trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
     async for status in trading_algorithm_executor.run_algorithm_iter(trading_algorithm=tr):
@@ -153,7 +157,8 @@ async def _prepare_algorithm(
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
         futures_margin_model: FuturesMarginModel | None = None,
-        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
+        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
+        intraday_metrics: bool = False,
 ) -> TradingAlgorithmExecutionResult:
     """Run a backtest for the given algorithm.
     This is shared between the cli and :func:`ziplime.run_algo`.
@@ -261,6 +266,7 @@ async def _prepare_algorithm(
         custom_data_sources=custom_data_sources,
         same_bar_execution=same_bar_execution,
         futures_margin_model=futures_margin_model,
+        intraday_metrics=intraday_metrics,
     )
 
     orders_by_exchange = {}

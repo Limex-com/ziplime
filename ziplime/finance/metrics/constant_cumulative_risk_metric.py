@@ -13,6 +13,11 @@ class ConstantCumulativeRiskMetric:
     This exists to maintain the existing structure of the perf packets. We
     should kill this as soon as possible.
     """
+    #: This metric's ``end_of_bar`` only writes into the packet it is handed -- it carries nothing
+    #: from one bar to the next -- so a run that is not emitting intraday packets can skip it.
+    #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
+    packet_only = True
+
 
     def __init__(self, field, value):
         self._field = field

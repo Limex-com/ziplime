@@ -22,6 +22,11 @@ class StartOfPeriodLedgerField:
         The name of the field to populate in the packet. If not provided,
         ``ledger_field`` will be used.
     """
+    #: This metric's ``end_of_bar`` only writes into the packet it is handed -- it carries nothing
+    #: from one bar to the next -- so a run that is not emitting intraday packets can skip it.
+    #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
+    packet_only = True
+
 
     def __init__(self, ledger_field, packet_field=None):
         self._get_ledger_field = op.attrgetter(ledger_field)

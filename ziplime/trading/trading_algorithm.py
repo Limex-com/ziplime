@@ -205,6 +205,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             stop_on_error: bool = False,
             same_bar_execution: bool = True,
             futures_margin_model: FuturesMarginModel | None = None,
+            intraday_metrics: bool = False,
 
     ):
         self.algorithm = algorithm
@@ -314,6 +315,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.clock = clock
 
         self.same_bar_execution = same_bar_execution
+        #: See MetricsTracker: the whole metric set on every intraday bar, or only at the close.
+        self.intraday_metrics = intraday_metrics
         self._logger = structlog.get_logger(__name__)
         self._session_count = 0
         if self.same_bar_execution:
@@ -409,7 +412,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             emission_rate=self.clock.emission_rate,
             ledger=self._ledger,
             metrics=self._metrics_set,
-            benchmark_source=self.benchmark_source
+            benchmark_source=self.benchmark_source,
+            intraday_metrics=self.intraday_metrics,
         )
 
         # Set the dt initially to the period start by forcing it to change.
@@ -864,7 +868,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     async def accrued_interest(self, asset: ExchangeAsset, dt: datetime.date = None) -> float:
-        """Coupon accrued on one bond (НКД) -- what a buyer owes the seller on top of the quote."""
+        """Coupon accrued on one bond -- what a buyer owes the seller on top of the quote."""
         bond = self._require_bond(asset)
         await self._ledger.bond_book.load(self.asset_service, [bond])
         return self._ledger.bond_book.accrued_interest(bond, dt or self.simulation_dt)
