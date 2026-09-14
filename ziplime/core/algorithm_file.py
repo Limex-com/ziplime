@@ -35,6 +35,11 @@ class AlgorithmFile:
             analyze (Callable): An optional analyze function in the loaded algorithm, only executed
                 after the main algorithm run. Defaults to a no-operation function if not provided in
                 the script.
+            compute_signals (Callable | None): Optional vectorised half of the strategy, computed
+                once over the whole price history before the first bar and read one row at a time
+                from ``handle_data``. See :mod:`ziplime.vectorized.signals`.
+            warmup (int): Bars of history loaded before the run's start for ``compute_signals`` to
+                warm its indicators on, taken from a module-level ``WARMUP``. Defaults to 0.
             config (BaseAlgorithmConfig): An instance of either a custom configuration class defined in the
                 script or the base configuration class `BaseAlgorithmConfig`, loaded using the algorithm
                 configuration file or default parameters.
@@ -72,6 +77,11 @@ class AlgorithmFile:
         self.initialize = module.__dict__.get("initialize", async_noop)
         self.handle_data = module.__dict__.get("handle_data", async_noop)
         self.before_trading_start = module.__dict__.get("before_trading_start", noop)
+        # The vectorised half, if the strategy has one. Deliberately a plain `def`: it is array
+        # work over history that is already loaded, and an `async def` here would invite awaiting
+        # per-bar reads inside the one function whose whole purpose is not to do them.
+        self.compute_signals = module.__dict__.get("compute_signals", None)
+        self.warmup = int(module.__dict__.get("WARMUP", 0) or 0)
         # Optional analyze function, gets called after run
         self.analyze = module.__dict__.get("analyze", noop)
         custom_config_class = None

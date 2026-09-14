@@ -112,6 +112,10 @@ from ziplime.utils.math_utils import (
     round_if_near_integer,
 )
 from ziplime.sources.benchmark_source import BenchmarkSource
+from ziplime.vectorized.signals import (
+    PricePanel, SignalPanel, as_of_panel, normalise_signals, verify_causality,
+)
+import polars as pl
 
 
 # For creating and storing pipeline instances
@@ -123,6 +127,48 @@ class NoBenchmark(ValueError):
         super(NoBenchmark, self).__init__(
             "Must specify either benchmark_sid or benchmark_returns.",
         )
+
+
+def _named_universe(universe) -> dict:
+    """Accept either shape a strategy already writes its universe in.
+
+    A dict names the panel's columns explicitly. A plain list -- which is what every strategy in
+    `examples/huggingface` already builds -- is named by ticker, so vectorising one of those is a
+    `compute_signals` function and nothing else.
+    """
+    if isinstance(universe, dict):
+        return universe
+    if not isinstance(universe, (list, tuple, set, frozenset)):
+        raise TypeError(
+            f"context.universe has to be a list of listings or a dict of name -> listing, got "
+            f"{type(universe).__name__}.")
+
+    named = {}
+    for listing in universe:
+        symbol = getattr(listing, "symbol", None)
+        if symbol is None:
+            raise TypeError(
+                f"context.universe holds a {type(listing).__name__}, which has no symbol to name "
+                f"a column by. Pass listings, or a dict of name -> listing.")
+        if symbol in named:
+            # Two venues, one ticker. Naming both "T" would silently drop one of them from the
+            # panel, so the strategy has to say which name means which listing.
+            raise ValueError(
+                f"Two listings in context.universe are both called {symbol!r} "
+                f"({named[symbol].mic} and {listing.mic}). Give them names: "
+                f"context.universe = {{'{symbol}.{named[symbol].mic}': ..., "
+                f"'{symbol}.{listing.mic}': ...}}.")
+        named[symbol] = listing
+    return named
+
+
+def _as_datetime(value, tz, default: datetime.date) -> datetime.datetime:
+    """A source's start bound as an aware datetime, however it was stored."""
+    if isinstance(value, datetime.datetime):
+        return value if value.tzinfo else value.replace(tzinfo=tz)
+    if isinstance(value, datetime.date):
+        return datetime.datetime.combine(value, datetime.time.min, tzinfo=tz)
+    return datetime.datetime.combine(default, datetime.time.min, tzinfo=tz)
 
 
 class TradingAlgorithm(BaseTradingAlgorithm):
@@ -274,6 +320,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self._before_trading_start = algorithm.before_trading_start
         # Optional analyze function, gets called after run
         self._analyze = algorithm.analyze
+        # The vectorised half, computed once between `initialize` and the first bar.
+        self._compute_signals = getattr(algorithm, "compute_signals", None)
+        self._signals_warmup = int(getattr(algorithm, "warmup", 0) or 0)
+        #: Set by :meth:`_compute_vectorised_signals`; read by strategies as `context.signals`.
+        self.signals = None
 
         self.event_manager.add_event(
             ziplime.utils.events.Event(
@@ -434,9 +485,147 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     date_from=self.clock.start_session,
                     date_to=self.clock.end_session,
                 )
+        await self._compute_vectorised_signals()
         await self.metrics_tracker.handle_start_of_simulation()
         return self.transform()
 
+    async def _compute_vectorised_signals(self) -> None:
+        """Run the strategy's ``compute_signals`` once, before the first bar.
+
+        This is the whole of the in-run hybrid. The indicators are array work and are done here in
+        one pass; the decisions stay in `handle_data`, bar by bar, with the ordinary blotter,
+        slippage and commissions. A strategy that does not define ``compute_signals`` is untouched
+        by any of it.
+
+        The panel handed to the hook covers the run plus exactly ``WARMUP`` bars before it -- not
+        however much history the bundle happens to hold, because then a strategy's first signals
+        would depend on how deeply the bundle was ingested rather than on what it declared.
+        """
+        if self._compute_signals is None:
+            return
+
+        universe = getattr(self, "universe", None)
+        if not universe:
+            raise ValueError(
+                "compute_signals needs to know which instruments to compute over. Set "
+                "`context.universe = {'JNJ': listing, ...}` in initialize -- the keys become the "
+                "column names of the price panel and of the signals read back in handle_data.")
+        universe = _named_universe(universe)
+
+        calendar = self.clock.trading_calendar
+        sessions = list(self.clock.sessions)
+        emission = self.clock.emission_rate
+        # Generous on purpose: fetching too little is a correctness bug, fetching too much costs
+        # a moment and is trimmed to the declared warm-up below.
+        bars_per_session = (1 if emission >= datetime.timedelta(days=1)
+                            else max(1, int(datetime.timedelta(hours=24) / emission)))
+        limit = (len(sessions) + self._signals_warmup + 1) * bars_per_session
+
+        # In the calendar's own zone, not the UTC `session_close` returns: bundles are stamped that
+        # way, and polars refuses to compare two zones rather than quietly aligning them.
+        end_stamp = calendar.session_close(self.clock.end_session).tz_convert(calendar.tz)
+
+        source = await self.current_data.resolve_data_source(None)
+        rows = await source.get_data_by_limit(
+            fields=None, limit=limit, frequency=emission, include_end_date=True,
+            end_date=end_stamp.to_pydatetime(), assets=frozenset(universe.values()))
+        if rows.is_empty():
+            raise ValueError(
+                f"No bars for {', '.join(universe)} in the run's window, so there is nothing to "
+                f"compute signals over.")
+
+        names = {listing.sid: name for name, listing in universe.items()}
+        panel = PricePanel.from_bundle_rows(rows, names)
+        panel = self._trim_to_warmup(panel, first_session=self.clock.start_session)
+        panel = await self._attach_datasets(panel, universe=universe, names=names)
+
+        computed = normalise_signals(self._compute_signals(self, panel), panel.index)
+        verify_causality(lambda prices: self._compute_signals(self, prices),
+                         panel=panel, computed=computed, warmup=self._signals_warmup)
+        self.signals = SignalPanel(computed, clock=self.get_datetime)
+
+        in_run = sum(1 for stamp in panel.index if stamp.date() >= self.clock.start_session)
+        expected = len(sessions) * bars_per_session
+        if emission >= datetime.timedelta(days=1) and in_run < expected:
+            self._logger.warning(
+                "The price panel is short of the run's sessions; on a bar it has no row for, a "
+                "signal reads its previous value, the way a forward-filled price does",
+                sessions=expected, panel_rows=in_run)
+        self._logger.info("Computed signals vectorised, ahead of the run",
+                          signals=sorted(computed), instruments=len(universe),
+                          bars=len(panel), warmup=self._signals_warmup)
+
+    async def _attach_datasets(self, panel: PricePanel, universe: dict, names: dict) -> PricePanel:
+        """Mount whatever `context.datasets` declares and resolve each as of every bar.
+
+        This is what lets a vectorised signal read fundamentals, filings or disclosures. Those
+        arrive a few times a year rather than once a bar, so each is resolved into the same shape
+        the prices already have -- at every bar, what was known by then -- by
+        :func:`~ziplime.vectorized.signals.as_of_panel`, which answers the question `data.current`
+        answers at one bar for the whole history at once.
+
+        The resolution the source declares is carried across rather than guessed: a source that
+        republishes revisions coalesces by column, and reading it by row instead silently drops
+        most of what it holds.
+        """
+        declared = getattr(self, "datasets", None)
+        if not declared:
+            return panel
+        if not isinstance(declared, dict):
+            raise TypeError(
+                f"context.datasets has to be a dict of name -> source, got "
+                f"{type(declared).__name__}.")
+
+        calendar = self.clock.trading_calendar
+        end_stamp = calendar.session_close(self.clock.end_session).tz_convert(calendar.tz)
+
+        datasets = {}
+        for label, address in declared.items():
+            source = await self.current_data.resolve_data_source(address)
+            # Everything the source holds, not just the run's window. WARMUP governs how much
+            # price history an indicator gets; an as-of view needs something different and
+            # unbounded -- the statement current on the first bar is whichever one was filed last
+            # before it, which may be eleven months earlier, and a window that starts at the first
+            # bar simply does not contain it. Fetching from the source's own start covers it.
+            reach = end_stamp.to_pydatetime() - _as_datetime(
+                getattr(source, "start_date", None), calendar.tz, default=datetime.date(1900, 1, 1))
+            rows = await source.get_data_by_window(
+                fields=None, since=reach + datetime.timedelta(days=1),
+                end_date=end_stamp.to_pydatetime(), frequency=self.clock.emission_rate,
+                assets=frozenset(universe.values()), include_end_date=True)
+            if rows.is_empty():
+                self._logger.warning(
+                    "Dataset has no rows over the run's window, so every signal built from it "
+                    "will be empty", dataset=label, source=getattr(source, "name", str(source)))
+            coalesce = str(getattr(getattr(source, "resolution", None), "value", "")) == "coalesce"
+            datasets[label] = as_of_panel(rows, names=names, index=panel.index,
+                                          coalesce=coalesce)
+            self._logger.info("Resolved a dataset as of every bar", dataset=label,
+                              rows=len(rows), coalesce=coalesce, fields=datasets[label].fields)
+
+        return PricePanel({field: getattr(panel, field) for field in panel.fields},
+                          panel.index, datasets)
+
+    def _trim_to_warmup(self, panel: PricePanel, first_session: datetime.date) -> PricePanel:
+        """Keep the run's bars plus exactly the declared warm-up ahead of them."""
+        positions = [ix for ix, stamp in enumerate(panel.index) if stamp.date() >= first_session]
+        if not positions:
+            raise ValueError(
+                f"The bundle has no bars on or after {first_session}, the run's first session.")
+        if positions[0] < self._signals_warmup:
+            # Worth saying out loud: an indicator that never fills its window produces NaN, and a
+            # comparison against NaN is False rather than an error, so the strategy simply does
+            # not trade early and nothing in the output says why.
+            self._logger.warning(
+                "The bundle holds less history before the run than WARMUP asks for, so indicators "
+                "start the run part-way through their windows",
+                warmup_requested=self._signals_warmup, warmup_available=positions[0],
+                first_session=str(first_session))
+        start = max(0, positions[0] - self._signals_warmup)
+        if start == 0:
+            return panel
+        kept = {field: getattr(panel, field).iloc[start:] for field in panel.fields}
+        return PricePanel(kept, panel.index[start:])
     async def calculate_capital_changes(
             self, dt: datetime.datetime, emission_rate: datetime.timedelta, is_interday: bool,
             portfolio_value_adjustment: float = 0.00
