@@ -90,6 +90,17 @@ optional = true
 numba = "^0.67"
 
 
+[tool.poetry.group.mcp]
+# The local MCP server -- see ziplime.mcp. Optional: nothing in the core imports it, and an
+# install that never speaks MCP does not carry it.
+#
+# The official `mcp` SDK, and not `fastmcp`, is not a preference. `lime-trader-sdk` pins
+# attrs<23.0.0; `fastmcp` pulls `cyclopts`, which needs attrs>=23.1.0, and pip refuses the pair
+# outright. `mcp` does not depend on attrs at all.
+optional = true
+
+[tool.poetry.group.mcp.dependencies]
+mcp = "^2.2.0"
 
 
 [tool.poetry.group.docs.dependencies]

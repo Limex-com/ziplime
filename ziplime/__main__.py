@@ -1,500 +1,477 @@
+"""The ``ziplime`` command line.
+
+Four things, in the order anyone actually does them:
+
+1. ``ziplime providers`` -- which data connectors this install has, and which are configured.
+2. ``ziplime ingest-assets`` -- reference data. Nothing else works before this: a bundle keys its
+   bars by ``sid``, and a sid only exists once the instrument is in the asset database.
+3. ``ziplime ingest`` -- the bars themselves, into a named bundle.
+4. ``ziplime run`` -- a backtest over that bundle.
+
+Every command drives the same entry points the Python API and ``examples/`` use --
+:func:`ziplime.core.ingest_data.ingest_market_data` and
+:func:`ziplime.core.run_simulation.run_simulation` -- rather than reaching into the engine itself.
+That is deliberate: the previous version of this file called four internal constructors directly
+and every one of them had moved on without it, so ``run`` and ``ingest`` had been raising
+``TypeError`` on their first line for some time while ``--help`` kept working.
+"""
 import asyncio
-import datetime
+
+import importlib.metadata
 import logging
-import os
+import sys
 from pathlib import Path
 
 import asyncclick as click
 
-from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES
-from ziplime.assets.repositories.sqlalchemy_adjustments_repository import SqlAlchemyAdjustmentRepository
-from ziplime.assets.repositories.sqlalchemy_asset_repository import SqlAlchemyAssetRepository
-from ziplime.constants.fundamental_data import FUNDAMENTAL_DATA_COLUMNS
-from ziplime.data.services.bundle_service import BundleService
-from ziplime.data.services.file_system_bundle_registry import FileSystemBundleRegistry
-from ziplime.data.services.limex_hub_data_source import LimexHubDataSource
-from ziplime.data.services.file_system_delta_lake_bundle_storage import FileSystemDeltaLakeBundleStorage
-from ziplime.domain.benchmark_spec import BenchmarkSpec
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.core.ingest_data import get_asset_service, ingest_assets, ingest_market_data
+from ziplime.core.run_simulation import run_simulation
+from ziplime.data.data_sources.registry import (
+    MissingProviderCredentials, UnknownDataProvider, list_providers, provider_names,
+)
 from ziplime.domain.data_frequency import DataFrequency
-from ziplime.finance.commission import DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE, DEFAULT_PER_CONTRACT_COST, PerContract, \
-    DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE, DEFAULT_PER_SHARE_COST, PerShare
-from ziplime.finance.constants import FUTURE_EXCHANGE_FEES_BY_SYMBOL
-from ziplime.finance.domain.simulation_paremeters import SimulationParameters
-from ziplime.finance.metrics import default_metrics
+from ziplime.finance.commission import PerShare
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
-from ziplime.finance.slippage.slippage_model import DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT
-from ziplime.finance.slippage.volatility_volume_share import VolatilityVolumeShare
-from ziplime.gens.domain.simulation_clock import SimulationClock
-from ziplime.exchanges.lime_trader_sdk.lime_trader_sdk_exchange import LimeTraderSdkExchange
-from ziplime.exchanges.simulation_exchange import SimulationExchange
-from ziplime.utils.date_utils import strip_time_and_timezone_info
-from ziplime.utils.run_algo import run_algorithm
-from exchange_calendars import get_calendar as ec_get_calendar
+from ziplime.utils.bundle_utils import (
+    get_asset_data_source, get_bundle_service, get_market_data_source,
+)
+from ziplime.utils.calendar_utils import get_calendar
 
-from asyncclick import DateTime
-from ziplime.utils.cli import Timestamp
+#: Where bundles and the asset database live unless told otherwise.
+DEFAULT_STORAGE = Path(Path.home(), ".ziplime", "data")
+DEFAULT_ASSET_DB = Path(Path.home(), ".ziplime", "assets.sqlite")
 
-from ziplime.utils.bundle_utils import get_fundamental_data_provider, get_data_source, \
-    provider_names
+#: Date formats every date option accepts.
+DATE_FORMATS = ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S")
 
-
-def validate_date_range(date_min: datetime.datetime, date_max: datetime.datetime):
-    def _validate_date_range(ctx, param, value):
-        if not date_min < value.replace(tzinfo=datetime.timezone.utc) < date_max:
-            raise click.BadParameter(f"Must be between {date_min} and {date_max}")
-        return value
-
-    return _validate_date_range
+FREQUENCIES = [frequency.value for frequency in DataFrequency]
 
 
-@click.group()
+def storage_option(function):
+    return click.option(
+        "--bundle-storage-path", default=str(DEFAULT_STORAGE), show_default=True,
+        help="Where bundles are stored.")(function)
+
+
+def asset_db_option(function):
+    return click.option(
+        "--asset-db", default=str(DEFAULT_ASSET_DB), show_default=True,
+        help="Asset database. Instruments have to be ingested into it before any bundle can "
+             "reference them.")(function)
+
+
+async def _resolve(asset_service, symbols: str, asset_type: AssetType) -> list:
+    """Turn ``TICKER`` or ``TICKER@MIC`` into stored listings, or fail saying which one is missing.
+
+    Resolving up front matters for more than error messages. A ticker is unique only within an
+    asset class and often not even then -- ``T`` is a New York listing and a Moscow one -- so the
+    listings, not the strings, are what the rest of the pipeline should be handed. It also keeps
+    the MIC out of the download: ``@MIC`` disambiguates a row in the asset database, and a vendor
+    asked for ``AAPL@XNGS`` looks for a ticker by that name and finds nothing.
+    """
+    from ziplime.assets.entities.asset_symbol import AssetSymbol
+
+    listings = []
+    for symbol in [s.strip() for s in symbols.split(",") if s.strip()]:
+        ticker, _, mic = symbol.partition("@")
+        listing = await asset_service.get_exchange_asset_by_symbol(
+            symbol=AssetSymbol(symbol=ticker, mic=mic or None), asset_type=asset_type)
+        if listing is None:
+            _fail(f"{symbol} is not in the asset database as {asset_type.value}.",
+                  "Run `ziplime ingest-assets` first, or check --asset-type.")
+        listings.append(listing)
+    return listings
+
+
+def _fail(message: str, hint: str | None = None) -> None:
+    """Report a problem the way a command line should: on stderr, with what to do next."""
+    click.secho(f"error: {message}", fg="red", err=True)
+    if hint:
+        click.secho(f"hint: {hint}", fg="yellow", err=True)
+    raise SystemExit(1)
+
+
+@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.version_option(importlib.metadata.version("ziplime"), "-V", "--version",
+                      prog_name="ziplime")
+@click.option("-v", "--verbose", is_flag=True, help="Log at DEBUG rather than INFO.")
 @click.pass_context
-async def main(ctx):
-    """Top level ziplime entry point."""
-    # install a logging handler before performing any other operations
+async def main(ctx, verbose):
+    """Ingest market data and run backtests.
+
+    Start with `ziplime providers` to see what this install can read, then `ziplime ingest-assets`
+    to populate the asset database -- everything else depends on it.
+    """
     logging.basicConfig(
-        format="[%(asctime)s-%(levelname)s][%(name)s]\n %(message)s",
-        level=logging.INFO,
+        format="[%(asctime)s %(levelname)s] %(message)s",
+        level=logging.DEBUG if verbose else logging.INFO,
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
 
 
-@main.command(context_settings=dict(
-))
-@click.option(
-    "-b",
-    "--bundle",
-    help="The data bundle to ingest.",
-)
-@click.option(
-    "-c",
-    "--trading-calendar",
-    help="Default calendar to use.",
-)
-@click.option(
-    "--start-date",
-    type=DateTime(),
-    callback=validate_date_range(date_min=datetime.datetime(year=1800,
-                                                            month=1,
-                                                            day=1,
-                                                            tzinfo=datetime.timezone.utc
-                                                            ),
-                                 date_max=datetime.datetime.now(tz=datetime.timezone.utc),
-                                 )
-)
-@click.option(
-    "--end-date",
-    type=DateTime(),
-    callback=validate_date_range(date_min=datetime.datetime(year=1800,
-                                                            month=1,
-                                                            day=1,
-                                                            tzinfo=datetime.timezone.utc
-                                                            ),
-                                 date_max=datetime.datetime.now(tz=datetime.timezone.utc),
-                                 )
-)
-@click.option(
-    "--frequency",
-    default="1d",
-    type=click.Choice([df.value for df in DataFrequency]),
-)
-@click.option("-s", '--symbols')
-@click.option('--fundamental-data')
-@click.option(
-    "--show-progress/--no-show-progress",
-    default=True,
-    help="Print progress information to the terminal.",
-)
-@click.option(
-    "--historical-market-data-provider",
-    # Choices come from the connector registry, so a build without a connector does not offer it.
-    type=click.Choice(provider_names()),
-    default="yahoo",
-    help="Data connector to read historical market data from",
-    show_default=True,
-)
-@click.option(
-    "--fundamental-data-provider",
-    type=click.Choice(['limex-hub', ]),
-    default="limex-hub",
-    help="Fundamental data provider",
-    show_default=True,
-)
-@click.option(
-    "--skip-fundamental-data",
-    default=False,
-    is_flag=True,
-    help="If passed, fundamental data won't be ingested.",
-)
-@click.option(
-    "--bundle-storage-path",
-    default=Path(Path.home(), ".ziplime", "data"),
-    show_default=True,
-    help="Path to the bundle storage on filesystem.",
-)
-@click.pass_context
-async def ingest(ctx, bundle, start_date, end_date, frequency, symbols, fundamental_data, show_progress,
-                 trading_calendar,
-                 historical_market_data_provider,
-                 fundamental_data_provider,
-                 skip_fundamental_data,
-                 bundle_storage_path,
-                 ):
-    """Top level ziplime entry point."""
-    symbols_parsed = symbols.split(',') if symbols else None
-    if skip_fundamental_data:
-        fundamental_data_list = set()
-    else:
-        fundamental_data_list = fundamental_data.split(",") if fundamental_data else None
-    # install a logging handler before performing any other operations
-    fundamental_data_list_cols = fundamental_data_list if fundamental_data_list is not None else [
-        col.name for col in
-        FUNDAMENTAL_DATA_COLUMNS
-    ]
-    fundamental_data_provider_instance = get_fundamental_data_provider(code=fundamental_data_provider)
-    fundamental_data_column_names = fundamental_data_provider_instance.get_fundamental_data_column_names(
-        fundamental_data_fields=set(fundamental_data_list_cols))
-    fundamental_data_cols = (
-        [
-            col
-            for col in FUNDAMENTAL_DATA_COLUMNS
-            if col.name in fundamental_data_column_names
-        ]
-        if fundamental_data_list is not None
-        else FUNDAMENTAL_DATA_COLUMNS
-    )
-    bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
-    bundle_service = BundleService(bundle_registry=bundle_registry)
-    bundle_storage = FileSystemDeltaLakeBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
-    data_bundle_source = LimexHubDataSource.from_env()
-
-    calendar = ec_get_calendar(trading_calendar, start=start_date - datetime.timedelta(days=30))
-
-    bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
-    assets_repository = SqlAlchemyAssetRepository(base_storage_path=bundle_storage_path,
-                                                  bundle_name=bundle,
-                                                  bundle_version=bundle_version,
-                                                  future_chain_predicates=CHAIN_PREDICATES)
-    adjustments_repository = SqlAlchemyAdjustmentRepository(base_storage_path=bundle_storage_path,
-                                                            bundle_name=bundle,
-                                                            bundle_version=bundle_version)
-
-    await bundle_service.ingest_bundle(
-        date_start=start_date.replace(tzinfo=calendar.tz),
-        date_end=end_date.replace(tzinfo=calendar.tz),
-        bundle_storage=bundle_storage,
-        data_bundle_source=data_bundle_source,
-        frequency=DataFrequency(frequency).to_timedelta(),
-        symbols=symbols_parsed,
-        name=bundle,
-        bundle_version=bundle_version,
-        trading_calendar=calendar,
-        assets_repository=assets_repository,
-        adjustments_repository=adjustments_repository,
-        forward_fill_missing_ohlcv_data=True
-    )
-
-
-@main.command(context_settings=dict(
-    ignore_unknown_options=True,
-    allow_extra_args=True,
-))
-@click.option(
-    "--bundle-storage-path",
-    default=Path(Path.home(), ".ziplime", "data"),
-    show_default=True,
-    help="Path to the bundle storage on filesystem.",
-)
-@click.option(
-    "-b",
-    "--bundle",
-    metavar="BUNDLE-NAME",
-    show_default=True,
-    help="The data bundle to clean.",
-)
-@click.option(
-    "-e",
-    "--before",
-    type=Timestamp(),
-    help="Clear all data before TIMESTAMP."
-         " This may not be passed with -k / --keep-last",
-)
-@click.option(
-    "-a",
-    "--after",
-    type=Timestamp(),
-    help="Clear all data after TIMESTAMP"
-         " This may not be passed with -k / --keep-last",
-)
-@click.option(
-    "-k",
-    "--keep-last",
-    type=int,
-    metavar="N",
-    help="Clear all but the last N downloads."
-         " This may not be passed with -e / --before or -a / --after",
-)
-@click.pass_context
-async def clean(ctx, bundle_storage_path, bundle, before, after, keep_last):
-    """Top level ziplime entry point."""
-
-    bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
-
-    bundle_service = BundleService(bundle_registry=bundle_registry)
-    await bundle_service.clean(bundle_name=bundle, after=after, before=before,
-                               keep_last=keep_last)
-
-
-@main.command(context_settings=dict(
-    ignore_unknown_options=True,
-    allow_extra_args=True,
-))
-@click.option(
-    "--bundle-storage-path",
-    default=Path(Path.home(), ".ziplime", "data"),
-    show_default=True,
-    help="Path to the bundle storage on filesystem.",
-)
-@click.pass_context
-async def bundles(ctx, bundle_storage_path):
-    """Top level ziplime entry point."""
-    bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
-
-    for bundle in await bundle_registry.list_bundles():
-        click.echo(f"{bundle["name"]} {bundle["version"]} - {bundle['timestamp']}")
+# -- providers ---------------------------------------------------------------------------------
 
 
 @main.command()
-@click.option(
-    "-f",
-    "--algofile",
-    default=None,
-    type=click.File("r"),
-    help="The file that contains the algorithm to run.",
-)
-@click.option(
-    "--emission-rate",
-    type=click.Choice([df.value for df in DataFrequency]),
-    show_default=True,
-    help="Emission rate of the simulation.",
-)
-@click.option(
-    "--capital-base",
-    type=float,
-    help="The starting capital for the simulation.",
-)
-@click.option(
-    "-b",
-    "--bundle",
-    metavar="BUNDLE-NAME",
-    help="The data bundle to use for the simulation.",
-)
-@click.option(
-    "-bf",
-    "--benchmark-file",
-    default=None,
-    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=str),
-    help="The csv file that contains the benchmark returns",
-)
-@click.option(
-    "--benchmark-symbol",
-    default=None,
-    type=click.STRING,
-    help="The symbol of the instrument to be used as a benchmark "
-         "(should exist in the ingested bundle)",
-)
-@click.option(
-    "--benchmark-sid",
-    default=None,
-    type=int,
-    help="The sid of the instrument to be used as a benchmark "
-         "(should exist in the ingested bundle)",
-)
-@click.option(
-    "--no-benchmark",
-    is_flag=True,
-    default=False,
-    help="If passed, use a benchmark of zero returns.",
-)
-@click.option(
-    "-s",
-    "--start-date",
-    type=click.DateTime(),
-    help="The start date of the simulation.",
-)
-@click.option(
-    "-e",
-    "--end-date",
-    type=click.DateTime(),
-    help="The end date of the simulation.",
-)
-@click.option(
-    "-o",
-    "--output",
-    default="-",
-    metavar="FILENAME",
-    show_default=True,
-    help="The location to write the perf data. If this is '-' the perf will"
-         " be written to stdout.",
-)
-@click.option(
-    "--trading-calendar",
-    metavar="TRADING-CALENDAR",
-    default="NYSE",
-    help="The calendar you want to use e.g. XLON. XNYS is the default.",
-)
-@click.option(
-    "--print-algo/--no-print-algo",
-    is_flag=True,
-    default=False,
-    help="Print the algorithm to stdout.",
-)
-@click.option(
-    "--exchange-name",
-    default='LIME',
-    help="The exchange to use for trading.",
-    show_default=True,
-)
-@click.option(
-    "--exchange-type",
-    default='simulation',
-    type=click.Choice(['simulation', 'lime-trader-sdk']),
-    help="The exchange to use for trading.",
-    show_default=True,
-)
-@click.option(
-    "--live-market-data-provider",
-    type=click.Choice(['lime-trader-sdk']),
-    default=None,
-    help="Market data provider for live trading",
-)
-@click.option(
-    "--bundle-storage-path",
-    default=Path(Path.home(), ".ziplime", "data"),
-    show_default=True,
-    help="Path to the bundle storage on filesystem.",
-)
-@click.pass_context
-async def run(
-        ctx,
-        algofile,
-        emission_rate,
-        capital_base,
-        bundle,
-        benchmark_file,
-        benchmark_symbol,
-        benchmark_sid,
-        no_benchmark,
-        start_date,
-        end_date,
-        output,
-        trading_calendar,
-        print_algo,
-        bundle_storage_path,
-        exchange_name: str,
-        exchange_type: str,
-        live_market_data_provider: str | None,
-):
-    """Run a backtest for the given algorithm."""
+@click.option("--configured-only", is_flag=True,
+              help="Show only connectors whose credentials are set.")
+async def providers(configured_only):
+    """List the data connectors this install can use.
 
-    calendar = ec_get_calendar(trading_calendar,
-                               start=strip_time_and_timezone_info(start_date) - datetime.timedelta(days=30))
+    A connector is skipped rather than reported broken when its package is absent, so this is also
+    how you find out whether an optional one is installed. ``env`` names the environment variables
+    it needs; a connector that needs none is always ready.
+    """
+    found = list_providers(configured_only=configured_only)
+    if not found:
+        click.echo("No data providers registered.")
+        return
+    click.echo(f"{'name':<14}{'assets':<8}{'bars':<7}{'ready':<7}{'env':<28}description")
+    click.echo("-" * 110)
+    for provider in found:
+        missing = provider.missing_env()
+        ready = "yes" if provider.is_configured else "no"
+        env = ", ".join(provider.required_env) or "-"
+        click.echo(f"{provider.name:<14}{'yes' if provider.supports_assets else 'no':<8}"
+                   f"{'yes' if provider.supports_market_data else 'no':<7}{ready:<7}{env:<28}"
+                   f"{provider.description[:52]}")
+        if missing:
+            click.secho(f"{'':<36}not set: {', '.join(missing)}", fg="yellow")
 
-    benchmark_spec = BenchmarkSpec(
-        benchmark_returns=None,
-        benchmark_sid=benchmark_sid,
-        benchmark_symbol=benchmark_symbol,
-        benchmark_file=benchmark_file,
-        no_benchmark=no_benchmark,
-    )
-    algotext = None
-    if algofile is not None:
-        algotext = algofile.read()
-    bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
 
-    if exchange_type == "simulation":
-        exchange_class = SimulationExchange(
-            name=exchange_name,
-            equity_slippage=FixedBasisPointsSlippage(),
-            equity_commission=PerShare(
-                cost=DEFAULT_PER_SHARE_COST,
-                min_trade_cost=DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE,
+# -- reference data ----------------------------------------------------------------------------
 
-            ),
-            future_slippage=VolatilityVolumeShare(
-                volume_limit=DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT,
-            ),
-            future_commission=PerContract(
-                cost=DEFAULT_PER_CONTRACT_COST,
-                exchange_fee=FUTURE_EXCHANGE_FEES_BY_SYMBOL,
-                min_trade_cost=DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE
-            ),
-            account_id="simulation_account"
+
+@main.command("ingest-assets")
+@click.option("-p", "--provider", default="yahoo", show_default=True,
+              type=click.Choice(provider_names()),
+              help="Connector to read instrument definitions from.")
+@asset_db_option
+@click.option("--clear", is_flag=True,
+              help="Delete the asset database first. Every stored sid is lost, so any bundle "
+                   "already keyed by one becomes unreadable.")
+async def ingest_assets_command(provider, asset_db, clear):
+    """Load instrument definitions into the asset database.
+
+    This is the prerequisite for everything else. A bundle stores bars against a ``sid``, and a
+    sid is minted here; ingesting bars for a symbol the database has never heard of fails with
+    "Symbols are missing in asset database".
+    """
+    try:
+        source = get_asset_data_source(provider)
+    except MissingProviderCredentials as error:
+        _fail(str(error), "See `ziplime providers` for what each connector needs.")
+    except UnknownDataProvider as error:
+        _fail(str(error))
+
+    asset_service = get_asset_service(db_path=asset_db, clear_asset_db=clear)
+    try:
+        await ingest_assets(asset_service=asset_service, asset_data_source=source)
+        click.secho(f"Assets ingested into {asset_db}", fg="green")
+    finally:
+        await asset_service._asset_repository.engine.dispose()
+
+
+# -- market data -------------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("-b", "--bundle", required=True, help="Name to store the bundle under.")
+@click.option("-s", "--symbols", required=True,
+              help="Comma-separated symbols. A symbol may name its exchange as TICKER@MIC, which "
+                   "is required wherever a ticker is not unique.")
+@click.option("-c", "--trading-calendar", default="XNYS", show_default=True,
+              help="Calendar the sessions come from.")
+@click.option("--start-date", required=True, type=click.DateTime(formats=DATE_FORMATS))
+@click.option("--end-date", required=True, type=click.DateTime(formats=DATE_FORMATS))
+@click.option("-f", "--frequency", default="1d", show_default=True,
+              type=click.Choice(FREQUENCIES), help="Bar interval.")
+@click.option("-p", "--provider", default="yahoo", show_default=True,
+              type=click.Choice(provider_names()), help="Connector to read bars from.")
+@click.option("--asset-type", default=AssetType.EQUITY.value, show_default=True,
+              type=click.Choice([t.value for t in AssetType]),
+              help="Which kind of instrument the symbols name. A ticker is unique only within a "
+                   "kind, so this is what stops futures bars being filed as an equity's.")
+@click.option("--forward-fill/--no-forward-fill", default=True, show_default=True,
+              help="Fill sessions an instrument did not trade with its previous close.")
+@click.option("--merge", is_flag=True, help="Merge into an existing bundle of this name.")
+@storage_option
+@asset_db_option
+async def ingest(bundle, symbols, trading_calendar, start_date, end_date, frequency, provider,
+                 asset_type, forward_fill, merge, bundle_storage_path, asset_db):
+    """Download bars for SYMBOLS and store them as a named bundle.
+
+    Market data only. Fundamentals and other non-bar datasets go through
+    :func:`ziplime.core.ingest_data.ingest_custom_data`, which takes a source object rather than a
+    connector name and so has no useful command-line form.
+
+    Run `ziplime ingest-assets` first: the symbols must already be in the asset database.
+    """
+    calendar = get_calendar(trading_calendar)
+    asset_service = get_asset_service(db_path=asset_db)
+    try:
+        listings = await _resolve(asset_service, symbols, AssetType(asset_type))
+        try:
+            # The listings go to the connector too: it then knows each instrument's exchange
+            # without a metadata lookup per symbol, which on some vendors is rate limited.
+            source = get_market_data_source(provider, assets=listings)
+        except MissingProviderCredentials as error:
+            _fail(str(error), "See `ziplime providers` for what each connector needs.")
+        except UnknownDataProvider as error:
+            _fail(str(error))
+
+        ingested = await ingest_market_data(
+            start_date=start_date.replace(tzinfo=calendar.tz),
+            end_date=end_date.replace(tzinfo=calendar.tz),
+            trading_calendar=trading_calendar,
+            bundle_name=bundle,
+            # Plain tickers: the MIC was for resolving the listing, and a vendor asked for
+            # "AAPL@XNGS" returns nothing at all.
+            symbols=[listing.symbol for listing in listings],
+            data_frequency=DataFrequency(frequency).to_timedelta(),
+            data_bundle_source=source,
+            asset_service=asset_service,
+            merge=merge,
+            forward_fill_missing_ohlcv_data=forward_fill,
+            bundle_storage_path=bundle_storage_path,
+            asset_type=AssetType(asset_type),
+            assets=listings,
         )
-    elif exchange_type == "lime-trader-sdk":
-        exchange_class = LimeTraderSdkExchange(
-            name=exchange_name,
-            lime_sdk_credentials_file=None
-        )
+        if ingested is None:
+            _fail(f"{provider} returned no bars for {symbols} between "
+                  f"{start_date:%Y-%m-%d} and {end_date:%Y-%m-%d}, so nothing was stored.",
+                  "Check the symbols and the window against what the connector covers.")
+        click.secho(f"Ingested {bundle} from {provider}: "
+                    f"{len(listings)} instrument(s), {ingested.data.height:,} bars", fg="green")
+    except ValueError as error:
+        _fail(str(error))
+    finally:
+        await asset_service._asset_repository.engine.dispose()
 
-    else:
-        raise Exception("Not valid exchange.")
-    max_shares = int(1e11)
 
-    sim_params = SimulationParameters(
-        start_date=start_date.replace(tzinfo=calendar.tz),
-        end_date=end_date.replace(tzinfo=calendar.tz),
-        trading_calendar=calendar,
-        capital_base=capital_base,
-        emission_rate=DataFrequency(emission_rate).to_timedelta(),
-        max_shares=max_shares,
-        exchange=exchange_class,
-        bundle_name=bundle
-    )
+# -- bundles -----------------------------------------------------------------------------------
 
-    clock = SimulationClock(
-        sessions=sim_params.sessions,
-        market_opens=sim_params.market_opens,
-        market_closes=sim_params.market_closes,
-        before_trading_start_minutes=sim_params.before_trading_start_minutes,
-        emission_rate=sim_params.emission_rate,
-        timezone=sim_params.trading_calendar.tz
-    )
-    timedelta_diff_from_current_time = datetime.datetime.now(tz=sim_params.trading_calendar.tz) - start_date.replace(
-        tzinfo=sim_params.trading_calendar.tz)
 
-    # clock = RealtimeClock(
-    #     sessions=sim_params.sessions,
-    #     market_opens=sim_params.market_opens,
-    #     market_closes=sim_params.market_closes,
-    #     before_trading_start_minutes=sim_params.before_trading_start_minutes,
-    #     emission_rate=sim_params.emission_rate,
-    #     timezone=sim_params.trading_calendar.tz,
-    #     timedelta_diff_from_current_time=-timedelta_diff_from_current_time
-    # )
+@main.command()
+@storage_option
+async def bundles(bundle_storage_path):
+    """List stored bundles, newest version of each first."""
+    registry = get_bundle_service(bundle_storage_path=bundle_storage_path)._bundle_registry
+    stored = await registry.list_bundles()
+    if not stored:
+        click.echo(f"No bundles in {bundle_storage_path}.")
+        return
 
-    result = await run_algorithm(
-        algofile=getattr(algofile, "name", "<algorithm>"),
-        algotext=algotext,
-        print_algo=print_algo,
-        metrics_set=default_metrics(),
-        benchmark_spec=benchmark_spec,
-        custom_loader=None,
-        missing_data_bundle_source=get_data_source(
-            live_market_data_provider) if live_market_data_provider is not None else None,
-        bundle_registry=bundle_registry,
-        simulation_params=sim_params,
-        clock=clock
+    by_name: dict[str, list] = {}
+    for entry in stored:
+        by_name.setdefault(entry["name"], []).append(entry)
+    click.echo(f"{'bundle':<32}{'versions':>9}  latest")
+    click.echo("-" * 70)
+    for name in sorted(by_name):
+        versions = sorted(by_name[name], key=lambda item: item["timestamp"], reverse=True)
+        click.echo(f"{name:<32}{len(versions):>9}  {versions[0]['timestamp']}")
+        for entry in versions[1:]:
+            click.secho(f"{'':<41}{entry['timestamp']}", fg="bright_black")
 
-    )
 
-    if output == "-":
-        click.echo(str(result))
-    elif output != os.devnull:  # make the ziplime magic not write any data
-        # TODO: test this
-        result.to_pickle(output)
+@main.command()
+@click.option("-b", "--bundle", required=True, help="Bundle to clean.")
+@click.option("-e", "--before", type=click.DateTime(formats=DATE_FORMATS),
+              help="Delete versions created before this. Not with --keep-last.")
+@click.option("-a", "--after", type=click.DateTime(formats=DATE_FORMATS),
+              help="Delete versions created after this. Not with --keep-last.")
+@click.option("-k", "--keep-last", type=int, metavar="N",
+              help="Keep the newest N versions and delete the rest. Not with --before/--after.")
+@storage_option
+async def clean(bundle, before, after, keep_last, bundle_storage_path):
+    """Delete stored versions of a bundle.
+
+    The three selectors are mutually exclusive, and this refuses rather than picking one. The help
+    has said so since the command was written but nothing enforced it, so passing both silently
+    applied whichever the service happened to check first -- on a command whose whole job is
+    deleting data.
+    """
+    if keep_last is not None and (before is not None or after is not None):
+        _fail("--keep-last cannot be combined with --before or --after.",
+              "They select versions in different ways; pick one.")
+    if before is None and after is None and keep_last is None:
+        _fail("Nothing selected, so nothing would be deleted.",
+              "Pass --before, --after or --keep-last.")
+
+    service = get_bundle_service(bundle_storage_path=bundle_storage_path)
+    try:
+        deleted = await service.clean(bundle_name=bundle, before=before, after=after,
+                                      keep_last=keep_last)
+    except ValueError as error:
+        _fail(str(error), "See `ziplime bundles` for what is stored.")
+
+    # Saying which versions went, rather than "Cleaned": this deletes data, and a command that
+    # deleted nothing looked exactly like one that deleted everything.
+    if not deleted:
+        click.secho(f"No version of {bundle} matched; nothing was deleted.", fg="yellow")
+        return
+    click.secho(f"Deleted {len(deleted)} version(s) of {bundle}:", fg="green")
+    for version in deleted:
+        click.echo(f"  {version}")
+
+
+# -- backtest ----------------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("-f", "--algofile", required=True, type=click.Path(exists=True, dir_okay=False),
+              help="Python file with `initialize` and `handle_data`.")
+@click.option("-b", "--bundle", required=True, help="Bundle to run over.")
+@click.option("--bundle-version", default=None, help="Version to load. Defaults to the newest.")
+@click.option("-s", "--symbols", required=True,
+              help="Comma-separated symbols to load from the bundle, as TICKER or TICKER@MIC.")
+@click.option("--start-date", required=True, type=click.DateTime(formats=DATE_FORMATS))
+@click.option("--end-date", required=True, type=click.DateTime(formats=DATE_FORMATS))
+@click.option("-c", "--trading-calendar", default="XNYS", show_default=True)
+@click.option("--emission-rate", default="1d", show_default=True, type=click.Choice(FREQUENCIES),
+              help="How often the strategy is called.")
+@click.option("--capital-base", default=100_000.0, show_default=True, type=float)
+@click.option("--asset-type", default=AssetType.EQUITY.value, show_default=True,
+              type=click.Choice([t.value for t in AssetType]))
+@click.option("--benchmark-symbol", default=None,
+              help="Instrument to measure against, as TICKER@MIC. Omitted means a zero-return "
+                   "benchmark, which is a statement about the run, not a missing value.")
+@click.option("--max-leverage", default=1.0, show_default=True, type=float)
+@click.option("--same-bar-execution/--next-bar-execution", default=False, show_default=True,
+              help="Same-bar execution fills an order at the close of the bar the decision was "
+                   "taken on -- a price the market had not printed yet. Off by default here "
+                   "because a look-ahead should be asked for, not inherited.")
+@click.option("--fill-price", default="close", show_default=True,
+              type=click.Choice(["open", "close", "high", "low"]),
+              help="Which price of the bar an order fills at.")
+@click.option("--commission-per-share", default=0.0, show_default=True, type=float)
+@click.option("--slippage-bps", default=5.0, show_default=True, type=float,
+              help="Fixed slippage in basis points. Fills are also capped at a tenth of the "
+                   "bar's volume. Pass 0 for no price impact -- a control run, not a realistic "
+                   "one.")
+@click.option("--stop-on-error", is_flag=True,
+              help="Raise on the first error instead of collecting them.")
+@click.option("--print-algo", is_flag=True, help="Print the strategy source before running.")
+@click.option("-o", "--output", default=None, type=click.Path(dir_okay=False),
+              help="Write the performance table here. `.csv` writes CSV, anything else a pickle. "
+                   "Without it, a summary is printed.")
+@storage_option
+@asset_db_option
+async def run(algofile, bundle, bundle_version, symbols, start_date, end_date, trading_calendar,
+              emission_rate, capital_base, asset_type, benchmark_symbol, max_leverage,
+              same_bar_execution, fill_price, commission_per_share, slippage_bps, stop_on_error,
+              print_algo, output, bundle_storage_path, asset_db):
+    """Run a backtest over an ingested bundle.
+
+    The symbols are named explicitly rather than taken from the bundle: loading a bundle checks
+    each instrument for missing sessions, and it can only do that against the instruments you say
+    you expect. A bundle holding more than you name is fine -- the extra is simply not loaded.
+    """
+    calendar = get_calendar(trading_calendar)
+    start = start_date.replace(tzinfo=calendar.tz)
+    end = end_date.replace(tzinfo=calendar.tz)
+    if start >= end:
+        _fail(f"--start-date {start_date:%Y-%m-%d} is not before --end-date {end_date:%Y-%m-%d}.")
+
+    asset_service = get_asset_service(db_path=asset_db)
+    try:
+        listings = await _resolve(asset_service, symbols, AssetType(asset_type))
+        service = get_bundle_service(bundle_storage_path=bundle_storage_path)
+        try:
+            market_data, missing = await service.load_bundle(
+                bundle_name=bundle, bundle_version=bundle_version, assets=listings,
+                start_date=start, end_date=end,
+                frequency=DataFrequency(emission_rate).to_timedelta(),
+                asset_service=asset_service)
+        except ValueError as error:
+            _fail(str(error), "See `ziplime bundles` for what is stored.")
+        if missing:
+            for listing, (first, last) in missing.items():
+                click.secho(f"warning: {listing.symbol}@{listing.mic} has no data "
+                            f"{first} .. {last}", fg="yellow", err=True)
+
+        result = await run_simulation(
+            start_date=start, end_date=end, trading_calendar=trading_calendar,
+            emission_rate=DataFrequency(emission_rate).to_timedelta(),
+            total_cash=capital_base, market_data_source=market_data, custom_data_sources=[],
+            algorithm_file=algofile, stop_on_error=stop_on_error, asset_service=asset_service,
+            benchmark_asset_symbol=benchmark_symbol, benchmark_returns=None,
+            equity_commission=PerShare(cost=commission_per_share, min_trade_cost=0.0),
+            equity_slippage=FixedBasisPointsSlippage(basis_points=slippage_bps),
+            max_leverage=max_leverage, same_bar_execution=same_bar_execution,
+            price_used_in_order_execution=fill_price, print_algo=print_algo)
+    finally:
+        await asset_service._asset_repository.engine.dispose()
+
+    _report(result, output)
     return result
 
 
+# -- mcp ---------------------------------------------------------------------------------------
+
+
+@main.command()
+async def mcp():
+    """Run the local MCP server, speaking MCP over stdin and stdout.
+
+    For a client that launches a server as a subprocess -- Claude Code, Claude Desktop, Cursor.
+    It exposes the same ingest and backtest path the commands above do, so a model drives this
+    install rather than a hosted one. Nothing it exposes places a real order.
+
+    Not a command to run by hand: with no client on the other end it waits on stdin forever.
+    """
+    try:
+        from ziplime.mcp import serve_stdio
+    except ImportError as error:
+        _fail(f"The MCP server needs the `mcp` package, which is not installed ({error}).",
+              "pip install mcp, or poetry install --with mcp.")
+    # Awaited, not `ziplime.mcp.main()`: that one calls `anyio.run()` and this command is
+    # already inside asyncclick's loop, so it would raise "Already running asyncio in this
+    # thread" -- which reaches the client as a server that closed the connection.
+    await serve_stdio()
+
+
+def _report(result, output: str | None) -> None:
+    """Print what the run did, and write the table if asked.
+
+    ``str(result)`` used to be the whole output, which is a dataclass repr -- several screens of
+    nested frames and no answer to "what happened".
+    """
+    perf = result.perf
+    errors = list(result.errors or [])
+    if output:
+        path = Path(output)
+        if path.suffix == ".csv":
+            perf.to_csv(path)
+        else:
+            perf.to_pickle(path)
+        click.secho(f"Wrote {len(perf)} rows to {path}", fg="green")
+
+    if perf.empty:
+        click.secho("The run recorded no sessions.", fg="red", err=True)
+    else:
+        total = float(perf["algorithm_period_return"].iloc[-1])
+        drawdown = float(perf["max_drawdown"].iloc[-1])
+        trades = sum(len(row) for row in perf["transactions"])
+        click.echo()
+        click.echo(f"  sessions      {len(perf)}  ({perf.index[0].date()} .. {perf.index[-1].date()})")
+        click.echo(f"  return        {total:+.2%}")
+        click.echo(f"  max drawdown  {drawdown:.2%}")
+        click.echo(f"  transactions  {trades}")
+        click.echo(f"  final value   {float(perf['portfolio_value'].iloc[-1]):,.2f}")
+
+    if errors:
+        click.echo()
+        click.secho(f"{len(errors)} error(s) during the run:", fg="red", err=True)
+        for error in errors[:5]:
+            click.secho(f"  {error.message[:160]}", fg="red", err=True)
+        if len(errors) > 5:
+            click.secho(f"  ... and {len(errors) - 5} more", fg="red", err=True)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:  # pragma: no cover - interactive only
+        sys.exit(130)
