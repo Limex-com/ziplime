@@ -47,7 +47,7 @@ class QuotationTests(unittest.TestCase):
 
 
 class AccruedInterestTests(unittest.TestCase):
-    """НКД: what the buyer hands the seller on top of the quote."""
+    """Accrued interest: what the buyer hands the seller on top of the quote."""
 
     def setUp(self):
         self.listing = make_bond(coupon_rate=0.08, coupon_frequency=2)

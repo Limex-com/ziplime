@@ -35,7 +35,7 @@ life fits in a test: a coupon every six months, an instalment every year, a rede
 | `ZLB26` | 8.5% semi-annual, repaid in full at maturity | the paying case                            |
 | `ZLZ26` | zero-coupon, same dates as `ZLB26`           | the **non**-paying control                 |
 | `ZLA27` | 11% quarterly, principal in four instalments | amortization                               |
-| `ZLO27` | 12% semi-annual with a put window            | offers (оферта)                            |
+| `ZLO27` | 12% semi-annual with a put window            | put windows                                |
 | `ZLS25` | 9% semi-annual, matures inside the window    | redemption at par                          |
 
 ## What each one shows
@@ -59,7 +59,7 @@ the strategies:
 
 1. **The quote is not the price.** A bond quotes as a percentage of face value, so `98.42` on a
    1000-unit nominal is 984.20. Read as money it understates the position tenfold.
-2. **The buyer pays accrued interest (НКД).** The tape carries the *clean* price; settlement
+2. **The buyer pays accrued interest.** The tape carries the *clean* price; settlement
    happens at the *dirty* one. Over a year of round trips this averages half a coupon per trade.
    Ask `await context.bond_dirty_price(bond, quote)` rather than computing it yourself.
 3. **The principal is not constant.** An amortizing issue repays face value in instalments, so the
@@ -71,7 +71,7 @@ the strategies:
 ```python
 bond   = await context.bond_symbol("ZLB26@XNYS")     # look up a bond listing
 money  = await context.bond_dirty_price(bond, quote) # what one bond costs, in cash
-accrued= await context.accrued_interest(bond)        # НКД per bond today
+accrued= await context.accrued_interest(bond)        # accrued interest per bond today
 face   = await context.bond_face_value(bond)         # principal outstanding today
 events = await context.bond_schedule(bond)           # coupons, amortizations, offers
 cy     = await context.bond_current_yield(bond, quote)

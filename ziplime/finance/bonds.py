@@ -5,7 +5,7 @@ between the tape and the ledger, and all three live here:
 
 #. **Quotation.** Exchanges quote a bond as a percentage of face value, so ``98.42`` on a
    1000-unit nominal is 984.20 per bond.
-#. **Accrued interest (НКД).** Between coupons the buyer owes the seller the part of the coupon
+#. **Accrued interest.** Between coupons the buyer owes the seller the part of the coupon
    that has already accrued. The tape carries the *clean* price; settlement happens at the *dirty*
    one. Over a year of round trips this is not a rounding error -- on an 8% coupon it averages
    4% of face value per trade.
@@ -197,7 +197,7 @@ class BondBook:
         return max(0.0, bond.face_value - repaid)
 
     def accrued_interest(self, bond: Bond, dt) -> float:
-        """Coupon accrued on one bond by ``dt`` (НКД), in the bond's currency.
+        """Coupon accrued on one bond by ``dt``, in the bond's currency.
 
         Zero on a coupon payment date -- the coupon has just been paid and a new period begins --
         and zero for a zero-coupon bond, which accrues nothing to hand to a seller.
@@ -218,7 +218,8 @@ class BondBook:
         """Accrual read straight off the schedule.
 
         Within a coupon period the accrual is linear in elapsed days -- exactly how an exchange
-        publishes НКД -- so no day-count convention is involved once the period is known.
+        publishes accrued interest directly -- so no day-count convention is involved once the
+    period is known.
         """
         dates = [coupon.date for coupon in coupons]
         index = bisect_right(dates, as_of)
@@ -331,7 +332,7 @@ def simple_yield_to_maturity(bond: Bond, book: BondBook, quoted_price: float, dt
 
     ``(remaining coupons + redemption - price paid) / price paid``, annualised over the years left.
     A simple approximation rather than an IRR: it is the number a rouble-bond desk quotes as
-    "простая доходность", and it needs no solver, which keeps it usable inside a bar loop.
+    "simple yield", and it needs no solver, which keeps it usable inside a bar loop.
     Returns 0.0 for a bond already at or past maturity.
     """
     as_of = _as_date(dt)

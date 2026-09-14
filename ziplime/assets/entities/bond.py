@@ -17,7 +17,7 @@ class Bond(Asset):
       percentage of ``face_value``; on most exchanges it is the latter. See
       :class:`~ziplime.assets.domain.price_quotation.PriceQuotation`.
     * **The buyer pays accrued interest.** A bond changes hands at its *clean* price plus the
-      coupon accrued since the last payment (НКД), which goes to the seller. Ignoring it makes
+      coupon accrued since the last payment, which goes to the seller. Ignoring it makes
       every purchase look cheaper and every sale poorer than it was.
     * **The principal is not constant.** An amortizing issue repays face value in instalments, so
       ``face_value`` is the nominal *at issue* and the outstanding amount has to be read from the

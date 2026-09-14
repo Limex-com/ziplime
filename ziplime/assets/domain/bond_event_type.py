@@ -27,7 +27,7 @@ class BondEventType(enum.Enum):
     AMORTIZATION = "AMORTIZATION"
     #: Final repayment of the outstanding face value.
     MATURITY = "MATURITY"
-    #: A put/call window (оферта). Informational: the engine never exercises it for you.
+    #: A put/call window. Informational: the engine never exercises it for you.
     OFFER = "OFFER"
     #: A dividend-like payment some structured issues make; treated as cash, like a coupon.
     DIVIDEND = "DIVIDEND"

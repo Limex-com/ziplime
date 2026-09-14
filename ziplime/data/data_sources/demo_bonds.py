@@ -16,7 +16,7 @@ portfolio:
 ``ZLB26``      Plain fixed-coupon issue, semi-annual. The paying case.
 ``ZLZ26``      Zero-coupon discount issue. The *non*-paying control: same dates, no cash flows.
 ``ZLA27``      Amortizing corporate issue, quarterly coupons, principal repaid in instalments.
-``ZLO27``      Fixed-coupon issue with a put window (оферта) partway through its life.
+``ZLO27``      Fixed-coupon issue with a put window partway through its life.
 ``ZLS25``      Short-dated high-coupon issue that matures inside the example window.
 ============== ================================================================================
 
