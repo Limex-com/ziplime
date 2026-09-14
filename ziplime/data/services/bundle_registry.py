@@ -64,12 +64,16 @@ class BundleRegistry(abc.ABC):
         ...
 
     @abstractmethod
-    async def delete_bundle(self):
-        """
-        Method for deleting a bundle.
+    async def delete_bundle(self, bundle_name: str, bundle_version: str) -> bool:
+        """Remove one version's metadata from the registry.
 
-        Raises:
-            ValueError: If bundle cannot be found
+        Args:
+            bundle_name: Name of the bundle.
+            bundle_version: The version to forget.
+
+        Returns:
+            True when an entry was removed, False when there was none -- so a caller deleting
+            several can report what it actually did rather than what it attempted.
         """
         ...
 

@@ -350,6 +350,26 @@ class FileSystemDeltaLakeBundleStorage(BundleStorage):
     def get_data_bundle_path(self, data_bundle: DataBundle) -> Path:
         return Path(self.base_data_path, "data_bundle", data_bundle.name, data_bundle.version, f"data.delta")
 
+    def get_bundle_version_path(self, bundle_name: str, bundle_version: str) -> Path:
+        """Where one version's data lives -- the parent of its delta table."""
+        return Path(self.base_data_path, "data_bundle", bundle_name, bundle_version)
+
+    async def delete_bundle_data(self, bundle_name: str, bundle_version: str) -> None:
+        import shutil
+
+        path = self.get_bundle_version_path(bundle_name, bundle_version)
+        if not await aiofiles.os.path.isdir(path):
+            return
+        shutil.rmtree(path)
+        # A bundle directory left behind once its last version is gone reads as a bundle that
+        # exists and holds nothing. Removed only when empty, so a concurrent ingest is not lost.
+        parent = path.parent
+        try:
+            if not await aiofiles.os.listdir(parent):
+                await aiofiles.os.rmdir(parent)
+        except OSError:
+            pass
+
     async def to_json(self, data_bundle: DataBundle) -> dict[str, Any]:
         return {
             "base_data_path": self.base_data_path,

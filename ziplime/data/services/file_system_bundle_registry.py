@@ -88,8 +88,12 @@ class FileSystemBundleRegistry(BundleRegistry):
         async with aiofiles.open(bundle_metadata_path, mode="wb") as f:
             await f.write(orjson.dumps(metadata, option=orjson.OPT_INDENT_2))
 
-    async def delete_bundle(self):
-        pass
+    async def delete_bundle(self, bundle_name: str, bundle_version: str) -> bool:
+        path = Path(self.get_bundle_registry_path(), f"{bundle_name}_{bundle_version}.json")
+        if not await aiofiles.os.path.isfile(path):
+            return False
+        await aiofiles.os.remove(path)
+        return True
 
     async def list_bundles(self) -> list[dict[str, Any]]:
         registry_items = []

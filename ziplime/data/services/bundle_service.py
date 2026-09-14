@@ -6,6 +6,8 @@ import polars as pl
 import structlog
 from exchange_calendars import ExchangeCalendar
 
+# Imported for its side effect: a bundle is ingested and checked for gaps against the calendar's
+# sessions, so it has to be the same corrected calendar the simulation will run on.
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from typing import Sequence
 
@@ -76,10 +78,15 @@ class BundleService:
             class_name=metadata["bundle_storage_class"].split(".")[-1],
         )
         storage = await storage_class.from_json(metadata["bundle_storage_data"])
+        # Bounded by the bundle's own span, as *dates*. Two things were wrong here and both are
+        # silent until a bundle is actually loaded: the stored values are bar timestamps, so a
+        # daily bundle's first one is a session close (16:00) and `exchange_calendars` rejects any
+        # bound whose time is not midnight; and `end` read `start_date`, which bounds the calendar
+        # to a single instant and leaves every later session outside it.
         calendar = get_calendar(
             metadata["trading_calendar_name"],
-            start=metadata["start_date"],
-            end=metadata["start_date"],
+            start=metadata["start_date"].date(),
+            end=metadata["end_date"].date(),
         )
         frequency = (
             datetime.timedelta(seconds=int(metadata["frequency_seconds"]))
@@ -632,9 +639,10 @@ class BundleService:
             class_name=bundle_metadata["bundle_storage_class"].split(".")[-1])
 
         bundle_storage = await bundle_storage_class.from_json(bundle_metadata["bundle_storage_data"])
-        tc =  get_calendar(bundle_metadata["trading_calendar_name"],
-                           start=bundle_metadata["start_date"],
-                           end=bundle_metadata["start_date"])
+        # Dates, and the real end -- see the note on the same call in `load_bundle`.
+        tc = get_calendar(bundle_metadata["trading_calendar_name"],
+                          start=bundle_metadata["start_date"].date(),
+                          end=bundle_metadata["end_date"].date())
         if start_date is None:
             start_date = bundle_metadata["start_date"].replace(tzinfo=tc.tz)
         if end_date is None:
@@ -751,23 +759,91 @@ class BundleService:
 
         return missing_data_per_symbol
 
-    async def clean(self, bundle_name: str, before: datetime.datetime = None, after: datetime.datetime = None,
-                    keep_last: bool = None):
-        """
-        Cleans up bundles based on the specified criteria.
+    async def clean(self, bundle_name: str, before: datetime.datetime = None,
+                    after: datetime.datetime = None, keep_last: int = None) -> list[str]:
+        """Delete stored versions of one bundle.
 
-        This method iterates through the bundles in the registry and removes
-        those that match the given parameters.
+        The previous version of this method took the same four arguments, ignored all of them,
+        iterated **every** bundle in the registry rather than the one named, and called
+        ``self._delete_bundle``, which does not exist -- so it raised ``AttributeError`` before
+        touching anything. That is the only reason it never destroyed anyone's data. Both halves
+        are fixed here: the selectors are honoured, and the deletion is real.
+
+        Exactly one selector applies. They pick versions in incompatible ways, and silently
+        applying whichever was checked first is not a behaviour a deleting operation should have.
 
         Args:
-            bundle_name (str): The name of the bundle to clean.
-            before (datetime.datetime, optional): A datetime to filter bundles created before
-                this date. Defaults to None.
-            after (datetime.datetime, optional): A datetime to filter bundles created after
-                this date. Defaults to None.
-            keep_last (bool, optional): A flag to indicate whether to keep the most recent
-                bundle. Defaults to None.
-        """
+            bundle_name: Which bundle. Only versions of this one are considered.
+            before: Delete versions ingested strictly before this instant.
+            after: Delete versions ingested strictly after this instant.
+            keep_last: Keep this many newest versions and delete the rest.
 
-        for bundle in await self._bundle_registry.list_bundles():
-            self._delete_bundle(bundle)
+        Returns:
+            The versions deleted, newest first.
+
+        Raises:
+            ValueError: If no selector is given, or more than one, or the bundle is unknown.
+        """
+        selectors = [before is not None, after is not None, keep_last is not None]
+        if not any(selectors):
+            raise ValueError(
+                "Nothing selected, so nothing would be deleted. Pass before, after or keep_last.")
+        if sum(selectors) > 1:
+            raise ValueError(
+                "before, after and keep_last select versions in different ways; pass one.")
+        if keep_last is not None and keep_last < 0:
+            raise ValueError(f"keep_last cannot be negative, got {keep_last}")
+
+        versions = await self._bundle_registry.list_bundles_by_name(bundle_name=bundle_name)
+        if not versions:
+            raise ValueError(f"Bundle {bundle_name} not found.")
+
+        # `list_bundles_by_name` returns newest first, which is the order `keep_last` counts in.
+        if keep_last is not None:
+            doomed = versions[keep_last:]
+        else:
+            bound = before if before is not None else after
+            doomed = []
+            for entry in versions:
+                ingested = self._ingested_at(entry, bound)
+                if ingested is None:
+                    continue          # an entry with no readable timestamp is never selected
+                if before is not None and ingested < before:
+                    doomed.append(entry)
+                elif after is not None and ingested > after:
+                    doomed.append(entry)
+
+        deleted = []
+        for entry in doomed:
+            version = entry["version"]
+            storage_class: BundleStorage = load_class(
+                module_name='.'.join(entry["bundle_storage_class"].split(".")[:-1]),
+                class_name=entry["bundle_storage_class"].split(".")[-1])
+            storage = await storage_class.from_json(entry["bundle_storage_data"])
+            # Data first. The other order can leave bars on disk that nothing points at, which is
+            # worse than a registry entry whose data is already gone -- that one at least reports.
+            await storage.delete_bundle_data(bundle_name=bundle_name, bundle_version=version)
+            await self._bundle_registry.delete_bundle(bundle_name=bundle_name,
+                                                      bundle_version=version)
+            deleted.append(version)
+            self._logger.info(f"Deleted bundle version {bundle_name}/{version}")
+        return deleted
+
+    @staticmethod
+    def _ingested_at(entry: dict[str, Any], reference: datetime.datetime):
+        """A registry entry's ingest time, made comparable with `reference`.
+
+        Registry timestamps are stored as ``%Y-%m-%dT%H:%M:%SZ`` -- naive text. Comparing that
+        against an aware bound raises `TypeError`, and against a naive one is fine, so the entry is
+        made to match whichever the caller passed rather than assuming a zone.
+        """
+        raw = entry.get("timestamp")
+        if not raw:
+            return None
+        try:
+            stamp = datetime.datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ")
+        except (TypeError, ValueError):
+            return None
+        if reference.tzinfo is not None:
+            return stamp.replace(tzinfo=datetime.timezone.utc)
+        return stamp

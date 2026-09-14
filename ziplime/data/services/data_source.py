@@ -53,6 +53,24 @@ class DataSource:
     def get_dataframe(self) -> pl.DataFrame:
         return self.data
 
+    def last_available_bar(self, sid: int | None = None) -> datetime.datetime | None:
+        """When this source's bars stop -- for one instrument, or across all of them.
+
+        This is the *data's* own edge, not the window the source was declared with. The two differ
+        exactly when something stops trading: a delisted equity keeps a row in the asset database
+        and an ``end_date`` in 2099, and the only place its delisting is recorded is that the bars
+        stop. Everything that has to notice a delisting asks here.
+
+        Args:
+            sid: The instrument to answer for, or ``None`` for the latest bar of any instrument.
+
+        Returns:
+            The instant of the last bar, or ``None`` when this source cannot say -- a live feed, a
+            source that is not bar-shaped, or an instrument it does not carry. ``None`` means "no
+            opinion" and must never be read as "it stopped trading".
+        """
+        return None
+
     def get_data_by_date(self, fields: frozenset[str],
                          from_date: datetime.datetime,
                          to_date: datetime.datetime,

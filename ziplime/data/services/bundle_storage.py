@@ -24,6 +24,21 @@ class BundleStorage:
         ...
 
     @abstractmethod
+    async def delete_bundle_data(self, bundle_name: str, bundle_version: str) -> None:
+        """Remove one stored version's data.
+
+        Deleting the registry entry alone would leave the bars on disk with nothing pointing at
+        them -- invisible to `list_bundles` and still occupying the space the caller was trying to
+        reclaim.
+
+        Args:
+            bundle_name: Name of the bundle.
+            bundle_version: The single version to remove. Never all of them: a caller that wants
+                every version asks for each one.
+        """
+        ...
+
+    @abstractmethod
     async def load_data_bundle(self, data_bundle: DataBundle,
                                assets: list[ExchangeAsset | None] = None,
                                start_date: datetime.datetime | None = None,

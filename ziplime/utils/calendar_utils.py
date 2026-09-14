@@ -3,7 +3,6 @@ from functools import lru_cache
 import pandas as pd
 from exchange_calendars import get_calendar as ec_get_calendar  # get_calendar,
 
-
 @lru_cache
 def get_calendar(*args, start=None, **kwargs):
     if not start:
