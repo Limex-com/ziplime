@@ -22,6 +22,7 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.futures_root import FuturesRoot
+from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.assets.domain.continuous_future import ContinuousFuture
 from ziplime.assets.domain.ordered_contracts import OrderedContracts
 from ziplime.assets.entities.split import Split
@@ -76,6 +77,21 @@ class AssetService:
     async def save_futures_contracts(self, futures_contracts: list[FuturesContract]) -> list[FuturesContract]:
         return await self._asset_repository.save_futures_contracts(futures_contracts=futures_contracts)
 
+    async def save_option_contracts(self, option_contracts: list[OptionContract]) -> list[OptionContract]:
+        return await self._asset_repository.save_option_contracts(option_contracts=option_contracts)
+
+    async def get_exchange_option_contracts(self, underlying_symbol: str,
+                                            expiration_date: datetime.date | None = None,
+                                            mic: str | None = None) -> list[ExchangeAsset]:
+        """Every listed option on ``underlying_symbol``, optionally only those expiring on a date.
+
+        This is the chain a 0DTE strategy asks for once a session; see
+        :class:`~ziplime.finance.options.chain.OptionChain` for the selection helpers that turn
+        the result into "the 25-delta put" or "the wing 5 strikes out".
+        """
+        return await self._asset_repository.get_exchange_option_contracts(
+            underlying_symbol=underlying_symbol, expiration_date=expiration_date, mic=mic)
+
     async def get_futures_roots(self) -> dict[str, FuturesRoot]:
         return await self._asset_repository.get_futures_roots()
 
@@ -118,6 +134,7 @@ class AssetService:
         bonds = await self.save_bonds(bonds=assets_import.bonds)
         await self.save_futures_roots(futures_roots=assets_import.futures_roots)
         await self.save_futures_contracts(futures_contracts=assets_import.futures)
+        await self.save_option_contracts(option_contracts=assets_import.options)
         await self.save_exchange_assets(exchange_assets=assets_import.exchange_assets)
         # Schedules are attached after the bonds exist, and to the *stored* bonds: the entities the
         # caller built still carry ``id=None``, which no event row could point at.
@@ -133,6 +150,7 @@ class AssetService:
             bond_events=len(assets_import.bond_events),
             futures_roots=len(assets_import.futures_roots),
             futures=len(assets_import.futures),
+            options=len(assets_import.options),
             exchange_assets=len(assets_import.exchange_assets),
         )
 

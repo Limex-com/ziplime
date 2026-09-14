@@ -51,6 +51,16 @@ optional = true
 [tool.poetry.group.huggingface.dependencies]
 huggingface-hub = "^1.0"
 
+[tool.poetry.group.options]
+# Black-Scholes prices, implied volatility and Greeks, for the option support in
+# ziplime.finance.options. Optional: nothing in the core imports it, so an install that never
+# prices an option does not carry it. `vollib` is the maintained package; `py_vollib` is its
+# deprecated alias and installing that instead emits a deprecation warning on every import.
+optional = true
+
+[tool.poetry.group.options.dependencies]
+vollib = "^1.0.11"
+
 [tool.poetry.group.vectorbt]
 optional = true
 

@@ -25,6 +25,9 @@ from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.domain.bond_event_type import BondEventType
 from ziplime.assets.domain.day_count import DayCount
 from ziplime.assets.domain.price_quotation import PriceQuotation
+from ziplime.assets.domain.exercise_style import ExerciseStyle
+from ziplime.assets.domain.option_type import OptionType
+from ziplime.assets.domain.premium_style import PremiumStyle
 from ziplime.assets.domain.settlement_type import SettlementType
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.asset_symbol import AssetSymbol
@@ -48,6 +51,7 @@ from ziplime.assets.models.equity_model import EquityModel
 from ziplime.assets.models.exchange_asset_model import ExchangeAssetModel
 from ziplime.assets.models.futures_contract_model import FuturesContractModel
 from ziplime.assets.models.futures_root_symbol_model import FuturesRootSymbolModel
+from ziplime.assets.models.option_contract_model import OptionContractModel
 from ziplime.assets.models.split_model import SplitModel
 from ziplime.assets.models.symbols_universe import SymbolsUniverseModel
 from ziplime.assets.models.symbols_universe_asset import SymbolsUniverseAssetModel
@@ -75,6 +79,7 @@ from ziplime.assets.models.asset_model import AssetModel
 from ziplime.assets.domain.continuous_future import ContinuousFuture
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.assets.entities.futures_root import FuturesRoot
 from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES, OrderedContracts, ADJUSTMENT_STYLES
 from ziplime.assets.domain.continuous_future import ROLL_STYLES
@@ -243,6 +248,31 @@ class SqlAlchemyAssetRepository(AssetRepository):
             tick_size=futures_contract_model.tick_size,
             settlement_type=SettlementType(futures_contract_model.settlement_type),
             margin_currency=futures_contract_model.margin_currency,
+        )
+
+    def _option_contract_model_to_option_contract(
+            self, option_contract_model: OptionContractModel,
+            underlying_asset: Asset | None,
+            underlying_exchange_asset: ExchangeAsset | None = None) -> OptionContract:
+        return OptionContract(
+            id=option_contract_model.id,
+            asset_name=option_contract_model.asset_name,
+            start_date=option_contract_model.start_date,
+            first_traded=option_contract_model.first_traded,
+            end_date=option_contract_model.end_date,
+            auto_close_date=option_contract_model.auto_close_date,
+            isin=option_contract_model.isin,
+            underlying_asset=underlying_asset,
+            underlying_symbol=option_contract_model.underlying_symbol,
+            underlying_exchange_asset=underlying_exchange_asset,
+            option_type=OptionType(option_contract_model.option_type),
+            strike=option_contract_model.strike,
+            expiration_date=option_contract_model.expiration_date,
+            multiplier=option_contract_model.multiplier,
+            tick_size=option_contract_model.tick_size,
+            exercise_style=ExerciseStyle(option_contract_model.exercise_style),
+            settlement_type=SettlementType(option_contract_model.settlement_type),
+            premium_style=PremiumStyle(option_contract_model.premium_style),
         )
 
     async def _asset_ids_by_identity(self) -> dict[tuple[type, str | None, str], int]:
@@ -814,6 +844,145 @@ class SqlAlchemyAssetRepository(AssetRepository):
         }
         return [saved_by_name.get(c.asset_name, c) for c in futures_contracts]
 
+    async def save_option_contracts(self, option_contracts: list[OptionContract]) -> list[OptionContract]:
+        """Persist option contracts, skipping ones already stored under the same name.
+
+        Contracts are identified by ``asset_name``, which for an option is its OCC symbol -- root,
+        expiry, side and strike, so it already names the contract uniquely. That matters more here
+        than for any other asset class: 0DTE lists a fresh chain every session, a run over a month
+        writes several hundred contracts, and re-running it must not write them twice.
+        """
+        if not option_contracts:
+            return []
+        names = [c.asset_name for c in option_contracts]
+        async with self.session_maker() as session:
+            existing_models = list((await session.execute(
+                select(OptionContractModel).where(OptionContractModel.asset_name.in_(names))
+            )).scalars())
+        stored_by_name = {m.asset_name: m for m in existing_models}
+        # A stored contract of the same name must be the *same contract*. Deduplicating on the
+        # name alone is safe only while names encode what they identify -- an OCC symbol carries
+        # the expiry and the strike, so two different contracts cannot share one. A MOEX monthly
+        # code does too; a MOEX *weekly* code does not, and generating one would file three series
+        # under one name and silently trade whichever was stored first, on the wrong expiry.
+        for contract in option_contracts:
+            stored = stored_by_name.get(contract.asset_name)
+            if stored is None:
+                continue
+            if (stored.expiration_date != contract.expiration_date
+                    or float(stored.strike) != float(contract.strike)
+                    or stored.option_type != contract.option_type.value):
+                raise ValueError(
+                    f"{contract.asset_name} is already stored as a "
+                    f"{stored.option_type.lower()} at {stored.strike} expiring "
+                    f"{stored.expiration_date}, but is being written as a "
+                    f"{contract.option_type.value.lower()} at {contract.strike} expiring "
+                    f"{contract.expiration_date}. Two different contracts cannot share a name: "
+                    f"the second would be dropped and the strategy would trade the first without "
+                    f"noticing. Check the venue's symbol scheme -- MOEX weekly codes need a week "
+                    f"suffix to be unique.")
+        new_contracts = [c for c in option_contracts if c.asset_name not in stored_by_name]
+
+        models = []
+        if new_contracts:
+            asset_ids = await self._asset_ids_by_identity()
+            asset_routers = [AssetRouter(id=c.id, asset_type=AssetType.OPTIONS_CONTRACT.value)
+                             for c in new_contracts]
+            async with self.session_maker() as session:
+                session.add_all(asset_routers)
+                await session.commit()
+
+            models = [
+                OptionContractModel(
+                    id=asset_routers[i].id,
+                    underlying_asset_id=(
+                        asset_ids.get((type(c.underlying_asset), c.underlying_asset.isin,
+                                       c.underlying_asset.asset_name))
+                        if c.underlying_asset is not None else None),
+                    underlying_exchange_asset_sid=(c.underlying_exchange_asset.sid
+                                                   if c.underlying_exchange_asset is not None
+                                                   else None),
+                    underlying_symbol=c.underlying_symbol,
+                    option_type=c.option_type.value,
+                    strike=c.strike,
+                    expiration_date=c.expiration_date,
+                    multiplier=c.multiplier,
+                    tick_size=c.tick_size,
+                    exercise_style=c.exercise_style.value,
+                    settlement_type=c.settlement_type.value,
+                    premium_style=c.premium_style.value,
+                    start_date=c.start_date,
+                    first_traded=c.first_traded,
+                    end_date=c.end_date,
+                    asset_name=c.asset_name,
+                    auto_close_date=c.auto_close_date,
+                    isin=c.isin,
+                )
+                for i, c in enumerate(new_contracts)
+            ]
+            async with self.session_maker() as session:
+                session.add_all(models)
+                await session.commit()
+            self._invalidate_asset_cache()
+
+        underlyings = {c.asset_name: c.underlying_asset for c in option_contracts}
+        saved_by_name = {
+            m.asset_name: self._option_contract_model_to_option_contract(
+                option_contract_model=m, underlying_asset=underlyings.get(m.asset_name))
+            for m in list(models) + existing_models
+        }
+        return [saved_by_name.get(c.asset_name, c) for c in option_contracts]
+
+    async def get_exchange_option_contracts(self, underlying_symbol: str,
+                                            expiration_date: datetime.date | None = None,
+                                            mic: str | None = None) -> list[ExchangeAsset]:
+        """Return the listed option contracts on an underlying, ordered by expiry, strike and side.
+
+        With ``expiration_date`` this is the chain lookup a 0DTE strategy makes once a session:
+        *every contract expiring today on this underlying*. Without it, every expiry on the books.
+        """
+        async with self.session_maker() as session:
+            q = select(OptionContractModel.id).where(
+                OptionContractModel.underlying_symbol == underlying_symbol)
+            if expiration_date is not None:
+                q = q.where(OptionContractModel.expiration_date == expiration_date)
+            contract_ids = list((await session.execute(q)).scalars())
+            if not contract_ids:
+                return []
+            q = select(ExchangeAssetModel).where(ExchangeAssetModel.asset_id.in_(contract_ids))
+            if mic is not None:
+                q = q.where(ExchangeAssetModel.mic == mic)
+            listings = list((await session.execute(q)).scalars())
+
+        all_assets = await self.get_all_assets()
+        exchange_assets = [
+            ExchangeAsset(
+                sid=listing.sid,
+                start_date=listing.start_date,
+                first_traded=listing.first_traded,
+                end_date=listing.end_date,
+                auto_close_date=listing.auto_close_date,
+                symbol=listing.symbol,
+                exchange=await self.get_exchange_by_mic(mic=listing.mic),
+                asset=all_assets[listing.asset_id],
+                quote=all_assets[listing.quote_id],
+                external_id=listing.external_id,
+            )
+            for listing in listings
+        ]
+        return sorted(exchange_assets,
+                      key=lambda ea: (ea.asset.expiration_date, ea.asset.strike,
+                                      ea.asset.option_type.value))
+
+    async def get_exchange_option_contracts_by_symbols(self,
+                                                       symbols: list[AssetSymbol]) -> list[ExchangeAsset]:
+        """Look up option listings by ``(symbol, mic)``; a ``None`` mic matches any exchange."""
+        return await self._get_exchange_assets_by_symbols(symbols=symbols, asset_type=OptionContract)
+
+    async def get_exchange_option_contract_by_symbol(self, symbol: AssetSymbol) -> ExchangeAsset | None:
+        contracts = await self.get_exchange_option_contracts_by_symbols(symbols=[symbol])
+        return contracts[0] if contracts else None
+
     async def get_futures_roots(self) -> dict[str, FuturesRoot]:
         """Return every stored futures chain, keyed by root symbol."""
         all_assets = await self.get_all_assets()
@@ -957,6 +1126,20 @@ class SqlAlchemyAssetRepository(AssetRepository):
 
             q_bonds = select(BondModel).options(selectinload(BondModel.asset_router))
             bonds = list((await session.execute(q_bonds)).scalars().all())
+
+            q_options = select(OptionContractModel).options(
+                selectinload(OptionContractModel.asset_router))
+            option_contracts = list((await session.execute(q_options)).scalars().all())
+
+            # The listings the options are written on. One row per underlying, not per contract --
+            # a whole year of 0DTE chains on SPY points at the same single listing. Fetched here
+            # because settling an option at expiry and computing any of its Greeks both need the
+            # underlying's *price*, and only its listing says where to read that.
+            underlying_sids = {c.underlying_exchange_asset_sid for c in option_contracts
+                               if c.underlying_exchange_asset_sid is not None}
+            underlying_listings = list((await session.execute(
+                select(ExchangeAssetModel).where(ExchangeAssetModel.sid.in_(underlying_sids))
+            )).scalars()) if underlying_sids else []
         res = {}
         for asset in equities:
             res[asset.id] = self._equity_model_to_equity(equity_model=asset)
@@ -970,6 +1153,27 @@ class SqlAlchemyAssetRepository(AssetRepository):
         for asset in futures_contracts:
             res[asset.id] = self._futures_contract_model_to_futures_contract(
                 futures_contract_model=asset, root_asset=res.get(asset.root_asset_id)
+            )
+        listings_by_sid = {
+            listing.sid: ExchangeAsset(
+                sid=listing.sid,
+                start_date=listing.start_date,
+                first_traded=listing.first_traded,
+                end_date=listing.end_date,
+                auto_close_date=listing.auto_close_date,
+                symbol=listing.symbol,
+                exchange=await self.get_exchange_by_mic(mic=listing.mic),
+                asset=res.get(listing.asset_id),
+                quote=res.get(listing.quote_id),
+                external_id=listing.external_id,
+            )
+            for listing in underlying_listings
+        }
+        for asset in option_contracts:
+            res[asset.id] = self._option_contract_model_to_option_contract(
+                option_contract_model=asset,
+                underlying_asset=res.get(asset.underlying_asset_id),
+                underlying_exchange_asset=listings_by_sid.get(asset.underlying_exchange_asset_sid),
             )
         self._cached_assets = res
         return res
@@ -1014,6 +1218,8 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 return await self.get_exchange_bond_by_symbol(symbol=symbol)
             case AssetType.FUTURES_CONTRACT:
                 return await self.get_exchange_futures_contract_by_symbol(symbol=symbol)
+            case AssetType.OPTIONS_CONTRACT:
+                return await self.get_exchange_option_contract_by_symbol(symbol=symbol)
             case AssetType.CURRENCY:
                 return await self.get_exchange_currency_by_symbol(symbol=symbol)
             case _:
@@ -1034,6 +1240,8 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 return await self.get_exchange_bonds_by_symbols(symbols=symbols)
             case AssetType.FUTURES_CONTRACT:
                 return await self.get_exchange_futures_contracts_by_symbols(symbols=symbols)
+            case AssetType.OPTIONS_CONTRACT:
+                return await self.get_exchange_option_contracts_by_symbols(symbols=symbols)
             case AssetType.CURRENCY:
                 return await self.get_exchange_currencies_by_symbols(symbols=symbols)
             case _:

@@ -22,6 +22,9 @@ from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.entities.option_contract import OptionContract
+from ziplime.finance.options.chain import OptionChain
+from ziplime.finance.options.greeks import Greeks, greeks, position_greeks, time_to_expiry
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.constants.logging_event import LoggingEvent
 from ziplime.core.algorithm_file import AlgorithmFile
@@ -370,6 +373,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.intraday_metrics = intraday_metrics
         self._logger = structlog.get_logger(__name__)
         self._session_count = 0
+        #: Listings whose bars ran out mid-run, see `data_delistings`.
+        self._data_delistings: dict[ExchangeAsset, datetime.date] = {}
         if self.same_bar_execution:
             self._logger.warning(
                 "LOOK-AHEAD: same-bar execution is on. Orders submitted from handle_data fill in "
@@ -626,6 +631,29 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             return panel
         kept = {field: getattr(panel, field).iloc[start:] for field in panel.fields}
         return PricePanel(kept, panel.index[start:])
+
+    def data_delistings(self) -> dict[ExchangeAsset, datetime.date]:
+        """Instruments the run held whose bars simply stopped, and the session they stopped on.
+
+        Only the unannounced ones. A bond that redeems and a futures contract that expires both
+        say so in their own reference data and leave the book through that; what lands here is the
+        case nothing declares -- an equity delisting, or a bundle that was ingested short. Both
+        look identical from inside the engine and both are worth saying out loud, because the
+        window after them contributes sessions of flat, riskless return to every metric computed
+        over the run.
+        """
+        return dict(self._data_delistings)
+
+    def _record_data_delisting(self, asset: ExchangeAsset, session: datetime.date) -> None:
+        if asset in self._data_delistings:
+            return
+        self._data_delistings[asset] = self.current_data.last_bar_session(asset)
+        self._logger.warning(
+            "No bars after this session; the position is closed at its last mark and the "
+            "listing cannot be traded again",
+            symbol=asset.symbol, mic=asset.mic,
+            last_bar=str(self._data_delistings[asset]), dt=str(session))
+
     async def calculate_capital_changes(
             self, dt: datetime.datetime, emission_rate: datetime.timedelta, is_interday: bool,
             portfolio_value_adjustment: float = 0.00
@@ -1202,6 +1230,111 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             root_symbol=root_symbol, mic=mic)
 
     @api_method
+    async def option_chain(self, underlying: ExchangeAsset | str,
+                           expiration_date: datetime.date | None = None,
+                           mic: str | None = None) -> OptionChain:
+        """The option chain on ``underlying``, as a selectable
+        :class:`~ziplime.finance.options.chain.OptionChain`.
+
+        ``expiration_date`` defaults to **today's session**, which is what makes this the 0DTE
+        call: the chain listed this morning, expiring at this afternoon's close. Pass a date to
+        reach another expiry.
+
+        A 0DTE strategy has to call this every session. The contracts are listed fresh each day and
+        every symbol in the chain changes with it -- ``SPY240614C00523000`` exists for one session
+        and never again -- so there is nothing to resolve once in ``initialize`` and hold onto.
+
+        Raises:
+            ValueError: if no contracts are listed for that underlying and expiry. On a 0DTE chain
+                that usually means the session has no chain rather than that the underlying is
+                wrong.
+        """
+        symbol = underlying.symbol if isinstance(underlying, ExchangeAsset) else underlying
+        if mic is None and isinstance(underlying, ExchangeAsset):
+            mic = underlying.mic
+        session = expiration_date or self.get_datetime().date()
+        listings = await self.asset_service.get_exchange_option_contracts(
+            underlying_symbol=symbol, expiration_date=session, mic=mic)
+        if not listings:
+            raise ValueError(
+                f"No options listed on {symbol} expiring {session}. For a 0DTE chain that is a "
+                f"statement about the session, not about the underlying: the chain exists only on "
+                f"its own expiration day.")
+        return OptionChain.from_listings(listings, expiration_date=session)
+
+    @api_method
+    async def option_symbol(self, symbol: str, mic: str | None = None) -> ExchangeAsset | None:
+        """Resolve one option listing by its OCC symbol, e.g. ``SPY240614C00523000``."""
+        return await self.asset_service.get_exchange_asset_by_symbol(
+            symbol=AssetSymbol(symbol=symbol, mic=mic), asset_type=AssetType.OPTIONS_CONTRACT)
+
+    @api_method
+    def time_to_expiry(self, asset: ExchangeAsset) -> float:
+        """Years left on ``asset``, measured to its expiration session's **close**.
+
+        The number every option formula takes, and on a 0DTE contract the one that moves fastest:
+        at the open it is about 0.0018 years and ninety minutes before the close it is a tenth of
+        that. Measuring in whole days instead -- the obvious shortcut -- overprices an afternoon
+        straddle several-fold.
+
+        Returns 0.0 once the closing bar is reached, which is not an error: it is the instant the
+        contract settles at intrinsic value.
+        """
+        contract = asset.asset
+        if not isinstance(contract, OptionContract):
+            raise TypeError(f"{asset.symbol} is not an option listing.")
+        calendar = self.clock.trading_calendar
+        expires_at = calendar.session_close(contract.expiration_date).tz_convert(
+            calendar.tz).to_pydatetime()
+        return time_to_expiry(self.get_datetime(), expires_at)
+
+    @api_method
+    async def option_greeks(self, asset: ExchangeAsset, volatility: float | None = None,
+                            rate: float = 0.0, amount: float = 0.0) -> Greeks:
+        """Price and Greeks for one option listing at the current bar.
+
+        ``volatility`` defaults to the ``implied_volatility`` column of the contract's own current
+        bar when the data source carries one -- the synthetic feed does, and a real one should --
+        and raises when it does not, rather than substituting a number nobody chose.
+
+        With ``amount`` the figures are scaled to a position of that many contracts (multiplier
+        included), so ``amount=-10`` on a short call gives the delta of the book rather than of one
+        unit.
+        """
+        contract = asset.asset
+        if not isinstance(contract, OptionContract):
+            raise TypeError(f"{asset.symbol} is not an option listing.")
+        underlying = contract.underlying_exchange_asset
+        if underlying is None:
+            raise ValueError(
+                f"{asset.symbol} has no underlying listing stored, so its Greeks cannot be "
+                f"computed: every one of them needs the underlying's price.")
+
+        spot = await self._spot_price(asset=underlying, dt=self.get_datetime())
+        if spot is None:
+            raise ValueError(f"No price for {underlying.symbol} at {self.get_datetime()}.")
+
+        if volatility is None:
+            volatility = await self._implied_volatility_of(asset)
+            if volatility is None:
+                raise ValueError(
+                    f"The data source carries no implied volatility for {asset.symbol}, so pass "
+                    f"volatility= explicitly. Inferring one from the price is possible with "
+                    f"ziplime.finance.options.greeks.implied_volatility, but it should be a "
+                    f"decision the strategy makes rather than a default.")
+
+        per_unit = greeks(contract.option_type, spot, contract.strike,
+                          self.time_to_expiry(asset), rate, volatility)
+        if amount:
+            return position_greeks(per_unit, amount=amount, multiplier=contract.multiplier)
+        return per_unit
+
+    async def _implied_volatility_of(self, asset: ExchangeAsset) -> float | None:
+        """The ``implied_volatility`` of this contract's current bar, if the source carries one."""
+        return await self._read_field(asset=asset, dt=self.get_datetime(),
+                                      field="implied_volatility")
+
+    @api_method
     async def future_symbol(self, symbol: str, mic: str = None) -> FuturesContract | None:
         """Lookup a futures contract with a given symbol.
 
@@ -1275,9 +1408,16 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             return value / last_price
 
     def _can_order_asset(self, asset: ExchangeAsset):
-        if asset.auto_close_date:
-            day = self.clock.trading_calendar.minute_to_session(self.simulation_dt).date()
+        day = self.clock.trading_calendar.minute_to_session(self.simulation_dt).date()
 
+        # Out of bars. Reference data does not record an equity's delisting -- the listing keeps
+        # an end date decades away -- so without this an order in a dead name is accepted and
+        # filled at the last price it ever printed, however many months ago that was.
+        if self.current_data.has_stopped_trading(asset=asset, session=day):
+            self._record_data_delisting(asset=asset, session=day)
+            return False
+
+        if asset.auto_close_date:
             if day > min(asset.end_date, asset.auto_close_date):
                 # If we are after the asset's end date or auto close date, warn
                 # the user that they can't place an order for this asset, and
@@ -2184,11 +2324,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         orders = self.blotter.get_open_orders_by_asset(asset=asset, exchange_name=exchange_name)
         if not orders:
             return
-        # We're making a copy here because `cancel` mutates the list of open
-        # orders in place.  The right thing to do here would be to make
-        # self.open_orders no longer a defaultdict.  If we do that, then we
-        # should just remove the orders once here and be done with the matter.
-        for order_id, order in orders.items():
+        # The comment below has been here since ziplime forked, and it is right about the problem
+        # and wrong about the code: cancelling *does* mutate the blotter's open orders, and this
+        # loop iterated the live mapping rather than a copy, so it raised `RuntimeError: dictionary
+        # changed size during iteration` the moment it had anything to cancel. It is reached when
+        # an order is still open on a contract that has expired -- routine on an option book, and
+        # essentially never on an equity one, which is why it survived this long.
+        for order_id, order in list(orders.items()):
             await self.cancel_order(order_id=order.id, exchange_name=order.exchange_name, relay_status=relay_status)
             if warn:
                 # Message appropriately depending on whether there's
@@ -2805,8 +2947,116 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     self._logger.error(f"Simulation error on dt={dt}")
                     if self.stop_on_error:
                         raise
+
+            errors.extend(self._end_of_run_warnings())
             risk_message = self.metrics_tracker.handle_simulation_end()
             yield risk_message, errors
+
+    def _end_of_run_warnings(self) -> list[BarSimulationError]:
+        """Facts about the run that a table of metrics cannot show, reported where they are read.
+
+        Two of them, both about a record that does not say what it looks like it says:
+
+        * sessions the run never recorded, which makes every metric a metric over a shorter window
+          than the one the run is labelled with;
+        * instruments whose prices ran out mid-run, which is a delisting nothing else announces --
+          they contribute flat, riskless sessions from then on.
+
+        These go in ``errors`` rather than into a log line because that is what a caller reads:
+        ``result.errors`` is checked, and the twentieth warning of a run is not.
+        """
+        warnings = []
+
+        expected = len(self.clock.sessions)
+        if self._session_count < expected:
+            recorded = self.clock.sessions[self._session_count - 1] if self._session_count else None
+            message = (
+                f"Performance record covers {self._session_count} of {expected} sessions: it ends "
+                f"at {recorded} instead of {self.clock.sessions[-1]}. Every metric in this result "
+                f"is computed over that shorter window, not over the one that was asked for."
+            )
+            self._logger.error(message)
+            warnings.append(BarSimulationError(trace="", message=message,
+                                               simulation_dt=self.simulation_dt))
+
+        if self._data_delistings:
+            listed = ", ".join(
+                f"{asset.symbol}@{asset.mic} after {session}"
+                for asset, session in sorted(self._data_delistings.items(),
+                                             key=lambda item: item[0].symbol))
+            message = (
+                f"The market data stops mid-run for {len(self._data_delistings)} listing(s) with "
+                f"nothing in their reference data to explain it: {listed}. Each was closed at its "
+                f"last mark and could not be traded again, so the sessions after it are flat for "
+                f"that name -- check whether it delisted or the bundle is simply short."
+            )
+            self._logger.error(message)
+            warnings.append(BarSimulationError(trace="", message=message,
+                                               simulation_dt=self.simulation_dt))
+
+        return warnings
+
+    async def _settlement_price(self, asset: ExchangeAsset, dt: datetime.datetime) -> float | None:
+        """What an expiring position settles at, or ``None`` to use its last mark.
+
+        Only options answer with a price, and the answer is arithmetic rather than a quote: an
+        expiring option is worth ``max(S - K, 0)`` per unit for a call and ``max(K - S, 0)`` for a
+        put, against wherever the underlying finished. Closing at the last mark instead is wrong in
+        both directions on the same day -- a wing that stopped being quoted at lunchtime carries a
+        few cents into a settlement of zero, and the strike that finishes ten cents in the money
+        carries nothing into ten dollars a contract.
+
+        **Cash settlement only.** A physically settled contract is settled in cash at intrinsic and
+        says so, rather than quietly delivering a hundred shares nobody asked for.
+        """
+        instrument = getattr(asset, "asset", None)
+        if not isinstance(instrument, OptionContract):
+            return None
+
+        underlying = instrument.underlying_exchange_asset
+        if underlying is None:
+            self._logger.warning(
+                "Expiring option has no underlying listing, so it cannot be settled at intrinsic "
+                "value; closing at its last mark instead",
+                symbol=asset.symbol, dt=str(dt))
+            return None
+
+        underlying_price = await self._spot_price(asset=underlying, dt=dt)
+        if underlying_price is None:
+            self._logger.warning(
+                "No price for the underlying on the expiration session, so the option cannot be "
+                "settled at intrinsic value; closing at its last mark instead",
+                symbol=asset.symbol, underlying=underlying.symbol, dt=str(dt))
+            return None
+
+        if instrument.settlement_type.is_deliverable:
+            self._logger.warning(
+                "Settling a physically delivered option in cash at its intrinsic value; delivery "
+                "of the underlying is not modelled",
+                symbol=asset.symbol, dt=str(dt))
+        return instrument.intrinsic_value(underlying_price)
+
+    async def _spot_price(self, asset: ExchangeAsset, dt: datetime.datetime) -> float | None:
+        """The close of ``asset``'s most recent bar at ``dt``, or ``None`` if it has none."""
+        return await self._read_field(asset=asset, dt=dt, field="close")
+
+    async def _read_field(self, asset: ExchangeAsset, dt: datetime.datetime,
+                          field: str) -> float | None:
+        """One column of ``asset``'s most recent bar at ``dt``.
+
+        Reads through the default exchange rather than the asset's own venue. Those are different
+        things and the repository's `get_exchange_by_mic` does not bridge them: it is keyed by the
+        exchange's *name* -- the broker the simulation trades through, "LIME" -- while a listing's
+        `mic` names where the instrument is listed, "ARCX". Asking it for a listing's MIC raises a
+        KeyError on every simulation with one exchange, which is all of them.
+        """
+        exchange = await self.exchange_repository.get_default_exchange()
+        rows = await exchange.get_spot_value(fields=frozenset([field]), dt=dt,
+                                             assets=frozenset({asset}))
+        if rows is None or rows.is_empty() or field not in rows.columns:
+            return None
+        value = rows[field][-1]
+        return None if value is None else float(value)
 
     async def _cleanup_expired_assets(self, dt: datetime.datetime, position_assets):
         """
@@ -2822,21 +3072,37 @@ class TradingAlgorithm(BaseTradingAlgorithm):
            auto_close_date.
         """
 
+        session = dt.date()
+
         def past_auto_close_date(asset: ExchangeAsset):
             acd = asset.auto_close_date
-            if acd is not None:
-                acd = acd
-            return acd is not None and acd <= dt.date()
+            return acd is not None and acd <= session
+
+        def delisted(asset: ExchangeAsset):
+            """Expired by the calendar, or out of bars.
+
+            Two different facts with the same consequence. A futures contract announces its own
+            end and carries an ``auto_close_date``; an equity does not -- a delisted listing keeps
+            its row and an end date decades away, and the only record of the delisting is that the
+            bars stop. Closing on the first fact alone left the second kind on the book at a mark
+            that never moved again, still counted in exposure, leverage and returns.
+            """
+            return (past_auto_close_date(asset)
+                    or self.current_data.has_stopped_trading(asset=asset, session=session))
 
         # Remove positions in any sids that have reached their auto_close date.
         assets_to_clear = [
             asset
             for asset in position_assets
-            if past_auto_close_date(asset)
+            if delisted(asset)
         ]
         # data_portal = self.data_portal
         for asset in assets_to_clear:
-            self._ledger.close_position(asset=asset, dt=dt)
+            if not past_auto_close_date(asset):
+                self._record_data_delisting(asset=asset, session=session)
+            self._ledger.close_position(
+                asset=asset, dt=dt,
+                price=await self._settlement_price(asset=asset, dt=dt))
 
         # Remove open orders for any sids that have reached their auto close
         # date. These orders get processed immediately because otherwise they
@@ -2844,7 +3110,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         assets_to_cancel = [
             asset
             for asset in self.blotter.get_all_assets_in_open_orders()
-            if past_auto_close_date(asset=asset)
+            if delisted(asset=asset)
         ]
 
         for asset in assets_to_cancel:

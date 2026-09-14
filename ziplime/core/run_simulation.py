@@ -13,7 +13,7 @@ from ziplime.core.algorithm_file import AlgorithmFile
 from ziplime.data.services.data_source import DataSource
 from ziplime.finance.commission import PerShare, DEFAULT_PER_SHARE_COST, DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE, \
     PerContract, DEFAULT_PER_CONTRACT_COST, DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE, EquityCommissionModel, \
-    FutureCommissionModel, BondCommissionModel, PerBondTurnover
+    FutureCommissionModel, BondCommissionModel, PerBondTurnover, OptionCommissionModel, PerOptionContract
 from ziplime.finance.constants import DEFAULT_BOND_COMMISSION_RATE
 from ziplime.finance.constants import FUTURE_EXCHANGE_FEES_BY_SYMBOL
 from ziplime.finance.margin import FuturesMarginModel
@@ -57,6 +57,8 @@ async def run_simulation(
         future_slippage: FutureSlippageModel | None = None,
         bond_commission: BondCommissionModel | None = None,
         bond_slippage: SlippageModel | None = None,
+        option_commission: OptionCommissionModel | None = None,
+        option_slippage: SlippageModel | None = None,
         clock: TradingClock | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
@@ -132,6 +134,11 @@ async def run_simulation(
     if bond_commission is None:
         # Bond desks bill a percentage of turnover, not a fee per unit; see PerBondTurnover.
         bond_commission = PerBondTurnover(cost=DEFAULT_BOND_COMMISSION_RATE)
+    if option_commission is None:
+        # Per contract, plus exchange fees. On a four-legged 0DTE structure opened and closed every
+        # session this is the difference between a strategy that earns its credit and one that
+        # hands it to the broker, so it is charged by default rather than opted into.
+        option_commission = PerOptionContract()
     if equity_slippage is None:
         equity_slippage = FixedBasisPointsSlippage()
     if future_slippage is None:
@@ -150,6 +157,8 @@ async def run_simulation(
             future_commission=future_commission,
             bond_slippage=bond_slippage,
             bond_commission=bond_commission,
+            option_slippage=option_slippage,
+            option_commission=option_commission,
             cash_balance=total_cash,
             clock=clock,
             price_used_in_order_execution=price_used_in_order_execution,
@@ -201,6 +210,8 @@ async def run_simulation_iter(
         future_slippage: FutureSlippageModel | None = None,
         bond_commission: BondCommissionModel | None = None,
         bond_slippage: SlippageModel | None = None,
+        option_commission: OptionCommissionModel | None = None,
+        option_slippage: SlippageModel | None = None,
         clock: TradingClock | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
@@ -266,6 +277,11 @@ async def run_simulation_iter(
     if bond_commission is None:
         # Bond desks bill a percentage of turnover, not a fee per unit; see PerBondTurnover.
         bond_commission = PerBondTurnover(cost=DEFAULT_BOND_COMMISSION_RATE)
+    if option_commission is None:
+        # Per contract, plus exchange fees. On a four-legged 0DTE structure opened and closed every
+        # session this is the difference between a strategy that earns its credit and one that
+        # hands it to the broker, so it is charged by default rather than opted into.
+        option_commission = PerOptionContract()
     if equity_slippage is None:
         equity_slippage = FixedBasisPointsSlippage()
     if future_slippage is None:
@@ -290,6 +306,8 @@ async def run_simulation_iter(
             future_commission=future_commission,
             bond_slippage=bond_slippage,
             bond_commission=bond_commission,
+            option_slippage=option_slippage,
+            option_commission=option_commission,
             cash_balance=total_cash,
             clock=clock,
             price_used_in_order_execution=price_used_in_order_execution,

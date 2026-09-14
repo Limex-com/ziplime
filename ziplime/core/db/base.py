@@ -11,6 +11,7 @@ from ziplime.assets.models.bond_model import BondModel # noqa
 from ziplime.assets.models.bond_event_model import BondEventModel # noqa
 from ziplime.assets.models.futures_root_symbol_model import FuturesRootSymbolModel # noqa
 from ziplime.assets.models.futures_contract_model import FuturesContractModel # noqa
+from ziplime.assets.models.option_contract_model import OptionContractModel # noqa
 from ziplime.assets.models.merger_model import MergerModel # noqa
 from ziplime.assets.models.split_model import SplitModel # noqa
 from ziplime.assets.models.stock_dividend_payout_model import StockDividendPayoutModel # noqa

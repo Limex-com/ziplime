@@ -6,6 +6,7 @@ import structlog
 
 from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
 
 logger = structlog.get_logger(__name__)
 
@@ -210,6 +211,19 @@ def calculate_position_tracker_stats(positions, position_count: int, stats, bond
 
             # unchecked cast, this is safe because we do a type check above
             exposure *= instrument.multiplier
+        elif type(instrument) is OptionContract:
+            exposure *= instrument.multiplier
+            if instrument.premium_style.is_margined:
+                # Nothing was paid for it, so there is nothing to be worth. A margined option is
+                # carried exactly like a futures position: the P&L has already reached cash
+                # through variation margin, and counting a value here as well would book the same
+                # money twice.
+                value = 0
+            else:
+                # A premium-paid option *is* worth something: it was bought and paid for, and a
+                # short one is a liability that has to be bought back. Which is why a short option
+                # shows negative value here, exactly like a short equity.
+                value = exposure
         elif type(instrument) is Bond:
             # A bond quote is a percentage of face value, and a holding is worth the
             # dirty price: what it would fetch is the clean value plus the coupon

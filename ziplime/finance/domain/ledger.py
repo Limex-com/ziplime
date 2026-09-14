@@ -12,6 +12,7 @@ from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.finance.bonds import BondBook
 from ziplime.finance.margin import (
     FuturesMarginModel, NoFuturesMarginModel, margin_currency_of,
@@ -28,6 +29,16 @@ from ziplime.finance.domain.order import Order
 from ziplime.finance.domain.position_tracker import PositionTracker
 from ziplime.finance.domain.transaction import Transaction
 from ziplime.trading.domain.lot import Lot
+
+
+def _is_margined_option(instrument) -> bool:
+    """Whether ``instrument`` is an option that settles variation margin rather than a premium.
+
+    A free function rather than a method because three separate places have to agree on it -- the
+    cash flow at a trade, the value of the position, and the margin it ties up -- and a
+    disagreement between any two of them double-counts or loses the position entirely.
+    """
+    return isinstance(instrument, OptionContract) and instrument.premium_style.is_margined
 
 
 class Ledger:
@@ -224,7 +235,12 @@ class Ledger:
         """
         asset = transaction.asset
         # `asset` is the exchange listing; the instrument itself hangs off `.asset`.
-        if isinstance(asset.asset, FuturesContract):
+        #
+        # A margined option settles the way a future does -- no premium changes hands, variation
+        # margin accrues daily -- so it joins the futures branch rather than getting one of its
+        # own. That is the whole of what makes a MOEX book different from an OPRA one; see
+        # `PremiumStyle`.
+        if isinstance(asset.asset, FuturesContract) or _is_margined_option(asset.asset):
             if not self.futures_margin_model.models_margin:
                 self.futures_margin_model.warn_once()
             try:
@@ -257,6 +273,12 @@ class Ledger:
             # averages half a coupon on every round trip.
             self._cash_flow(-(self.bond_price_in_money(asset=asset, quoted_price=transaction.price,
                                                        dt=transaction.dt) * transaction.amount))
+        elif isinstance(asset.asset, OptionContract):
+            # A premium-paid option. The premium is quoted per unit of the underlying and one
+            # contract covers `multiplier` of them, so buying one 1.20 call costs 120, not 1.20 --
+            # a hundredfold error in cash, and one that compounds: it also sets the cost basis
+            # every later P&L is measured from.
+            self._cash_flow(-(transaction.price * asset.asset.multiplier * transaction.amount))
         else:
             self._cash_flow(-(transaction.price * transaction.amount))
         # print("LEVERAGE: BEFORE EXCEUTION", self.account.leverage, self.account.net_leverage)
@@ -362,12 +384,22 @@ class Ledger:
         self._cash_flow(-commission.amount)
         # print(f"Commission 3 for {asset.asset_name} is {cost}", tr.account.leverage, tr.account.net_leverage)
 
-    def close_position(self, asset: ExchangeAsset, dt: datetime.datetime):
+    def close_position(self, asset: ExchangeAsset, dt: datetime.datetime,
+                       price: float | None = None):
         """Force-close a position whose contract has reached its auto close date.
 
         For a physically delivered contract this is the step that keeps the backtest honest: the
         position is being closed precisely so that it does not become a delivery obligation, and
         that is worth saying rather than letting it look like ordinary housekeeping.
+
+        Args:
+            price: What to close at, defaulting to the position's last mark. An expiring option is
+                closed at its **settlement** value instead -- ``max(S - K, 0)`` for a call --
+                because the last mark is a quote and the settlement is an arithmetic fact about
+                where the underlying finished. The two part company exactly where it matters most:
+                a 0DTE wing that stops being quoted an hour before the close carries a mark of a
+                few cents into a settlement of zero, and the strike that finishes a dime in the
+                money carries a mark of nothing into a payout of ten dollars a contract.
         """
         instrument = asset.asset
         if getattr(instrument, "is_deliverable", False):
@@ -376,11 +408,12 @@ class Ledger:
                 symbol=asset.symbol, notice_date=str(getattr(instrument, "notice_date", None)),
                 expiration_date=str(getattr(instrument, "expiration_date", None)), dt=str(dt))
 
-        for txn in self.position_tracker.close_positions(asset=asset, dt=dt):
+        for txn in self.position_tracker.close_positions(asset=asset, dt=dt, price=price):
             self.process_transaction(transaction=txn)
 
     def bond_price_in_money(self, asset: ExchangeAsset, quoted_price: float, dt) -> float:
-        """What one bond of ``asset`` changes hands for at ``quoted_price``: clean value plus НКД."""
+        """What one bond of ``asset`` changes hands for at ``quoted_price``: clean value plus
+        accrued coupon interest."""
         return self.bond_book.dirty_value(asset.asset, quoted_price, dt)
 
     def held_bonds(self) -> list[Bond]:
@@ -572,7 +605,12 @@ class Ledger:
         ]
 
     def futures_margin_by_currency(self, maintenance: bool = False) -> dict[str, float]:
-        """Margin the open futures positions tie up, keyed by the currency it is posted in.
+        """Margin the open margined positions tie up, keyed by the currency it is posted in.
+
+        Futures, and **margined options** -- a MOEX option ties up initial margin on both sides,
+        because neither side has paid anything and either can end up owing. A premium-paid option
+        is not counted: the buyer's risk is the premium they already handed over, and the writer's
+        margin is a broker's rule rather than the exchange's, so the ledger does not invent one.
 
         Margin currency is a property of the exchange, not of the quote: an exchange may collect
         its local currency even for the contracts it quotes in dollars. Amounts in different currencies are reported
@@ -581,7 +619,8 @@ class Ledger:
         model = self.futures_margin_model
         totals: dict[str, float] = {}
         for position in self.position_tracker.get_position_list():
-            if not isinstance(position.asset.asset, FuturesContract):
+            instrument = position.asset.asset
+            if not (isinstance(instrument, FuturesContract) or _is_margined_option(instrument)):
                 continue
             margin = (model.maintenance_margin if maintenance else model.initial_margin)
             amount = margin(position.asset, position.amount, position.last_sale_price)

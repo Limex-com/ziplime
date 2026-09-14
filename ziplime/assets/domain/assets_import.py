@@ -8,6 +8,7 @@ from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.futures_root import FuturesRoot
+from ziplime.assets.entities.option_contract import OptionContract
 
 
 @dataclass
@@ -17,7 +18,8 @@ class AssetsImport:
     Order matters on import: ``exchange_assets`` reference assets by identity, and a
     ``FuturesContract`` references both its underlying (a commodity, currency or equity) and its
     chain, so those have to be written first. ``bond_events`` reference their bond, so they go
-    after ``bonds``.
+    after ``bonds``. An ``OptionContract`` references its underlying the same way a futures
+    contract does, so ``options`` go after the equities and commodities they are written on.
     """
 
     exchange_assets: list[ExchangeAsset]
@@ -28,3 +30,4 @@ class AssetsImport:
     bond_events: list[BondEvent] = field(default_factory=list)
     futures_roots: list[FuturesRoot] = field(default_factory=list)
     futures: list[FuturesContract] = field(default_factory=list)
+    options: list[OptionContract] = field(default_factory=list)

@@ -14,6 +14,7 @@ from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.constants.period import Period
 from ziplime.data.services.data_source import DataSource
 
@@ -22,6 +23,7 @@ from ziplime.domain.portfolio import Portfolio
 from ziplime.domain.account import Account
 from ziplime.finance.commission import (
     BondCommissionModel, CommissionModel, EquityCommissionModel, FutureCommissionModel,
+    OptionCommissionModel, PerOptionContract,
 )
 from ziplime.finance.commission.no_commission import NoCommission
 from ziplime.finance.domain.commission import Commission
@@ -47,6 +49,8 @@ class SimulationExchange(Exchange):
                  is_default: bool,
                  bond_slippage: SlippageModel = None,
                  bond_commission: BondCommissionModel = None,
+                 option_slippage: SlippageModel = None,
+                 option_commission: OptionCommissionModel = None,
                  data_source: DataSource = None,
                  price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
                  ):
@@ -61,11 +65,20 @@ class SimulationExchange(Exchange):
             Equity: equity_slippage,
             Bond: bond_slippage if bond_slippage is not None else equity_slippage,
             FuturesContract: future_slippage,
+            # An option's fill is a percentage of a premium, which is what the equity models
+            # express, so the equity model is the sensible default rather than the futures one --
+            # `VolatilityVolumeShare` is calibrated on futures volume and would reject most of a
+            # 0DTE chain outright.
+            OptionContract: option_slippage if option_slippage is not None else equity_slippage,
         }
         self.commission_models = {
             Equity: equity_commission,
             Bond: bond_commission if bond_commission is not None else NoCommission(),
             FuturesContract: future_commission,
+            # Options are billed per contract, never per share; see PerOptionContract for why
+            # substituting an equity model understates the cost by the multiplier.
+            OptionContract: (option_commission if option_commission is not None
+                             else PerOptionContract()),
         }
         self.cash_balance = cash_balance
         self.price_used_in_order_execution = price_used_in_order_execution

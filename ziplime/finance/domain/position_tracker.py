@@ -14,6 +14,7 @@ from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.bond_event import BondEvent
 from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.finance.bonds import BondBook
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.domain.position import Position
@@ -249,7 +250,10 @@ class PositionTracker:
 
         prev_cost = position.cost_basis * position.amount
         instrument = position.asset.asset
-        if isinstance(instrument, FuturesContract):
+        if isinstance(instrument, (FuturesContract, OptionContract)):
+            # Both carry their cost basis in quoted units -- points for a future, premium for an
+            # option -- while a commission arrives in money, so it has to be divided by the
+            # multiplier before it can be folded in.
             cost_to_use = cost / instrument.multiplier
         elif isinstance(instrument, Bond):
             # A bond's cost basis is carried in quote units (percent of face), so a commission in

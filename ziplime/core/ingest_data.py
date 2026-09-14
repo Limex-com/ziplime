@@ -230,7 +230,10 @@ async def ingest_market_data(
             bundle_version = existing_bundle_metadata["version"]
     else:
         bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
-    await bundle_service.ingest_market_data_bundle(
+    # Returned, not discarded: ingestion skips silently when the source hands back nothing -- a
+    # mistyped symbol, a window the vendor does not cover -- and a caller that gets None back can
+    # say so instead of reporting success over an empty bundle.
+    return await bundle_service.ingest_market_data_bundle(
         date_start=start_date.replace(tzinfo=calendar.tz),
         date_end=end_date.replace(tzinfo=calendar.tz),
         bundle_storage=bundle_storage,

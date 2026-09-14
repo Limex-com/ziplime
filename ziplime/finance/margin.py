@@ -54,15 +54,26 @@ def notional(asset: ExchangeAsset, amount: float, price: float) -> float:
     return abs(amount) * price * multiplier
 
 
-def margin_currency_of(asset: ExchangeAsset) -> str:
-    """Currency the exchange collects margin for ``asset`` in."""
-    return getattr(asset.asset, "margin_currency", None) or DEFAULT_MARGIN_CURRENCY
-
-
 def quote_currency_of(asset: ExchangeAsset) -> str:
     """Currency ``asset`` is quoted in, taken from its quote asset."""
     quote = getattr(asset, "quote", None)
     return getattr(quote, "asset_name", None) or DEFAULT_MARGIN_CURRENCY
+
+
+def margin_currency_of(asset: ExchangeAsset) -> str:
+    """Currency the exchange collects margin for ``asset`` in.
+
+    A futures contract says so itself, because the answer is genuinely not derivable: an exchange
+    may quote a contract in dollars and still collect roubles. An instrument that does not carry
+    the field -- a margined option -- is margined in the currency it is **quoted** in, which is
+    true on both venues that have them: SPY options margin in dollars, MOEX options in roubles.
+
+    Falling back to :data:`DEFAULT_MARGIN_CURRENCY` instead would claim a dollar-quoted option
+    margins in roubles, and a rate-of-notional model would then refuse to compute anything for it
+    rather than silently converting -- which is how this was found.
+    """
+    declared = getattr(asset.asset, "margin_currency", None)
+    return declared or quote_currency_of(asset)
 
 
 class FuturesMarginModel:
