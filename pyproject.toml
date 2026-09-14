@@ -62,10 +62,34 @@ optional = true
 vollib = "^1.0.11"
 
 [tool.poetry.group.vectorbt]
+# A reference engine for tests, and nothing else. The vectorised path is ziplime's own kernel
+# (ziplime.vectorized.kernel); vectorbt is kept so `tests/reference/vectorbt/` can hold the two
+# side by side on the same signals and require the same fills, and so a later cross-engine
+# benchmark has something to measure against.
+#
+# Not a runtime dependency in any sense: nothing under ziplime/ imports it, and the whole suite
+# passes with it uninstalled -- `tests/reference/vectorbt/` is the only thing that skips.
 optional = true
 
 [tool.poetry.group.vectorbt.dependencies]
 vectorbt = "0.28.2"
+# Pinned below 6, and not by preference. vectorbt 0.28 registers a plotly theme referencing
+# `scattermapbox`, which plotly 6 removed, so `import vectorbt` raises on a fresh install that
+# resolves plotly freely -- before any ziplime code runs.
+plotly = "<6"
+
+
+[tool.poetry.group.numba]
+# Compiles the vector kernel's inner loop -- see ziplime.vectorized.kernel._core. Optional, and
+# genuinely so: without it the same loop runs interpreted and produces identical numbers, just
+# slower. Measured on 500 instruments over five years: 0.055s compiled against 0.312s
+# interpreted, or 2.3x versus 13.4x the runtime of the library this kernel replaced.
+optional = true
+
+[tool.poetry.group.numba.dependencies]
+numba = "^0.67"
+
+
 
 
 [tool.poetry.group.docs.dependencies]

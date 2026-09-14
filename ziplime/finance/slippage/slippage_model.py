@@ -12,6 +12,7 @@ from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.errors import LiquidityExceeded
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.shared import FinancialModelMeta
@@ -59,7 +60,7 @@ class SlippageModel(metaclass=FinancialModelMeta):
     """
 
     # Asset types that are compatible with the given model.
-    allowed_asset_types = (Equity, Bond, FuturesContract)
+    allowed_asset_types = (Equity, Bond, FuturesContract, OptionContract)
 
     def __init__(self):
         self._volume_for_bar = 0

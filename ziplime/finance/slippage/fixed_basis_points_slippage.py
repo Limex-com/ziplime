@@ -45,9 +45,12 @@ class FixedBasisPointsSlippage(SlippageModel):
     def __init__(self, basis_points=5.0, volume_limit=0.1):
         super(FixedBasisPointsSlippage, self).__init__()
         if volume_limit <= 0:
-            raise ValueError("volume_limit must be positive.")
-        if basis_points <= 0:
-            raise ValueError("volume_limit must be positive.")
+            raise ValueError(f"volume_limit must be positive, got {volume_limit!r}.")
+        # Zero is allowed: it is the control run -- no price impact, but fills still capped by
+        # volume, which is what separates it from NoSlippage. Only a negative is meaningless, and
+        # rejecting zero here reported it as a problem with `volume_limit`, which it is not.
+        if basis_points < 0:
+            raise ValueError(f"basis_points cannot be negative, got {basis_points!r}.")
 
         self.basis_points = basis_points
         self.percentage = float(self.basis_points) / 10000.0
