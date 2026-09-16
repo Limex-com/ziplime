@@ -2077,7 +2077,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     def _calculate_order_target_amount(self, exchange: Exchange, trading_account_id: str, asset: ExchangeAsset,
                                        target: int):
-        current_position = self.portfolio.positions.get(exchange.name, {}).get(trading_account_id, {}).get(asset, None)
+        current_position = self.portfolio.positions.get((exchange.name,trading_account_id, asset), None)
         if current_position is not None:
             # current_position = self.portfolio.positions[asset].amount
             target -= current_position.amount
