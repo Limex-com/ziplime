@@ -18,4 +18,3 @@ from ziplime.assets.models.stock_dividend_payout_model import StockDividendPayou
 from ziplime.assets.models.symbols_universe import SymbolsUniverseModel # noqa
 from ziplime.assets.models.symbols_universe_asset import SymbolsUniverseAssetModel # noqa
 from ziplime.assets.models.exchange_asset_model import ExchangeAssetModel # noqa
-# from ziplime.assets.models.trading_pair import TradingPair # noqa

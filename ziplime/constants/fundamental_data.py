@@ -11,11 +11,6 @@ class FundamentalDataValueType(enum.Enum):
 
 class FundamentalData(enum.Enum):
     TOTAL_SHARE_HOLDER_EQUITY = "total_share_holder_equity"
-    # TOTAL_LIABILITIES = "total_liabilities"
-    # TOTAL_ASSETS = "total_assets"
-    # SHARES_OUTSTANDING = "shares_outstanding"
-    # OPERATING_INCOME = "operating_income"
-
     ROI = "roi"
     ROE = "roe"
     ROA = "roa"

@@ -1,14 +1,12 @@
 import datetime
-import importlib.util
 import inspect
-import sys
 import traceback
 import uuid
 from collections import namedtuple, OrderedDict
 from contextlib import AsyncExitStack
 from copy import copy
 import warnings
-from typing import Callable, Literal
+from typing import Callable
 import pandas as pd
 import structlog
 from pygments.styles import default
@@ -46,7 +44,6 @@ from ziplime.gens.domain.trading_clock import TradingClock
 from ziplime.exchanges.exchange import Exchange
 from ziplime.trading.base_trading_algorithm import BaseTradingAlgorithm
 from ziplime.trading.enums.simulation_event import SimulationEvent
-from ziplime.trading.trading_signal_executor import TradingSignalExecutor
 from ziplime.utils.calendar_utils import get_calendar
 
 from ziplime.protocol import handle_non_market_minutes
@@ -261,7 +258,6 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.config = algorithm.config
         self.exchange_repository = exchange_repository
         self.stop_on_error = stop_on_error
-        self.trading_signal_executor = TradingSignalExecutor()
         # List of trading controls to be used to validate orders.
         self.trading_controls = []
 

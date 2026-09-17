@@ -30,7 +30,6 @@ from ziplime.pipeline.terms.filters import (
 from ziplime.pipeline.mixins import RestrictedDTypeMixin
 
 from ziplime.utils.numpy_utils import float64_dtype
-from ziplime.utils.sharedoc import templated_docstring
 
 
 
@@ -367,7 +366,6 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             window_safe=True,
         )
 
-    @templated_docstring(CORRELATION_METHOD_NOTE=CORRELATION_METHOD_NOTE)
     def pearsonr(self, target: Term, correlation_length: int, mask: Filter | None = None):
         """
         Construct a new Factor that computes rolling pearson correlation
@@ -431,7 +429,6 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             mask=mask,
         )
 
-    @templated_docstring(CORRELATION_METHOD_NOTE=CORRELATION_METHOD_NOTE)
     def spearmanr(self, target: Term, correlation_length: int, mask: Filter | None = None):
         """
         Construct a new Factor that computes rolling spearman rank correlation
@@ -494,7 +491,6 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             mask=mask,
         )
 
-    @templated_docstring(CORRELATION_METHOD_NOTE=CORRELATION_METHOD_NOTE)
     def linear_regression(self, target: Term, regression_length: int, mask: Filter | None = None):
         """
         Construct a new Factor that performs an ordinary least-squares

@@ -31,13 +31,6 @@ async def _run_live_trading(
         config_file: str | None = None,
 
 ):
-    # benchmark_spec = BenchmarkSpec(
-    #     benchmark_returns=None,
-    #     benchmark_sid=benchmark_sid,
-    #     benchmark_symbol=benchmark_symbol,
-    #     benchmark_file=benchmark_file,
-    #     no_benchmark=no_benchmark,
-    # )
     calendar = get_calendar(trading_calendar)
 
     bundle_storage_path = str(Path(Path.home(), ".ziplime", "data"))

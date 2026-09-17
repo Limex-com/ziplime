@@ -1,8 +1,6 @@
 import dataclasses
 import datetime
 import asyncio
-from collections import deque
-from functools import partial
 from operator import attrgetter
 from pathlib import Path
 from typing import Any, Self
@@ -1082,10 +1080,9 @@ class SqlAlchemyAssetRepository(AssetRepository):
         ]
 
     async def save_dividends(self, dividends: list[DividendPayout]) -> list[DividendPayout]:
-        all_assets = await self.get_all_assets()
         dividends_db = [DividendPayoutModel(
             asset_id=d.asset.id,
-            ex_date=d.pay_date,
+            ex_date=d.ex_date,
             declared_date=d.declared_date,
             record_date=d.record_date,
             pay_date=d.pay_date,
@@ -1305,72 +1302,25 @@ class SqlAlchemyAssetRepository(AssetRepository):
 
     async def get_equities_by_symbols_and_exchange(self, symbols: list[str], exchange_name: str) -> list[Equity]:
         async with self.session_maker() as session:
-            q_equity_symbol_mapping = select(EquitySymbolMappingModel).where(
-                EquitySymbolMappingModel.exchange == exchange_name,
-                EquitySymbolMappingModel.symbol.in_(symbols))
-
-            equity_mappings = (await session.execute(q_equity_symbol_mapping)).scalars()
-
-            q_equities = select(EquityModel).where(
-                EquityModel.sid.in_([equity_mapping.sid for equity_mapping in equity_mappings])).options(
-                selectinload(EquityModel.asset_router)).options(selectinload(EquityModel.equity_symbol_mappings))
-            assets: list[EquityModel] = list((await session.execute(q_equities)).scalars())
-
-            return [Equity(
-                sid=asset.sid,
-                asset_name=asset.asset_name,
-                start_date=asset.start_date,
-                first_traded=asset.first_traded,
-                end_date=asset.end_date,
-                auto_close_date=asset.auto_close_date,
-                symbol_mapping={
-                    equity_mapping.exchange: EquitySymbolMapping(
-                        company_symbol=equity_mapping.company_symbol,
-                        symbol=equity_mapping.symbol,
-                        exchange_name=equity_mapping.exchange,
-                        share_class_symbol=equity_mapping.share_class_symbol,
-                        end_date=equity_mapping.end_date,
-                        start_date=equity_mapping.start_date
-                    )
-                    for equity_mapping in asset.equity_symbol_mappings
-                },
-                mic=asset.mic,
-                isin=asset.isin
-            ) for asset in assets]
+            q = select(ExchangeAssetModel).where(
+                ExchangeAssetModel.mic == exchange_name,
+                ExchangeAssetModel.symbol.in_(symbols),
+            )
+            listings = list((await session.execute(q)).scalars())
+        all_assets = await self.get_all_assets()
+        return [
+            asset for listing in listings
+            if isinstance((asset := all_assets.get(listing.asset_id)), Equity)
+        ]
 
     async def get_equities_by_symbols(self, symbols: list[AssetSymbol]) -> list[Equity]:
+        names = [symbol.symbol if isinstance(symbol, AssetSymbol) else symbol for symbol in symbols]
         async with self.session_maker() as session:
-            q_equity_symbol_mapping = select(EquitySymbolMappingModel).where(
-                EquitySymbolMappingModel.symbol.in_(symbols))
-
-            equity_mappings = (await session.execute(q_equity_symbol_mapping)).scalars()
-
             q_equities = select(EquityModel).where(
-                EquityModel.sid.in_([equity_mapping.sid for equity_mapping in equity_mappings])).options(
-                selectinload(EquityModel.asset_router)).options(selectinload(EquityModel.equity_symbol_mappings))
+                EquityModel.asset_name.in_(names)).options(selectinload(EquityModel.asset_router))
             assets: list[EquityModel] = list((await session.execute(q_equities)).scalars())
 
-            return [Equity(
-                sid=asset.sid,
-                asset_name=asset.asset_name,
-                start_date=asset.start_date,
-                first_traded=asset.first_traded,
-                end_date=asset.end_date,
-                auto_close_date=asset.auto_close_date,
-                symbol_mapping={
-                    equity_mapping.exchange: EquitySymbolMapping(
-                        company_symbol=equity_mapping.company_symbol,
-                        symbol=equity_mapping.symbol,
-                        exchange_name=equity_mapping.exchange,
-                        share_class_symbol=equity_mapping.share_class_symbol,
-                        end_date=equity_mapping.end_date,
-                        start_date=equity_mapping.start_date
-                    )
-                    for equity_mapping in asset.equity_symbol_mappings
-                },
-                mic=asset.mic,
-                isin=asset.isin
-            ) for asset in assets]
+        return [self._equity_model_to_equity(equity_model=asset) for asset in assets]
 
     async def get_exchange_currencies_by_symbols(self, symbols: list[AssetSymbol]) -> list[ExchangeAsset]:
         """Look up currency listings by ``(symbol, mic)``; a ``None`` mic matches any exchange.
@@ -1684,95 +1634,6 @@ class SqlAlchemyAssetRepository(AssetRepository):
         # Run the migration
         command.upgrade(alembic_cfg, "head")
 
-    @property
-    def exchange_info(self):
-        with self.engine.connect() as conn:
-            es = conn.execute(sa.select(self.exchanges.c)).fetchall()
-        return {
-            name: ExchangeInfoModel(name, canonical_name, country_code)
-            for name, canonical_name, country_code in es
-        }
-
-    @property
-    def symbol_ownership_map(self):
-        out = {}
-        for mappings in self.symbol_ownership_maps_by_country_code.values():
-            for key, ownership_periods in mappings.items():
-                out.setdefault(key, []).extend(ownership_periods)
-
-        return out
-
-    @property
-    def symbol_ownership_maps_by_country_code(self):
-        with self.engine.connect() as conn:
-            query = sa.select(
-                self.equities.c.sid,
-                self.exchanges.c.country_code,
-            ).where(self.equities.c.exchange == self.exchanges.c.exchange)
-            sid_to_country_code = dict(conn.execute(query).fetchall())
-
-            return build_grouped_ownership_map(
-                conn,
-                table=self.equity_symbol_mappings,
-                key_from_row=(lambda row: (row.company_symbol, row.share_class_symbol)),
-                value_from_row=lambda row: row.symbol,
-                group_key=lambda row: sid_to_country_code[row.sid],
-            )
-
-    def lookup_asset_types(self, sids: list[int]):
-        """Retrieve asset types for a list of sids.
-
-        Parameters
-        ----------
-        sids : list[int]
-
-        Returns
-        -------
-        types : dict[sid -> str or None]
-            Asset types for the provided sids.
-        """
-        found = {}
-        missing = set()
-
-        for sid in sids:
-            try:
-                found[sid] = self._asset_type_cache[sid]
-            except KeyError:
-                missing.add(sid)
-
-        if not missing:
-            return found
-
-        router_cols = self.asset_router.c
-
-        with self.engine.connect() as conn:
-            for assets in group_into_chunks(missing):
-                query = sa.select(router_cols.sid, router_cols.asset_type).where(
-                    self.asset_router.c.sid.in_(map(int, assets))
-                )
-                for sid, type_ in conn.execute(query).fetchall():
-                    missing.remove(sid)
-                    found[sid] = self._asset_type_cache[sid] = type_
-
-                for sid in missing:
-                    found[sid] = self._asset_type_cache[sid] = None
-
-        return found
-
-    def group_by_type(self, sids: list[int]):
-        """Group a list of sids by asset type.
-
-        Parameters
-        ----------
-        sids : list[int]
-
-        Returns
-        -------
-        types : dict[str or None -> list[int]]
-            A dict mapping unique asset types to lists of sids drawn from sids.
-            If we fail to look up an asset, we assign it a key of None.
-        """
-        return invert(self.lookup_asset_types(sids))
 
     def retrieve_asset(self, sid: int, default_none: bool = False):
         """
@@ -1815,427 +1676,12 @@ class SqlAlchemyAssetRepository(AssetRepository):
             When a requested sid is not found and default_none=False.
         """
 
-        async with self.session_maker() as session:
-            q = select(AssetRouter).where(AssetModel.sid.in_(sids))
-            assets = (await session.execute(q)).scalars()
-            return list(assets)
+        assets_by_id = await self.get_all_assets()
+        missing = [sid for sid in sids if sid not in assets_by_id]
+        if missing and not default_none:
+            raise SidsNotFound(sids=missing)
+        return [assets_by_id.get(sid) for sid in sids]
 
-        hits, missing, failures = {}, set(), []
-        for sid in sids:
-            try:
-                asset = self._asset_cache[sid]
-                if not default_none and asset is None:
-                    # Bail early if we've already cached that we don't know
-                    # about an asset.
-                    raise SidsNotFound(sids=[sid])
-                hits[sid] = asset
-            except KeyError:
-                missing.add(sid)
-
-        # All requests were cache hits.  Return requested sids in order.
-        if not missing:
-            return [hits[sid] for sid in sids]
-
-        update_hits = hits.update
-
-        # Look up cache misses by type.
-        type_to_assets = self.group_by_type(sids=missing)
-
-        # Handle failures
-        failures = {failure: None for failure in type_to_assets.pop(None, ())}
-        update_hits(failures)
-        self._asset_cache.update(failures)
-
-        if failures and not default_none:
-            raise SidsNotFound(sids=list(failures))
-
-        # We don't update the asset cache here because it should already be
-        # updated by `self.retrieve_equities`.
-        update_hits(self.retrieve_equities(sids=type_to_assets.pop("equity", [])))
-        update_hits(self.retrieve_futures_contracts(sids=type_to_assets.pop("future", [])))
-
-        # We shouldn't know about any other asset types.
-        if type_to_assets:
-            raise AssertionError("Found asset types: %s" % list(type_to_assets.keys()))
-
-        return [hits[sid] for sid in sids]
-
-    def retrieve_equities(self, sids: list[int]):
-        """Retrieve Equity objects for a list of sids.
-
-        Users generally shouldn't need to this method (instead, they should
-        prefer the more general/friendly `retrieve_assets`), but it has a
-        documented interface and tests because it's used upstream.
-
-        Parameters
-        ----------
-        sids : iterable[int]
-
-        Returns
-        -------
-        equities : dict[int -> Equity]
-
-        Raises
-        ------
-        EquitiesNotFound
-            When any requested asset isn't found.
-        """
-        return self._retrieve_assets(sids=sids, asset_tbl=self.equities, asset_type=Equity)
-
-    # def _retrieve_equity(self, sid):
-    #     return self.retrieve_equities(sids=[sid, ])[sid]
-
-    def retrieve_futures_contracts(self, sids: list[int]):
-        """Retrieve Future objects for an iterable of sids.
-
-        Users generally shouldn't need to this method (instead, they should
-        prefer the more general/friendly `retrieve_assets`), but it has a
-        documented interface and tests because it's used upstream.
-
-        Parameters
-        ----------
-        sids : iterable[int]
-
-        Returns
-        -------
-        equities : dict[int -> Equity]
-
-        Raises
-        ------
-        EquitiesNotFound
-            When any requested asset isn't found.
-        """
-        return self._retrieve_assets(sids=sids, asset_tbl=self.futures_contracts, asset_type=FuturesContract)
-
-    @staticmethod
-    def _select_assets_by_sid(asset_tbl: Table, sids: list[int]):
-        return sa.select(asset_tbl).where(asset_tbl.c.sid.in_(map(int, sids)))
-
-    @staticmethod
-    def _select_asset_by_symbol(asset_tbl: Table, symbol: str):
-        return sa.select(asset_tbl).where(asset_tbl.c.symbol == symbol)
-
-    def _select_most_recent_symbols_chunk(self, sid_group: list[int]):
-        """Retrieve the most recent symbol for a set of sids.
-
-        Parameters
-        ----------
-        sid_group : iterable[int]
-            The sids to lookup. The length of this sequence must be less than
-            or equal to SQLITE_MAX_VARIABLE_NUMBER because the sids will be
-            passed in as sql bind params.
-
-        Returns
-        -------
-        sel : Selectable
-            The sqlalchemy selectable that will query for the most recent
-            symbol for each sid.
-
-        Notes
-        -----
-        This is implemented as an inner select of the columns of interest
-        ordered by the end date of the (sid, symbol) mapping. We then group
-        that inner select on the sid with no aggregations to select the last
-        row per group which gives us the most recently active symbol for all
-        of the sids.
-        """
-        cols = self.equity_symbol_mappings.c
-
-        # These are the columns we actually want.
-        data_cols = (cols.sid,) + tuple(cols[name] for name in SYMBOL_COLUMNS)
-
-        # Also select the max of end_date so that all non-grouped fields take
-        # on the value associated with the max end_date.
-        # to_select = data_cols + (sa.func.max(cols.end_date),)
-        func_rank = (
-            sa.func.rank()
-            .over(order_by=cols.end_date.desc(), partition_by=cols.sid)
-            .label("rnk")
-        )
-        to_select = data_cols + (func_rank,)
-
-        subquery = (
-            sa.select(*to_select)
-            .where(cols.sid.in_(map(int, sid_group)))
-            .subquery("sq")
-        )
-        query = (
-            sa.select(subquery.columns)
-            .filter(subquery.c.rnk == 1)
-            .select_from(subquery)
-        )
-        return query
-
-    def _lookup_most_recent_symbols(self, sids: list[int]):
-        with self.engine.connect() as conn:
-            return {
-                row.sid: {c: row[c] for c in SYMBOL_COLUMNS}
-                for row in concat(
-                    conn.execute(self._select_most_recent_symbols_chunk(sid_group=sid_group))
-                    .mappings()
-                    .fetchall()
-                    for sid_group in partition_all(n=SQLITE_MAX_VARIABLE_NUMBER, seq=sids)
-                )
-            }
-
-    def _retrieve_asset_dicts(self, sids: list[int], asset_tbl: Table, querying_equities):
-        if not sids:
-            return
-
-        if querying_equities:
-
-            def mkdict(
-                    row,
-                    exchanges=self.exchange_info,
-                    symbols=self._lookup_most_recent_symbols(sids=sids),
-            ):
-                d = dict(row)
-                d["exchange_info"] = exchanges[d.pop("exchange")]
-                # we are not required to have a symbol for every asset, if
-                # we don't have any symbols we will just use the empty string
-                return merge(d, symbols.get(row["sid"], {}))
-
-        else:
-
-            def mkdict(row, exchanges=self.exchange_info):
-                d = dict(row)
-                d["exchange_info"] = exchanges[d.pop("exchange")]
-                return d
-
-        for assets in group_into_chunks(sids):
-            # Load misses from the db.
-            query = self._select_assets_by_sid(asset_tbl, assets)
-
-            with self.engine.connect() as conn:
-                for row in conn.execute(query).mappings().fetchall():
-                    yield _convert_asset_timestamp_fields(mkdict(row))
-
-    def _retrieve_assets(self, sids: list[int], asset_tbl: Table, asset_type: type):
-        """Internal function for loading assets from a table.
-
-        This should be the only method of `AssetFinder` that writes Assets into
-        self._asset_cache.
-
-        Parameters
-        ---------
-        sids : iterable of int
-            Asset ids to look up.
-        asset_tbl : sqlalchemy.Table
-            Table from which to query assets.
-        asset_type : type
-            Type of asset to be constructed.
-
-        Returns
-        -------
-        assets : dict[int -> Asset]
-            Dict mapping requested sids to the retrieved assets.
-        """
-        # Fastpath for empty request.
-        if not sids:
-            return {}
-
-        cache = self._asset_cache
-        hits = {}
-
-        querying_equities = issubclass(asset_type, Equity)
-        filter_kwargs = (
-            _filter_equity_kwargs if querying_equities else _filter_future_kwargs
-        )
-
-        rows = self._retrieve_asset_dicts(sids, asset_tbl, querying_equities)
-        for row in rows:
-            sid = row["sid"]
-            asset = asset_type(**filter_kwargs(row))
-            hits[sid] = cache[sid] = asset
-
-        # If we get here, it means something in our code thought that a
-        # particular sid was an equity/future and called this function with a
-        # concrete type, but we couldn't actually resolve the asset.  This is
-        # an error in our code, not a user-input error.
-        misses = tuple(set(sids) - hits.keys())
-        if misses:
-            if querying_equities:
-                raise EquitiesNotFound(sids=misses)
-            else:
-                raise FutureContractsNotFound(sids=misses)
-        return hits
-
-    def _lookup_symbol_strict(self, ownership_map: dict[(str, str), list[OwnershipPeriod]], multi_country: bool,
-                              symbol: str, as_of_date: datetime.datetime):
-        """Resolve a symbol to an asset object without fuzzy matching.
-
-        Parameters
-        ----------
-        ownership_map : dict[(str, str), list[OwnershipPeriod]]
-            The mapping from split symbols to ownership periods.
-        multi_country : bool
-            Does this mapping span multiple countries?
-        symbol : str
-            The symbol to look up.
-        as_of_date : datetime or None
-            If multiple assets have held this sid, which day should the
-            resolution be checked against? If this value is None and multiple
-            sids have held the ticker, then a MultipleSymbolsFound error will
-            be raised.
-
-        Returns
-        -------
-        asset : AssetModel
-            The asset that held the given symbol.
-
-        Raises
-        ------
-        SymbolNotFound
-            Raised when the symbol or symbol as_of_date pair do not map to
-            any assets.
-        MultipleSymbolsFound
-            Raised when multiple assets held the symbol. This happens if
-            multiple assets held the symbol at disjoint times and
-            ``as_of_date`` is None, or if multiple assets held the symbol at
-            the same time and``multi_country`` is True.
-
-        Notes
-        -----
-        The resolution algorithm is as follows:
-
-        - Split the symbol into the company and share class component.
-        - Do a dictionary lookup of the
-          ``(company_symbol, share_class_symbol)`` in the provided ownership
-          map.
-        - If there is no entry in the dictionary, we don't know about this
-          symbol so raise a ``SymbolNotFound`` error.
-        - If ``as_of_date`` is None:
-          - If more there is more than one owner, raise
-            ``MultipleSymbolsFound``
-          - Otherwise, because the list mapped to a symbol cannot be empty,
-            return the single asset.
-        - Iterate through all of the owners:
-          - If the ``as_of_date`` is between the start and end of the ownership
-            period:
-            - If multi_country is False, return the found asset.
-            - Otherwise, put the asset in a list.
-        - At the end of the loop, if there are no candidate assets, raise a
-          ``SymbolNotFound``.
-        - If there is exactly one candidate, return it.
-        - Othewise, raise ``MultipleSymbolsFound`` because the ticker is not
-          unique across countries.
-        """
-        # split the symbol into the components, if there are no
-        # company/share class parts then share_class_symbol will be empty
-        company_symbol, share_class_symbol = split_delimited_symbol(symbol=symbol)
-        try:
-            owners = ownership_map[company_symbol, share_class_symbol]
-            assert owners, "empty owners list for %r" % symbol
-        except KeyError as exc:
-            # no equity has ever held this symbol
-            raise SymbolNotFound(symbol=symbol) from exc
-
-        if not as_of_date:
-            # exactly one equity has ever held this symbol, we may resolve
-            # without the date
-            if len(owners) == 1:
-                return self.retrieve_asset(sid=owners[0].sid)
-
-            options = {self.retrieve_asset(sid=owner.sid) for owner in owners}
-
-            if multi_country:
-                country_codes = map(attrgetter("country_code"), options)
-
-                if len(set(country_codes)) > 1:
-                    raise SameSymbolUsedAcrossCountries(
-                        symbol=symbol, options=dict(zip(country_codes, options))
-                    )
-
-            # more than one equity has held this ticker, this
-            # is ambiguous without the date
-            raise MultipleSymbolsFound(symbol=symbol, options=options)
-
-        options = []
-        country_codes = []
-        for start, end, sid, _ in owners:
-            if start.date() <= as_of_date < end.date():
-                # find the equity that owned it on the given asof date
-                asset = self.retrieve_asset(sid=sid)
-
-                # if this asset owned the symbol on this asof date and we are
-                # only searching one country, return that asset
-                if not multi_country:
-                    return asset
-                else:
-                    options.append(asset)
-                    country_codes.append(asset.country_code)
-
-        if not options:
-            # no equity held the ticker on the given asof date
-            raise SymbolNotFound(symbol=symbol)
-
-        # if there is one valid option given the asof date, return that option
-        if len(options) == 1:
-            return options[0]
-
-        # if there's more than one option given the asof date, a country code
-        # must be passed to resolve the symbol to an asset
-        raise SameSymbolUsedAcrossCountries(
-            symbol=symbol, options=dict(zip(country_codes, options))
-        )
-
-    def _choose_symbol_ownership_map(self, country_code: str):
-        if country_code is None:
-            return self.symbol_ownership_map
-
-        return self.symbol_ownership_maps_by_country_code.get(country_code)
-
-    def lookup_symbol(self, symbol: str, as_of_date: datetime.datetime,
-                      country_code: str | None = None):
-        """Lookup an equity by symbol.
-
-        Parameters
-        ----------
-        symbol : str
-            The ticker symbol to resolve.
-        as_of_date : datetime.datetime or None
-            Look up the last owner of this symbol as of this datetime.
-            If ``as_of_date`` is None, then this can only resolve the equity
-            if exactly one equity has ever owned the ticker.
-        country_code : str or None, optional
-            The country to limit searches to. If not provided, the search will
-            span all countries which increases the likelihood of an ambiguous
-            lookup.
-
-        Returns
-        -------
-        equity : Equity
-            The equity that held ``symbol`` on the given ``as_of_date``, or the
-            only equity to hold ``symbol`` if ``as_of_date`` is None.
-
-        Raises
-        ------
-        SymbolNotFound
-            Raised when no equity has ever held the given symbol.
-        MultipleSymbolsFound
-            Raised when no ``as_of_date`` is given and more than one equity
-            has held ``symbol``. This is also raised when ``fuzzy=True`` and
-            there are multiple candidates for the given ``symbol`` on the
-            ``as_of_date``. Also raised when no ``country_code`` is given and
-            the symbol is ambiguous across multiple countries.
-        """
-        if symbol is None:
-            raise TypeError(
-                "Cannot lookup asset for symbol of None for "
-                "as of date %s." % as_of_date
-            )
-
-        f = self._lookup_symbol_strict
-        mapping = self._choose_symbol_ownership_map(country_code)
-
-        if mapping is None:
-            raise SymbolNotFound(symbol=symbol)
-        return f(
-            mapping,
-            country_code is None,
-            symbol,
-            as_of_date,
-        )
 
     async def get_ordered_contracts(self, root_symbol: str, mic: str | None = None) -> OrderedContracts:
         """Return the contract chain of ``root_symbol``, ordered by expiration.
@@ -2364,21 +1810,8 @@ class SqlAlchemyAssetRepository(AssetRepository):
         return lifetimes
 
     @aiocache.cached(cache=Cache.MEMORY)
-    async def _compute_asset_lifetimes(self, assets: frozenset[Asset]) -> Lifetimes:
+    async def _compute_asset_lifetimes(self, assets: frozenset[ExchangeAsset]) -> Lifetimes:
         """Compute and cache a recarray of asset lifetimes"""
-        # sids = starts = ends = []
-        # async with self.session_maker() as session:
-        #     sids_subquery = select(EquitySymbolMappingModel.sid).join(
-        #         ExchangeInfo, onclause=ExchangeInfo.exchange == EquitySymbolMappingModel.exchange
-        #     ).where(ExchangeInfo.country_code.in_(country_codes))
-        #     q = select(
-        #         EquityModel.sid,
-        #         EquityModel.start_date,
-        #         EquityModel.end_date
-        #     ).where(EquityModel.sid.in_(sids_subquery))
-        #     result = list((await session.execute(q)))
-        #     if result:
-        #         sids, starts, ends = zip(*result)
         sids = [asset.sid for asset in assets]
         starts = [asset.start_date for asset in assets]
         ends = [asset.end_date for asset in assets]
@@ -2394,7 +1827,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         end[np.isnan(end)] = np.iinfo(int).max  # convert missing end to INTMAX
         return Lifetimes(sid, start.astype("i8"), end.astype("i8"))
 
-    async def asset_lifetimes(self, assets: list[Asset], dates: pd.DatetimeIndex, include_start_date: bool):
+    async def asset_lifetimes(self, assets: list[ExchangeAsset], dates: pd.DatetimeIndex, include_start_date: bool):
         """Compute a DataFrame representing asset lifetimes for the specified date
         range.
 
@@ -2430,36 +1863,6 @@ class SqlAlchemyAssetRepository(AssetRepository):
         lifetimes = await self._compute_asset_lifetimes(assets=frozenset(assets))
         return lifetimes
 
-    # def equities_sids_for_country_code(self, country_code: str):
-    #     """Return all of the sids for a given country.
-    #
-    #     Parameters
-    #     ----------
-    #     country_code : str
-    #         An ISO 3166 alpha-2 country code.
-    #
-    #     Returns
-    #     -------
-    #     tuple[int]
-    #         The sids whose exchanges are in this country.
-    #     """
-    #     sids = self._compute_asset_lifetimes(country_codes=[country_code]).sid
-    #     return tuple(sids.tolist())
-
-    # def equities_sids_for_exchange_name(self, exchange_name: str):
-    #     """Return all of the sids for a given exchange_name.
-    #
-    #     Parameters
-    #     ----------
-    #     exchange_name : str
-    #
-    #     Returns
-    #     -------
-    #     tuple[int]
-    #         The sids whose exchanges are in this country.
-    #     """
-    #     sids = self._compute_asset_lifetimes(exchange_names=[exchange_name]).sid
-    #     return tuple(sids.tolist())
 
     def to_json(self):
         return {

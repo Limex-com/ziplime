@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 
-import pandas as pd
-
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 

@@ -31,7 +31,6 @@ from ziplime.assets.entities.symbol_universe import SymbolsUniverse
 from ziplime.assets.repositories.adjustments_repository import AdjustmentRepository
 from ziplime.assets.repositories.asset_repository import AssetRepository
 from ziplime.errors import AmbiguousSymbol
-from ziplime.trading.entities.trading_pair import TradingPair
 from ziplime.assets.entities.asset import Asset
 
 class AssetService:
@@ -169,8 +168,6 @@ class AssetService:
     async def save_exchanges(self, exchanges: list[ExchangeInfo]) -> None:
         return await self._asset_repository.save_exchanges(exchanges=exchanges)
 
-    async def save_trading_pairs(self, trading_pairs: list[TradingPair]) -> None:
-        ...
 
     async def get_asset_by_sid(self, sid: int) -> ExchangeAsset | None:
         return await self._asset_repository.get_asset_by_sid(sid=sid)

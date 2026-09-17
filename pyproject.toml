@@ -42,6 +42,11 @@ deltalake = "^1.6.1"
 httpx = {extras = ["http2"], version = "^0.28.1"}
 pytest = "^9.1.1"
 pytest-asyncio = "^1.4.0"
+mcp = "^2.2.0"
+vollib = "^1.0.11"
+vectorbt = "==0.28.2"
+coverage = "^7.16.1"
+pytest-cov = "^7.1.0"
 
 [tool.poetry.group.huggingface]
 # Reading point-in-time datasets from the Hugging Face Hub. Optional, so an install that never
@@ -114,6 +119,7 @@ markdown-include-variants = "^0.0.5"
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.1.1"
 pytest-asyncio = "^1.4.0"
+coverage="^7.16.1"
 
 [tool.poetry.scripts]
 ziplime = "ziplime.__main__:main"

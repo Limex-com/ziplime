@@ -148,10 +148,10 @@ class Exchange(DataSource, ABC):
         return await self.data_source.get_current_future_chain(
             continuous_future=continuous_future, dt=dt)
 
-    async def get_data_by_limit(self, fields: frozenset[str],
+    async def get_data_by_limit(self, fields: frozenset[str] | None,
                                 limit: int,
                                 end_date: datetime.datetime,
-                                frequency: datetime.timedelta,
+                                frequency: datetime.timedelta  | Period,
                                 assets: frozenset[ExchangeAsset],
                                 include_end_date: bool,
                                 ) -> pl.DataFrame:

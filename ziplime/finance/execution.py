@@ -15,15 +15,11 @@
 
 import abc
 import datetime
-import uuid
 from sys import float_info
 from numpy import isfinite
 import ziplime.utils.math_utils as zp_math
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.errors import BadOrderParameters
-from ziplime.trading.entities.orders.market_order_request import MarketOrderRequest
-from ziplime.trading.entities.trading_pair import TradingPair
-from ziplime.trading.enums.order_side import OrderSide
 from ziplime.trading.enums.order_type import OrderType
 from ziplime.utils.compat import consistent_round
 
@@ -74,20 +70,6 @@ class MarketOrder(ExecutionStyle):
 
     def to_order_type(self) -> OrderType:
         return OrderType.MARKET
-
-    async def to_order_request(self, base_asset: ExchangeAsset, quote_asset: ExchangeAsset,
-                               quantity: int,
-                               creation_dt: datetime.datetime,
-                               ) -> MarketOrderRequest:
-        order_req = MarketOrderRequest(
-            order_id=uuid.uuid4().hex,
-            trading_pair=TradingPair(base_asset=base_asset,
-                                     quote_asset=quote_asset),
-            order_side=OrderSide.BUY if quantity > 0 else OrderSide.SELL,
-            quantity=float(quantity),
-            creation_date=creation_dt
-        )
-        return order_req
 
     def __str__(self):
         return "MarketOrder()"

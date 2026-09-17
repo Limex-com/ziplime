@@ -6,10 +6,6 @@ from toolz import compose
 from operator import attrgetter, methodcaller
 
 from ziplime.utils.numpy_utils import changed_locations
-from ziplime.utils.sharedoc import (
-    templated_docstring,
-    PIPELINE_DOWNSAMPLING_FREQUENCY_DOC,
-)
 
 _dt_to_period = {
     "year_start": attrgetter("year"),
@@ -21,7 +17,6 @@ _dt_to_period = {
 SUPPORTED_DOWNSAMPLE_FREQUENCIES = frozenset(_dt_to_period)
 
 
-@templated_docstring(frequency=PIPELINE_DOWNSAMPLING_FREQUENCY_DOC)
 def select_sampling_indices(dates, frequency):
     """
     Choose entries from ``dates`` to use for downsampling at ``frequency``.
