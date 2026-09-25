@@ -3,24 +3,15 @@ from typing import Sequence
 import os
 from pathlib import Path
 
-import asyncio
-from exchange_calendars import ExchangeCalendar
-from scipy.constants import micro
-
-from ziplime.assets.models.exchange_asset_model import ExchangeAssetModel
 from ziplime.utils.calendar_utils import get_calendar
+from ziplime.utils.date_utils import normalize_datetime
 
 from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES
-from ziplime.assets.entities.currency import Currency
-from ziplime.assets.entities.equity import Equity
-from ziplime.assets.entities.symbol_universe import SymbolsUniverse
-from ziplime.assets.models.exchange_info_model import ExchangeInfoModel
 from ziplime.assets.repositories.sqlalchemy_adjustments_repository import SqlAlchemyAdjustmentRepository
 from ziplime.assets.repositories.sqlalchemy_asset_repository import SqlAlchemyAssetRepository
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.constants.period import Period
-from ziplime.constants.stock_symbols import ALL_US_STOCK_SYMBOLS
 from ziplime.data.data_sources.asset_data_source import AssetDataSource
 from ziplime.data.services.bundle_service import BundleService
 from ziplime.data.services.data_bundle_source import DataBundleSource
@@ -236,8 +227,8 @@ async def ingest_market_data(
     # mistyped symbol, a window the vendor does not cover -- and a caller that gets None back can
     # say so instead of reporting success over an empty bundle.
     return await bundle_service.ingest_market_data_bundle(
-        date_start=start_date.replace(tzinfo=calendar.tz),
-        date_end=end_date.replace(tzinfo=calendar.tz),
+        date_start=normalize_datetime(start_date, calendar.tz),
+        date_end=normalize_datetime(end_date, calendar.tz),
         bundle_storage=bundle_storage,
         data_bundle_source=data_bundle_source,
         frequency=data_frequency,
@@ -316,8 +307,8 @@ async def ingest_custom_data(
     # bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
 
     await bundle_service.ingest_custom_data_bundle(
-        date_start=start_date.replace(tzinfo=calendar.tz),
-        date_end=end_date.replace(tzinfo=calendar.tz),
+        date_start=normalize_datetime(start_date, calendar.tz),
+        date_end=normalize_datetime(end_date, calendar.tz),
         bundle_storage=bundle_storage,
         data_bundle_source=data_bundle_source,
         frequency=data_frequency,

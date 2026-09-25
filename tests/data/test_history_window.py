@@ -17,6 +17,7 @@ import polars as pl
 
 from ziplime.constants.data_type import DataType
 from ziplime.data.services.data_source import DataSource
+from ziplime.utils.calendar_utils import get_calendar
 
 NOW = datetime.datetime(2024, 6, 30, tzinfo=datetime.timezone.utc)
 
@@ -46,8 +47,11 @@ def make_source() -> DataSource:
     rows.append({"date": NOW - datetime.timedelta(days=30), "sid": RARE.sid, "value": 1.0})
     rows.append({"date": NOW - datetime.timedelta(days=9 * 365), "sid": RARE.sid, "value": 2.0})
 
-    source = DataSource(name="events", start_date=datetime.date(2000, 1, 1),
-                        end_date=datetime.date(2030, 1, 1),
+    source = DataSource(
+                        name="events",
+                        start_date=datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc),
+                        end_date=datetime.datetime(2030, 1, 1, tzinfo=datetime.timezone.utc),
+                        trading_calendar=get_calendar("XNYS"),
                         frequency=datetime.timedelta(days=1),
                         original_frequency=datetime.timedelta(days=1),
                         data_type=DataType.CUSTOM)

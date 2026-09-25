@@ -27,7 +27,7 @@ from ziplime.data.services.data_bundle_source import DataBundleSource
 from ziplime.data.services.bundle_registry import BundleRegistry
 from ziplime.data.services.bundle_storage import BundleStorage
 from ziplime.utils.class_utils import load_class
-from ziplime.utils.date_utils import period_to_timedelta
+from ziplime.utils.date_utils import normalize_datetime, period_to_timedelta
 from ziplime.utils.data_utils import _backfill_symbol_data, backfill_sid_data
 from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.utils.calendar_utils import get_calendar
@@ -96,13 +96,13 @@ class BundleService:
         bundle = DataBundle(
             name=bundle_name,
             version=metadata["version"],
-            start_date=metadata["start_date"].replace(tzinfo=calendar.tz),
-            end_date=metadata["end_date"].replace(tzinfo=calendar.tz),
+            start_date=normalize_datetime(metadata["start_date"], calendar.tz),
+            end_date=normalize_datetime(metadata["end_date"], calendar.tz),
             trading_calendar=calendar,
             frequency=frequency,
             original_frequency=frequency,
             data_type=DataType(metadata["data_type"]),
-            timestamp=metadata["timestamp"].replace(tzinfo=calendar.tz),
+            timestamp=normalize_datetime(metadata["timestamp"], calendar.tz),
         )
         if bundle.data_type != DataType.MARKET_DATA:
             raise ValueError(f"Bundle {bundle_name} is not MARKET_DATA.")

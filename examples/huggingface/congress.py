@@ -29,6 +29,7 @@ Three filters are applied for reasons the dataset documents:
 import datetime
 
 import polars as pl
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.data.data_sources.huggingface.huggingface_data_source import (
     HuggingFaceDataSource, load_table,
@@ -91,7 +92,8 @@ async def load_disclosures(revision: str | None = None,
 
 async def mount_disclosures(frame: pl.DataFrame, name: str, asset_service,
                             start_date: datetime.date, end_date: datetime.date,
-                            session_timezone: str, fields: list[str] | None = None,
+                            trading_calendar: ExchangeCalendar,
+                            fields: list[str] | None = None,
                             revision=None) -> HuggingFaceDataSource:
     """Mount a prepared disclosure frame on its **filing** date.
 
@@ -102,7 +104,7 @@ async def mount_disclosures(frame: pl.DataFrame, name: str, asset_service,
     return HuggingFaceDataSource.from_frame(
         frame=frame, name=name, knowledge_column="filing_date", entity_column="ticker",
         event_column="transaction_date", asset_service=asset_service,
-        start_date=start_date, end_date=end_date, session_timezone=session_timezone,
+        start_date=start_date, end_date=end_date, trading_calendar=trading_calendar,
         fields=fields, revision=revision)
 
 

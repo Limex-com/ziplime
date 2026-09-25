@@ -6,6 +6,7 @@ from exchange_calendars import ExchangeCalendar
 
 from ziplime.trading.enums.simulation_event import SimulationEvent
 from ziplime.gens.domain.trading_clock import TradingClock
+from ziplime.utils.date_utils import normalize_datetime
 
 
 class RealtimeClock(TradingClock):
@@ -17,6 +18,10 @@ class RealtimeClock(TradingClock):
                  timedelta_diff_from_current_time: datetime.timedelta = None,
                  ):
         super().__init__(trading_calendar=trading_calendar, emission_rate=emission_rate)
+        if start_date is not None:
+            start_date = normalize_datetime(start_date, trading_calendar.tz)
+        if end_date is not None:
+            end_date = normalize_datetime(end_date, trading_calendar.tz)
         if start_date is not None and end_date is not None:
             if start_date >= end_date:
                 raise ValueError("Period start falls after period end.")
@@ -42,7 +47,7 @@ class RealtimeClock(TradingClock):
         self.end_session = self.end_date.date()
 
         if trading_calendar.sessions_distance(self.start_session, self.end_session) < 1:
-            raise Exception(
+            raise ValueError(
                 f"There are no trading days between {self.start_session} and {self.end_session}")
 
         if not trading_calendar.is_session(self.start_session):

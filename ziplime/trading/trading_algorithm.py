@@ -79,7 +79,6 @@ from ziplime.finance.margin import FuturesMarginModel
 from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.equity import Equity
-from ziplime.finance.domain.simulation_paremeters import SimulationParameters
 from ziplime.finance.metrics_tracker import MetricsTracker
 from ziplime.pipeline import Pipeline
 import ziplime.pipeline.domain as domain
@@ -95,7 +94,6 @@ from ziplime.utils.api_support import (
     disallowed_in_before_trading_start,
 )
 from ziplime.utils.compat import ExitStack
-from ziplime.utils.date_utils import make_utc_aware
 from ziplime.utils.cache import ExpiringCache
 
 from ziplime.utils.events import (
@@ -115,7 +113,6 @@ from ziplime.sources.benchmark_source import BenchmarkSource
 from ziplime.vectorized.signals import (
     PricePanel, SignalPanel, as_of_panel, normalise_signals, verify_causality,
 )
-import polars as pl
 
 
 # For creating and storing pipeline instances
@@ -1162,7 +1159,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return await HuggingFaceDataSource.mount(
             name, asset_service=self.asset_service,
             start_date=self.clock.start_session, end_date=self.clock.end_session,
-            session_timezone=str(self.clock.trading_calendar.tz))
+            trading_calendar=self.clock.trading_calendar)
 
     @api_method
     async def huggingface_dataset(self, repo_id: str, config: str | None = None,
@@ -1206,7 +1203,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             start_date=start_date or self.clock.start_session,
             end_date=end_date or self.clock.end_session,
             fields=fields, name=name,
-            session_timezone=str(self.clock.trading_calendar.tz))
+            trading_calendar=self.clock.trading_calendar)
         self.current_data.data_sources[source.name] = source
         return source
 

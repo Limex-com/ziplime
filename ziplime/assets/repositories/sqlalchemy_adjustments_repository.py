@@ -1,5 +1,4 @@
 import datetime
-import sqlite3
 from collections import namedtuple
 from collections.abc import Sequence
 from functools import lru_cache
@@ -204,10 +203,6 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
 
         start_date = dates[0].to_pydatetime().date()
         end_date = dates[-1].to_pydatetime().date()
-        # TODO: localize dates for adjustments
-        # start_date = dates[0].tz_localize(self.trading_calendar.tz).to_pydatetime().date()
-        # end_date = dates[-1].tz_localize(self.trading_calendar.tz).to_pydatetime().date()
-
         if should_include_splits:
             split_sids = await self._get_split_sids(
                 db_session,

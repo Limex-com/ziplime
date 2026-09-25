@@ -36,10 +36,11 @@ class CSVDataSource(DataSource):
         self._data_frequency_use_window_end = data_frequency_use_window_end
         self._symbols = symbols
         self.data = None
-        self.start_date = None
-        self.end_date = None
+        self.start_date = trading_calendar.first_session.tz_localize(trading_calendar.tz).to_pydatetime()
+        self.end_date = trading_calendar.last_session.tz_localize(trading_calendar.tz).to_pydatetime()
         self.data_type = data_type
-        super().__init__(name=name, start_date=self.start_date, end_date=self.end_date, frequency=frequency,
+        super().__init__(name=name, start_date=self.start_date, end_date=self.end_date,
+                         trading_calendar=trading_calendar, frequency=frequency,
                          data_type=data_type, original_frequency=frequency)
 
     async def load_data_in_memory(self) -> pl.DataFrame:

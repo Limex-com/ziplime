@@ -114,7 +114,7 @@ class FundamentalsTestCase(unittest.IsolatedAsyncioTestCase):
             frame=self.statements_frame(), name="fundamentals",
             knowledge_column="knowledge_date", entity_column="ticker", event_column=None,
             asset_service=self.asset_service, start_date=BUNDLE_START, end_date=END,
-            session_timezone=str(self.calendar.tz), fields=FIELDS, resolution=resolution)
+            trading_calendar=self.calendar, fields=FIELDS, resolution=resolution)
 
     def bundle(self) -> DataBundle:
         rows = [{"date": stamp, "sid": self.listings[t].sid, "symbol": t, "mic": "XNYS",
@@ -228,7 +228,7 @@ class StalenessTests(FundamentalsTestCase):
         source = HuggingFaceDataSource.from_frame(
             frame=frame, name="fundamentals", knowledge_column="knowledge_date",
             entity_column="ticker", event_column=None, asset_service=self.asset_service,
-            start_date=BUNDLE_START, end_date=END, session_timezone=str(self.calendar.tz),
+            start_date=BUNDLE_START, end_date=END, trading_calendar=self.calendar,
             fields=FIELDS, resolution=Resolution.COALESCE)
         await source.materialize()
         rows = await source.get_data_by_window(
@@ -310,7 +310,7 @@ class LookAheadTests(FundamentalsTestCase):
             frame=frame, name="exact", knowledge_column="knowledge_date",
             entity_column="ticker", event_column=None, asset_service=self.asset_service,
             start_date=BUNDLE_START, end_date=END,
-            session_timezone=str(self.calendar.tz), fields=FIELDS,
+            trading_calendar=self.calendar, fields=FIELDS,
             resolution=Resolution.COALESCE)
         await source.materialize()
         rows = await source.get_data_by_window(

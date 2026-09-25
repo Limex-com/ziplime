@@ -60,6 +60,13 @@ def strip_time_and_timezone_info(dt: datetime.datetime) -> datetime.datetime:
     return dt.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def normalize_datetime(dt: datetime.datetime, timezone: datetime.tzinfo) -> datetime.datetime:
+    """Interpret naive datetimes in ``timezone`` and convert aware values to it."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone)
+    return dt.astimezone(timezone)
+
+
 def period_to_timedelta(period: Period | datetime.timedelta) -> datetime.timedelta:
     if type(period) is datetime.timedelta:
         return period

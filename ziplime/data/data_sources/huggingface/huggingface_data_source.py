@@ -40,6 +40,7 @@ import enum
 import re
 from typing import Any, Self
 from zoneinfo import ZoneInfo
+from exchange_calendars import ExchangeCalendar
 
 import polars as pl
 import structlog
@@ -55,6 +56,8 @@ from ziplime.data.data_sources.huggingface.manifest import (
     resolve_knowledge_column,
 )
 from ziplime.data.services.data_source import DataSource
+from ziplime.utils.date_utils import normalize_datetime
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 _logger = structlog.get_logger(__name__)
 
@@ -174,18 +177,16 @@ class HuggingFaceDataSource(DataSource):
                  config: str, repo_files: tuple[str, ...], knowledge_column: str,
                  entity_column: str, event_column: str | None, asset_service,
                  start_date: datetime.date,
-                 end_date: datetime.date, fields: frozenset[str] | None = None,
+                 end_date: datetime.date, trading_calendar: ExchangeCalendar,
+                 fields: frozenset[str] | None = None,
                  frequency: datetime.timedelta | Period = datetime.timedelta(days=1),
-                 session_timezone: str = "UTC", row_filter: pl.Expr | None = None,
+                 row_filter: pl.Expr | None = None,
                  resolution: Resolution = Resolution.LATEST_ROW):
-        # Timestamps are presented in the simulation's own timezone, not in UTC. polars refuses
-        # to compare two tz-aware columns in different zones, and every window filter in the
-        # engine compares this source's `date` against the simulation clock -- which is stamped
-        # in the trading calendar's zone. The instant is unchanged; only its label moves.
-        self.session_timezone = session_timezone
+        timezone = str(trading_calendar.tz)
         super().__init__(name=name,
-                         start_date=_at_zone(start_date, session_timezone),
-                         end_date=_at_zone(end_date, session_timezone, end_of_day=True),
+                         start_date=_at_zone(start_date, timezone),
+                         end_date=_at_zone(end_date, timezone, end_of_day=True),
+                         trading_calendar=trading_calendar,
                          frequency=frequency, original_frequency=frequency,
                          data_type=DataType.CUSTOM)
         self.window_start = _as_date(start_date)
@@ -213,9 +214,9 @@ class HuggingFaceDataSource(DataSource):
     @classmethod
     def from_frame(cls, frame: pl.DataFrame, name: str, knowledge_column: str,
                    entity_column: str, asset_service, start_date: datetime.date,
-                   end_date: datetime.date, event_column: str | None = None,
+                   end_date: datetime.date, trading_calendar: ExchangeCalendar,
+                   event_column: str | None = None,
                    fields: list[str] | frozenset[str] | None = None,
-                   session_timezone: str = "UTC",
                    resolution: Resolution = Resolution.LATEST_ROW,
                    revision: hub.RepoRevision | None = None) -> Self:
         """Mount a frame the caller built, under the same point-in-time rules as a Hub config.
@@ -243,17 +244,18 @@ class HuggingFaceDataSource(DataSource):
             knowledge_column=knowledge_column, entity_column=entity_column,
             event_column=event_column, asset_service=asset_service,
             start_date=start_date, end_date=end_date,
-            fields=frozenset(fields) if fields else None, session_timezone=session_timezone,
+            fields=frozenset(fields) if fields else None, trading_calendar=trading_calendar,
             resolution=resolution)
         source._source_frame = frame
         return source
 
     @classmethod
-    async def mount(cls, address: str, config: str | None = None, revision: str | None = None,
+    async def mount(cls, address: str, trading_calendar: ExchangeCalendar,
+                    config: str | None = None, revision: str | None = None,
                     asset_service=None, start_date: datetime.date | None = None,
                     end_date: datetime.date | None = None,
                     fields: list[str] | frozenset[str] | None = None,
-                    name: str | None = None, session_timezone: str = "UTC",
+                    name: str | None = None,
                     row_filter: pl.Expr | None = None,
                     resolution: Resolution = Resolution.LATEST_ROW,
                     materialize: bool = False) -> Self:
@@ -271,8 +273,7 @@ class HuggingFaceDataSource(DataSource):
                 cannot reach; without it the whole dataset is downloaded.
             fields: Columns to keep, on top of ``date`` and ``sid``. All of them by default.
             name: What the strategy calls this source. Defaults to the address.
-            session_timezone: Zone to present timestamps in. Must match the simulation's trading
-                calendar, since every window filter compares the two.
+            trading_calendar: Calendar whose timezone is used for timestamps and query bounds.
             row_filter: A polars expression selecting the rows to keep, applied while the Parquet
                 is read rather than afterwards. This is how a table with many rows per instrument
                 is narrowed -- to one legislator, or to the rows a dataset documents as clean --
@@ -315,7 +316,7 @@ class HuggingFaceDataSource(DataSource):
             start_date=start_date or manifest.coverage_start or datetime.date(1900, 1, 1),
             end_date=end_date or manifest.coverage_end or datetime.date(2099, 12, 31),
             fields=frozenset(fields) if fields else None,
-            session_timezone=session_timezone, resolution=resolution)
+            trading_calendar=trading_calendar, resolution=resolution)
 
         _logger.info("Mounted a Hugging Face dataset",
                      dataset=pinned.describe(), config=spec.name,
@@ -345,7 +346,7 @@ class HuggingFaceDataSource(DataSource):
         # Normalise the knowledge column first, so the window filter compares like with like: a
         # Date column and a tz-aware bound do not compare in polars.
         knowledge = _to_session_time(self.knowledge_column, schema[self.knowledge_column],
-                                     self.session_timezone)
+                                     str(self.trading_calendar.tz))
         floored = 0
         if self.event_column and self.event_column in schema.names():
             # A knowledge date earlier than its own event is impossible, and these datasets carry
@@ -353,7 +354,7 @@ class HuggingFaceDataSource(DataSource):
             # describes, which would make it visible from the first bar of every backtest. The
             # event date is the earliest the row could conceivably have been known, so floor to it.
             event = _to_session_time(self.event_column, schema[self.event_column],
-                                     self.session_timezone)
+                                     str(self.trading_calendar.tz))
             knowledge_floored = pl.max_horizontal(knowledge, event)
             floored = int(
                 scan.select((knowledge < event).fill_null(False).sum()).collect().item() or 0)
@@ -477,7 +478,7 @@ class HuggingFaceDataSource(DataSource):
     async def get_data_by_limit(self, fields: frozenset[str] | None, limit: int,
                                 end_date: datetime.datetime,
                                 frequency: datetime.timedelta | Period,
-                                assets: frozenset[Asset], include_end_date: bool) -> pl.DataFrame:
+                                assets: frozenset[ExchangeAsset], include_end_date: bool) -> pl.DataFrame:
         """Serve a trailing window, materialising the dataset on the first call."""
         await self.materialize()
         return await super().get_data_by_limit(
@@ -487,14 +488,14 @@ class HuggingFaceDataSource(DataSource):
     async def get_data_by_window(self, fields: frozenset[str] | None, since: datetime.timedelta,
                                  end_date: datetime.datetime,
                                  frequency: datetime.timedelta | Period,
-                                 assets: frozenset[Asset], include_end_date: bool) -> pl.DataFrame:
+                                 assets: frozenset[ExchangeAsset], include_end_date: bool) -> pl.DataFrame:
         """Serve a calendar-time window, materialising the dataset on the first call."""
         await self.materialize()
         return await super().get_data_by_window(
             fields=fields, since=since, end_date=end_date, frequency=frequency, assets=assets,
             include_end_date=include_end_date)
 
-    async def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str] | None,
+    async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str] | None,
                              dt: datetime.datetime, frequency=None, **kwargs) -> pl.DataFrame:
         """The current state per instrument, resolved the way this source's data requires.
 
@@ -545,15 +546,18 @@ def _as_date(value: datetime.date | datetime.datetime) -> datetime.date:
     return value.date() if isinstance(value, datetime.datetime) else value
 
 
-def _at_zone(day: datetime.date, timezone: str,
+def _at_zone(day: datetime.date | datetime.datetime, timezone: str,
              end_of_day: bool = False) -> datetime.datetime:
     """A window bound as an instant in ``timezone``, matching the mounted date column."""
     zone = ZoneInfo(timezone)
     if isinstance(day, datetime.datetime):
-        moment = day if day.tzinfo else day.replace(tzinfo=zone)
-        return moment.astimezone(zone)
-    return datetime.datetime.combine(
-        day, datetime.time.max if end_of_day else datetime.time.min, tzinfo=zone)
+        return normalize_datetime(day, zone)
+    return normalize_datetime(
+        datetime.datetime.combine(
+            day, datetime.time.max if end_of_day else datetime.time.min
+        ),
+        zone,
+    )
 
 
 def _to_session_time(column: str, dtype: pl.DataType, timezone: str) -> pl.Expr:

@@ -644,4 +644,3 @@ class EarningsEstimatesLoader(PipelineLoader):
         return last_per_qtr, stacked_last_per_qtr
 
 
-
