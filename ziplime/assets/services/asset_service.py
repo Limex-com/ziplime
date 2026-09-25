@@ -156,10 +156,10 @@ class AssetService:
     async def import_bond_events(self, bond_events: list[BondEvent]) -> list[BondEvent]:
         return await self._asset_repository.save_bond_events(bond_events=bond_events)
 
-    async def import_dividends(self, dividends: list[DividendPayout]):
+    async def import_dividends(self, dividends: list[DividendPayout]) -> list[DividendPayout]:
         return await self._asset_repository.save_dividends(dividends=dividends)
 
-    async def import_splits(self, splits: list[Split]):
+    async def import_splits(self, splits: list[Split]) -> list[Split]:
         return await self._asset_repository.save_splits(splits=splits)
 
     async def save_exchange_assets(self, exchange_assets: list[ExchangeAsset]) -> list[ExchangeAsset]:
@@ -268,13 +268,18 @@ class AssetService:
         return await self._adjustments_repository.get_stock_dividends(sid=sid,
                                                                       trading_days=trading_days)
 
-    async def get_splits(self, assets: list[Asset], date):
+    async def get_splits(self, assets: list[Asset], date: datetime.date) -> list[Split]:
         return await self._asset_repository.get_splits(date=date, assets=assets)
 
     async def get_symbols_universe(self, name: str, dt: datetime.date) -> SymbolsUniverse | None:
         return await self._asset_repository.get_symbols_universe(name=name, dt=dt)
 
-    async def lifetimes(self, dates: pd.DatetimeIndex, include_start_date: bool, country_codes: list[str]):
+    async def lifetimes(
+        self,
+        dates: pd.DatetimeIndex,
+        include_start_date: bool,
+        country_codes: list[str],
+    ) -> pd.DataFrame:
         # normalize to a cache-key so that we can memoize results.
         lifetimes = await self._asset_repository.lifetimes(dates=dates, include_start_date=include_start_date,
                                                            country_codes=country_codes)
@@ -287,7 +292,12 @@ class AssetService:
         mask &= raw_dates[:, None] <= lifetimes.end[None, :]
         return pd.DataFrame(mask, index=dates, columns=lifetimes.sid)
 
-    async def asset_lifetimes(self, assets: list[ExchangeAsset], dates: pd.DatetimeIndex, include_start_date: bool):
+    async def asset_lifetimes(
+        self,
+        assets: list[ExchangeAsset],
+        dates: pd.DatetimeIndex,
+        include_start_date: bool,
+    ) -> pd.DataFrame:
         # normalize to a cache-key so that we can memoize results.
         lifetimes = await self._asset_repository.asset_lifetimes(dates=dates, include_start_date=include_start_date,
                                                                  assets=assets)
@@ -300,13 +310,26 @@ class AssetService:
         mask &= raw_dates[:, None] <= lifetimes.end[None, :]
         return pd.DataFrame(mask, index=dates, columns=lifetimes.sid)
 
-    async def retrieve_all(self, sids: list[int], default_none: bool = False):
+    async def retrieve_all(
+        self,
+        sids: list[int],
+        default_none: bool = False,
+    ) -> list[Asset | None]:
         return await self._asset_repository.retrieve_all(sids=sids, default_none=default_none)
 
-    async def load_pricing_adjustments(self, columns, dates, assets):
+    async def load_pricing_adjustments(
+        self,
+        columns: list[str],
+        dates: pd.DatetimeIndex,
+        assets: pd.Index,
+    ) -> list[object]:
         return await self._adjustments_repository.load_pricing_adjustments(columns=columns, dates=dates, assets=assets)
 
-    async def get_cash_dividends_with_ex_date(self, assets, date):
+    async def get_cash_dividends_with_ex_date(
+        self,
+        assets: list[Asset],
+        date: datetime.date,
+    ) -> list[DividendPayout]:
         return await self._asset_repository.get_cash_dividends_with_ex_date(date=date, assets=assets)
 
 

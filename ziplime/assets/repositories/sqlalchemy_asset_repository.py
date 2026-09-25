@@ -140,7 +140,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         self.session_maker = async_sessionmaker(autocommit=False, autoflush=True, bind=self.engine, class_=AsyncSession,
                                                 expire_on_commit=False)
 
-    async def add_all_and_commit(self, models: list[BaseModel]):
+    async def add_all_and_commit(self, models: list[BaseModel]) -> None:
         async with self.session_maker() as session:
             session.add_all(models)
             await session.commit()
@@ -339,7 +339,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
 
         return [self._currency_model_to_currency(currency_model=c) for c in assets_db]
 
-    async def save_symbol_universe(self, symbol_universe: SymbolsUniverse):
+    async def save_symbol_universe(self, symbol_universe: SymbolsUniverse) -> None:
         async with self.session_maker() as session:
             symbol_universe_model = SymbolsUniverseModel(symbol=symbol_universe.symbol,
                                                          universe_type=symbol_universe.universe_type,
@@ -1635,7 +1635,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         command.upgrade(alembic_cfg, "head")
 
 
-    def retrieve_asset(self, sid: int, default_none: bool = False):
+    def retrieve_asset(self, sid: int, default_none: bool = False) -> Asset | None:
         """
         Retrieve the Asset for a given sid.
         """
@@ -1653,7 +1653,11 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 return None
             raise SidsNotFound(sids=[sid]) from None
 
-    async def retrieve_all(self, sids: list[int], default_none: bool = False):
+    async def retrieve_all(
+        self,
+        sids: list[int],
+        default_none: bool = False,
+    ) -> list[Asset | None]:
         """Retrieve all assets in `sids`.
 
         Parameters
@@ -1773,7 +1777,12 @@ class SqlAlchemyAssetRepository(AssetRepository):
         end[np.isnan(end)] = np.iinfo(int).max  # convert missing end to INTMAX
         return Lifetimes(sid, start.astype("i8"), end.astype("i8"))
 
-    async def lifetimes(self, dates: pd.DatetimeIndex, include_start_date: bool, country_codes: list[str]):
+    async def lifetimes(
+        self,
+        dates: pd.DatetimeIndex,
+        include_start_date: bool,
+        country_codes: list[str],
+    ) -> Lifetimes:
         """Compute a DataFrame representing asset lifetimes for the specified date
         range.
 
@@ -1827,7 +1836,12 @@ class SqlAlchemyAssetRepository(AssetRepository):
         end[np.isnan(end)] = np.iinfo(int).max  # convert missing end to INTMAX
         return Lifetimes(sid, start.astype("i8"), end.astype("i8"))
 
-    async def asset_lifetimes(self, assets: list[ExchangeAsset], dates: pd.DatetimeIndex, include_start_date: bool):
+    async def asset_lifetimes(
+        self,
+        assets: list[ExchangeAsset],
+        dates: pd.DatetimeIndex,
+        include_start_date: bool,
+    ) -> Lifetimes:
         """Compute a DataFrame representing asset lifetimes for the specified date
         range.
 
@@ -1864,7 +1878,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         return lifetimes
 
 
-    def to_json(self):
+    def to_json(self) -> dict[str, str]:
         return {
             "db_url": self.db_url
         }

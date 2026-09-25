@@ -5,6 +5,7 @@ import sys
 from typing import Self
 
 import limexhub
+import requests
 import structlog
 from asyncclick import progressbar
 from joblib import Parallel, delayed

@@ -13,14 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import MutableMapping
+from typing import Any
+
 from pandas import Timestamp
 
 EPOCH = Timestamp(0, tz='UTC')
 
 
-def _lookup_dt(dt_cache: dict,
-               dt: int,
-               fallback):
+def _lookup_dt(
+    dt_cache: MutableMapping[int, int],
+    dt: int,
+    fallback: Any,
+) -> int:
     if dt not in dt_cache:
         dt_cache[dt] = fallback.searchsorted(dt, side='right')
     return dt_cache[dt]

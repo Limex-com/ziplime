@@ -1,6 +1,7 @@
 import datetime
 import sqlite3
 from collections import namedtuple
+from collections.abc import Sequence
 from functools import lru_cache
 from itertools import chain
 from typing import Self, Any
@@ -39,8 +40,6 @@ UNPAID_QUERY_TEMPLATE = """
                         WHERE ex_date = ?
                           AND sid IN ({0}) \
                         """
-
-# Dividend = namedtuple("Dividend", ["asset", "amount", "pay_date"])
 
 UNPAID_STOCK_DIVIDEND_QUERY_TEMPLATE = """
                                        SELECT sid, payment_sid, ratio, pay_date
@@ -114,14 +113,16 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
         ).distinct()
         return set((await db.execute(q)).scalars())
 
-    async def _adjustments(self,
-                     adjustments_db: AsyncSession,
-                     split_sids: set,
-                     merger_sids: set,
-                     dividends_sids: set,
-                     start_date: int,
-                     end_date: int,
-                     assets: pd.Index):
+    async def _adjustments(
+        self,
+        adjustments_db: AsyncSession,
+        split_sids: set[int],
+        merger_sids: set[int],
+        dividends_sids: set[int],
+        start_date: datetime.date,
+        end_date: datetime.date,
+        assets: pd.Index,
+    ) -> tuple[list[Any], list[Any], list[Any]]:
 
         async def fetch(model, date_column, selected_ids):
             if not selected_ids:
@@ -142,14 +143,16 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
             await fetch(DividendPayoutModel, DividendPayoutModel.ex_date, dividends_sids & set(assets)),
         )
 
-    async def load_adjustments_from_sqlite(self,
-                                           db_session: AsyncSession,
-                                           dates: pd.DatetimeIndex,
-                                           assets: pd.Index,
-                                           should_include_splits: bool,
-                                           should_include_mergers: bool,
-                                           should_include_dividends: bool,
-                                           adjustment_type: str):
+    async def load_adjustments_from_sqlite(
+        self,
+        db_session: AsyncSession,
+        dates: pd.DatetimeIndex,
+        assets: pd.Index,
+        should_include_splits: bool,
+        should_include_mergers: bool,
+        should_include_dividends: bool,
+        adjustment_type: str,
+    ) -> dict[str, dict[int, list[Float64Multiply]]]:
         """Load a dictionary of Adjustment objects from adjustments_db.
 
         Parameters
@@ -301,14 +304,14 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
         return result
 
     async def load_adjustments(
-            self,
-            dates,
-            assets,
-            should_include_splits,
-            should_include_mergers,
-            should_include_dividends,
-            adjustment_type,
-    ):
+        self,
+        dates: pd.DatetimeIndex,
+        assets: pd.Index,
+        should_include_splits: bool,
+        should_include_mergers: bool,
+        should_include_dividends: bool,
+        adjustment_type: str,
+    ) -> dict[str, dict[int, list[Float64Multiply]]]:
         """Load collection of Adjustment objects from underlying adjustments db.
 
         Parameters
@@ -333,7 +336,7 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
             A dictionary containing price and/or volume adjustment mappings
             from index to adjustment objects to apply at that index.
         """
-        dates = dates.tz_localize("UTC")
+        dates = dates.tz_localize("UTC") if dates.tz is None else dates.tz_convert("UTC")
 
         async with self.session_maker() as session:
             return await self.load_adjustments_from_sqlite(
@@ -346,7 +349,12 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
                 adjustment_type,
             )
 
-    async def load_pricing_adjustments(self, columns, dates, assets):
+    async def load_pricing_adjustments(
+        self,
+        columns: Sequence[str],
+        dates: pd.DatetimeIndex,
+        assets: pd.Index,
+    ) -> list[Any]:
         if "volume" not in set(columns):
             adjustment_type = "price"
         elif len(set(columns)) == 1:
@@ -370,7 +378,7 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
             for column in columns
         ]
 
-    def get_adjustments_for_sid(self, table_name, sid):
+    def get_adjustments_for_sid(self, table_name: str, sid: int) -> list[list[Any]]:
         return []
         t = (sid,)
         c = self.conn.cursor()
@@ -384,7 +392,11 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
             for adjustment in adjustments_for_sid
         ]
 
-    def get_dividends_with_ex_date(self, assets, date):
+    def get_dividends_with_ex_date(
+        self,
+        assets: Sequence[int],
+        date: datetime.date,
+    ) -> list[Any]:
         # seconds = date.value / int(1e9)
         return []
         c = self.conn.cursor()
@@ -411,7 +423,11 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
     async def get_stock_dividends(self, sid: int, trading_days: pl.Series) -> list[StockDividendPayoutModel]:
         return []
 
-    async def get_stock_dividends_with_ex_date(self, assets, date):
+    async def get_stock_dividends_with_ex_date(
+        self,
+        assets: Sequence[int],
+        date: datetime.date,
+    ) -> list[StockDividend]:
         # seconds = date.value / int(1e9)
         return []
 
@@ -525,7 +541,11 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
         )
 
 
-    async def get_splits(self, assets: frozenset[Asset], dt: datetime.date):
+    async def get_splits(
+        self,
+        assets: frozenset[Asset],
+        dt: datetime.date,
+    ) -> list[tuple[Asset, float]]:
         """Returns any splits for the given sids and the given dt.
 
         Parameters
@@ -560,17 +580,9 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
 
         return splits
 
-    def to_json(self):
-        return {
-            "base_storage_path": self._base_storage_path,
-            "bundle_name": self._bundle_name,
-            "bundle_version": self._bundle_version,
-        }
+    def to_json(self) -> dict[str, str]:
+        return {"db_url": self.db_url}
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> Self:
-        return cls(
-            base_storage_path=data["base_storage_path"],
-            bundle_name=data["bundle_name"],
-            bundle_version=data["bundle_version"],
-        )
+        return cls(db_url=data["db_url"])

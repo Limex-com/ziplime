@@ -1,6 +1,10 @@
 import datetime
+from collections.abc import Sequence
+from typing import Any
+
 import polars as pl
-from typing import Any, Self
+import pandas as pd
+from typing import Self
 
 from ziplime.assets.entities.asset import Asset
 
@@ -15,9 +19,14 @@ class AdjustmentRepository:
 
     async def get_stock_dividends(self, sid: int, trading_days: pl.Series) -> list[StockDividendPayoutModel]: ...
 
-    async def load_pricing_adjustments(self, columns, dates, assets): ...
+    async def load_pricing_adjustments(
+        self,
+        columns: Sequence[str],
+        dates: pd.DatetimeIndex,
+        assets: pd.Index,
+    ) -> list[Any]: ...
 
-    def to_json(self): ...
+    def to_json(self) -> dict[str, Any]: ...
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> Self: ...

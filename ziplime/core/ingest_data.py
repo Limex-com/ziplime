@@ -182,7 +182,7 @@ async def ingest_market_data(
         forward_fill_missing_ohlcv_data: bool = True,
         bundle_storage_path: str = str(Path(Path.home(), ".ziplime", "data")),
         asset_type: AssetType | Sequence[AssetType] = AssetType.EQUITY,
-        assets: list = None,
+        assets: list[ExchangeAsset] | None = None,
 ):
     """
     Ingests market data into a specified bundle for a given time period, using
@@ -200,6 +200,8 @@ async def ingest_market_data(
         data_frequency (datetime.timedelta): The frequency at which data intervals should be recorded.
         data_bundle_source (DataBundleSource): The source responsible for providing market data.
         asset_service (AssetService): Service for handling and obtaining asset-related information.
+        merge (bool, optional): If true, merge the new rows into the latest stored bundle version.
+            Defaults to False.
         forward_fill_missing_ohlcv_data (bool, optional): Indicates whether to forward-fill missing
             Open-High-Low-Close-Volume (OHLCV) data in the ingested bundle. Defaults to True.
         bundle_storage_path (str, optional): The path where the data bundle should be stored.
@@ -262,7 +264,7 @@ async def ingest_custom_data(
         data_bundle_source: DataBundleSource,
         asset_service: AssetService,
         merge: bool = False,
-        merge_columns: list[str] = ["sid", "date"],
+        merge_columns: Sequence[str] = ("sid", "date"),
         bundle_storage_path: str = str(Path(Path.home(), ".ziplime", "data")),
 ):
     """
@@ -287,6 +289,10 @@ async def ingest_custom_data(
         data_bundle_source (DataBundleSource): The source of the data to ingest.
         asset_service (AssetService): The asset service providing information about
             assets.
+        merge (bool, optional): If true, merge the new rows into the latest stored bundle version.
+            Defaults to False.
+        merge_columns (Sequence[str], optional): Columns forming the row identity during a merge.
+            Defaults to ``("sid", "date")``.
         bundle_storage_path (str, optional): The path to store the ingested bundle.
             Defaults to the data directory under the user's home path.
 
@@ -322,5 +328,5 @@ async def ingest_custom_data(
         trading_calendar=calendar,
         asset_service=asset_service,
         merge=merge,
-        merge_columns=merge_columns
+        merge_columns=list(merge_columns)
     )
