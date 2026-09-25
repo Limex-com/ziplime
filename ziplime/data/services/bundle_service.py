@@ -28,7 +28,7 @@ from ziplime.data.services.bundle_registry import BundleRegistry
 from ziplime.data.services.bundle_storage import BundleStorage
 from ziplime.utils.class_utils import load_class
 from ziplime.utils.date_utils import period_to_timedelta
-from ziplime.utils.data_utils import backfill_sid_data
+from ziplime.utils.data_utils import _backfill_symbol_data, backfill_sid_data
 from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.utils.calendar_utils import get_calendar
 
@@ -324,8 +324,8 @@ class BundleService:
         asset_identifiers = list(data["sid"].unique()) if sid_id else list(data["symbol"].unique())
 
         if sid_id:
-            data = await self._backfill_symbol_data(data=data, asset_service=asset_service,
-                                                    required_sessions=required_sessions)
+            data = await _backfill_symbol_data(data=data, asset_service=asset_service,
+                                               required_sessions=required_sessions)
         else:
             data = await backfill_sid_data(data=data, asset_service=asset_service,
                                            required_sessions=required_sessions)
@@ -361,9 +361,6 @@ class BundleService:
         self._logger.info(f"Finished ingesting custom bundle_name={name}, bundle_version={bundle_version}")
 
         return data_bundle
-
-    async def _backfill_symbol_data(self):
-        pass
 
     async def ingest_market_data_bundle(self, name: str,
                                         bundle_version: str,

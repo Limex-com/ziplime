@@ -28,7 +28,7 @@ class BundleRegistry(abc.ABC):
             list[dict[str, Any]]: A list of dictionaries, each representing a bundle with
             specific attributes and details.
         """
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def list_bundles_by_name(self, bundle_name: str) -> list[dict[str, Any]]:
@@ -42,7 +42,7 @@ class BundleRegistry(abc.ABC):
             A list of dictionaries, where each dictionary contains details of a bundle
             matching the specified name.
         """
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def load_bundle_metadata(self, bundle_name: str, bundle_version: str | None) -> dict[str, Any] | None:
@@ -61,7 +61,7 @@ class BundleRegistry(abc.ABC):
             A dictionary containing the metadata of the bundle if available, or None if
             the metadata cannot be retrieved.
         """
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def delete_bundle(self, bundle_name: str, bundle_version: str) -> bool:
@@ -75,7 +75,7 @@ class BundleRegistry(abc.ABC):
             True when an entry was removed, False when there was none -- so a caller deleting
             several can report what it actually did rather than what it attempted.
         """
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def persist_metadata(self, data_bundle: DataBundle, metadata: dict[str, Any]):
@@ -91,7 +91,7 @@ class BundleRegistry(abc.ABC):
         Returns:
             None. This method is intended for storing metadata and does not return a value.
         """
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def get_bundle_metadata(self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool) -> dict[str, Any]:
@@ -108,7 +108,7 @@ class BundleRegistry(abc.ABC):
         Returns:
             dict[str, Any]: A dictionary containing metadata about the data bundle.
         """
-        ...
+        raise NotImplementedError
 
     async def register_bundle(self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool):
         """

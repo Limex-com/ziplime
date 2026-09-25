@@ -16,7 +16,6 @@ class LimeTraderSdkDataSource(DataBundleSource):
     def __init__(self, lime_sdk_credentials_file: str | None,
                  trading_calendar: ExchangeCalendar
                  ):
-        super().__init__()
         self._lime_sdk_credentials_file = lime_sdk_credentials_file
         self.trading_calendar = trading_calendar
         self._logger = structlog.get_logger(__name__)

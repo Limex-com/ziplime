@@ -5,12 +5,9 @@ import structlog
 
 from .blotter import Blotter
 
-from ziplime.domain.bar_data import BarData
 from ziplime.finance.domain.order import Order
 from ziplime.exchanges.exchange import Exchange
-from ...assets.entities.asset import Asset
 from ...assets.entities.exchange_asset import ExchangeAsset
-from ...exchanges.repositories.exchange_repository import ExchangeRepository
 
 
 class InMemoryBlotter(Blotter):
@@ -153,7 +150,15 @@ class InMemoryBlotter(Blotter):
                     self.cancel_all_orders_for_asset(asset=asset, exchange_name=exchange, relay_status=False)
 
     def order_held(self, order: Order) -> None:
-        pass
+        reason = order.reason or "Order held by exchange."
+        order.hold(reason=reason)
+
+        self.orders.setdefault(order.exchange_name, {})[order.id] = order
+
+        exchange_orders = self.open_orders.setdefault(order.exchange_name, defaultdict(dict))
+        exchange_orders.setdefault(order.asset, {})[order.id] = order
+
+        self.new_orders[order.id] = order
 
     def process_splits(self, splits):
         """

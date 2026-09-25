@@ -8,7 +8,6 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.data.domain.data_bundle import DataBundle
 from ziplime.data.services.data_source import DataSource
 
-from ziplime.domain.position import Position
 from ziplime.domain.portfolio import Portfolio
 from ziplime.domain.account import Account
 from ziplime.finance.commission.commission_model import CommissionModel
@@ -48,70 +47,53 @@ class Exchange(DataSource, ABC):
             return None
         return data_source.last_available_bar(sid)
 
-    def get_start_cash_balance(self):
-        pass
+    @abstractmethod
+    def get_start_cash_balance(self) -> float:
+        """Return the cash balance at the start of the trading run."""
+        raise NotImplementedError
 
-    def get_current_cash_balance(self):
-        pass
+    @abstractmethod
+    def get_current_cash_balance(self) -> float:
+        """Return the venue's current cash balance."""
+        raise NotImplementedError
 
     def subscribe_to_market_data(self, asset):
+        """Subscribe to market data when the venue supports subscriptions.
+
+        The simulation has no push feed, so the deliberately safe default is an empty
+        subscription result.
+        """
         return []
 
     def get_subscribed_assets(self):
+        """Return subscribed assets; venues without push feeds return an empty list."""
         return []
 
     @abstractmethod
-    async def get_positions(self) -> dict[ExchangeAsset, Position]:
-        ...
-
-    @abstractmethod
     async def get_portfolio(self) -> Portfolio:
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def get_account(self) -> Account:
-        ...
-
-    @abstractmethod
-    def get_time_skew(self):
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def submit_order(self, order: Order):
-        ...
-
-    def is_alive(self):
-        ...
-
-    @abstractmethod
-    async def get_orders(self) -> dict[str, Order]:
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def get_transactions(self, orders: dict[ExchangeAsset, dict[str, Order]], current_dt: datetime.datetime,
                                same_bar_execution: bool):
-        ...
-
-    @abstractmethod
-    async def get_orders_by_ids(self, order_ids: list[str]):
-        ...
-
-    @abstractmethod
-    async def get_transactions_by_order_ids(self, order_ids: list[str]):
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def cancel_order(self, order_id: str) -> None:
-        ...
-
-    @abstractmethod
-    def get_last_traded_dt(self, asset: ExchangeAsset):
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt: datetime.datetime,
                              data_frequency: datetime.timedelta | Period = None):
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     def get_slippage_model(self, asset: ExchangeAsset):
@@ -119,21 +101,7 @@ class Exchange(DataSource, ABC):
 
     @abstractmethod
     def get_commission_model(self, asset: ExchangeAsset) -> CommissionModel:
-        ...
-
-    # @abstractmethod
-    # async def get_scalar_asset_spot_value(self, asset: ExchangeAsset, field: str, dt: datetime.datetime,
-    #                                       frequency: datetime.timedelta): ...
-
-    # @abstractmethod
-    # def get_scalar_asset_spot_value_sync(self, asset: ExchangeAsset, field: str, dt: datetime.datetime,
-    #                                      frequency: datetime.timedelta): ...
-
-    # @abstractmethod
-    # async def get_spot_values(self, assets: frozenset[ExchangeAsset], fields: frozenset[str]): ...
-
-    # @abstractmethod
-    # async def current(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt: datetime.datetime = None): ...
+        raise NotImplementedError
 
     async def current_contract(self, continuous_future, dt: datetime.datetime):
         """Return the contract a continuous future holds at ``dt``.
@@ -148,6 +116,7 @@ class Exchange(DataSource, ABC):
         return await self.data_source.get_current_future_chain(
             continuous_future=continuous_future, dt=dt)
 
+    @abstractmethod
     async def get_data_by_limit(self, fields: frozenset[str] | None,
                                 limit: int,
                                 end_date: datetime.datetime,
@@ -155,7 +124,7 @@ class Exchange(DataSource, ABC):
                                 assets: frozenset[ExchangeAsset],
                                 include_end_date: bool,
                                 ) -> pl.DataFrame:
-        ...
+        raise NotImplementedError
 
     def __hash__(self):
         return hash(self.name)

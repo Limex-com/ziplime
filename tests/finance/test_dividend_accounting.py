@@ -270,7 +270,7 @@ class DividendRepositoryTests(unittest.IsolatedAsyncioTestCase):
         await self.asset_service._asset_repository.engine.dispose()
         self.temp_dir.cleanup()
 
-    @unittest.expectedFailure
+    #@unittest.expectedFailure
     async def test_import_preserves_ex_date(self):
         ex_date = dt.date(2025, 1, 6)
         pay_date = dt.date(2025, 1, 20)

@@ -48,16 +48,18 @@ class LimeTraderSdkExchange(Exchange):
                  trading_calendar: ExchangeCalendar,
                  clock: TradingClock,
                  cash_balance: float,
-                 account_id: str | None = None,
+                 account_id: str = "",
                  lime_sdk_credentials_file: str | None = None,
                  data_bundle: DataBundle | None = None,
                  ):
         super().__init__(name=name,
                          canonical_name=name,
                          clock=clock,
-                         data_bundle=data_bundle,
+                         data_source=data_bundle,
                          country_code=country_code,
-                         trading_calendar=trading_calendar)
+                         trading_calendar=trading_calendar,
+                         account_id=account_id,
+                         is_default=False)
 
         self._lime_sdk_credentials_file = lime_sdk_credentials_file
         self._logger = structlog.get_logger(__name__)
@@ -112,7 +114,7 @@ class LimeTraderSdkExchange(Exchange):
                 continue
         return z_positions
 
-    def get_portfolio(self) -> ZpPortfolio:
+    async def get_portfolio(self) -> ZpPortfolio:
         account = self.get_account_balance(account_number=self._account_id)
         z_portfolio = ZpPortfolio(portfolio_value=float(account.account_value_total),
                                   positions=self.get_positions(),
@@ -121,17 +123,35 @@ class LimeTraderSdkExchange(Exchange):
                                   start_date=None,
                                   returns=float(0.0),
                                   starting_cash=float(0.0),
-                                  capital_used=float(0.0),
-                                  pnl=float(0.0)
+                                  pnl=float(0.0),
+                                  cash_flow=float(0.0),
+                                  positions_exposure=float(account.position_market_value)
                                   )
         return z_portfolio
 
-    def get_account(self) -> ZpAccount:
+    async def get_account(self) -> ZpAccount:
         account = self.get_account_balance(account_number=self._account_id)
-        z_account = ZpAccount()
-        z_account.buying_power = float(account.cash)
-        z_account.total_position_value = float(account.position_market_value)
-        return z_account
+        position_value = float(account.position_market_value)
+        net_liquidation = float(account.account_value_total)
+        return ZpAccount(
+            settled_cash=float(account.cash),
+            accrued_interest=0.0,
+            buying_power=float(account.cash),
+            equity_with_loan=net_liquidation,
+            total_positions_value=position_value,
+            total_positions_exposure=position_value,
+            regt_equity=net_liquidation,
+            regt_margin=0.0,
+            initial_margin_requirement=0.0,
+            maintenance_margin_requirement=0.0,
+            available_funds=float(account.cash),
+            excess_liquidity=float(account.cash),
+            cushion=1.0 if net_liquidation else 0.0,
+            day_trades_remaining=float("inf"),
+            leverage=0.0 if net_liquidation == 0 else abs(position_value / net_liquidation),
+            net_leverage=0.0 if net_liquidation == 0 else position_value / net_liquidation,
+            net_liquidation=net_liquidation,
+        )
 
     def get_account_balance(self, account_number: str) -> AccountDetails:
         acc = next(filter(lambda x: x.account_number == account_number, self._lime_sdk_client.account.get_balances()),
@@ -139,16 +159,6 @@ class LimeTraderSdkExchange(Exchange):
         if acc is None:
             raise Exception(f"Invalid account number {account_number}. Not found.")
         return acc
-
-    def get_time_skew(self) -> pd.Timedelta:
-        return pd.Timedelta('0 sec')  # TODO: use clock API
-
-    def is_alive(self) -> bool:
-        try:
-            self._lime_sdk_client.account.get_balances()
-            return True
-        except Exception as _:
-            return False
 
     def _order2zp(self, order: OrderDetails, asset: ExchangeAsset) -> Order | None:
 
@@ -334,34 +344,6 @@ class LimeTraderSdkExchange(Exchange):
         #         results[order_sdk_raw.client_order_id] = tx
         return results
 
-        # raise NotImplementedError("Use get_transactions_by_order_ids method.")
-
-    # def get_transactions_by_order_ids(self, order_ids: list[str]):
-    #     results = {}
-    #
-    #     for order_id in order_ids:
-    #         order = self._lime_sdk_client.trading.get_order_details_by_client_order_id(client_order_id=order_id)
-    #         # self._lime_sdk_client.account.iterate_trades(account_number=self._account_id,
-    #         #                                          date=
-    #         #
-    #         #                                          ):
-    #         if order.executed_timestamp is None:
-    #             continue
-    #         try:
-    #             asset = symbol_lookup(order.symbol)
-    #         except SymbolNotFound:
-    #             continue
-    #         tx = Transaction(
-    #             asset=asset,
-    #             amount=int(order.executed_quantity),
-    #             dt=order.executed_timestamp,
-    #             price=float(order.price),
-    #             order_id=order.client_order_id,
-    #             commission=0.0,
-    #         )
-    #         results[order.client_order_id] = tx
-    #     return results
-
     async def cancel_order(self, zp_order_id: str) -> None:
         try:
             order = self._lime_sdk_client.trading.get_order_details_by_client_order_id(order_id=zp_order_id)
@@ -369,10 +351,6 @@ class LimeTraderSdkExchange(Exchange):
         except Exception as e:
             self._logger.error(e)
             return
-
-    def get_last_traded_dt(self, asset) -> datetime.datetime:
-        quote = self._lime_sdk_client.market.get_current_quote(asset.symbol)
-        return quote.date
 
     async def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str], dt, data_frequency) -> pl.DataFrame:
         return self._lime_trader_sdk_data_source.get_spot_value(assets=assets, fields=fields, dt=dt,
@@ -452,10 +430,16 @@ class LimeTraderSdkExchange(Exchange):
         return order_details
 
     def get_commission_model(self, asset: ExchangeAsset) -> CommissionModel:
-        pass
+        raise NotImplementedError(
+            f"No commission model configured for live {self.name} orders. "
+            "Supply a commission model before submitting an order."
+        )
 
     def get_slippage_model(self, asset: ExchangeAsset) -> SlippageModel:
-        pass
+        raise NotImplementedError(
+            f"No slippage model configured for live {self.name} orders. "
+            "Supply a slippage model before submitting an order."
+        )
 
     def get_scalar_asset_spot_value_sync(self, asset: ExchangeAsset, field: str, dt: datetime.datetime,
                                                frequency: datetime.timedelta):

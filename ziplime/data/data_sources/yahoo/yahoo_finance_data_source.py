@@ -23,7 +23,6 @@ class YahooFinanceDataSource(DataBundleSource):
 
     def __init__(self, maximum_threads: int | None = None,
                  symbol_mics: dict[str, str] | None = None):
-        super().__init__()
         self._logger = structlog.get_logger(__name__)
         if maximum_threads is not None:
             self._maximum_threads = min(multiprocessing.cpu_count() * 2, maximum_threads)

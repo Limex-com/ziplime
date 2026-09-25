@@ -58,7 +58,6 @@ def fetch_historical_limex_data_task(date_from: datetime.datetime,
 
 class LimexHubDataSource(DataBundleSource):
     def __init__(self, limex_api_key: str, maximum_threads: int | None = None):
-        super().__init__()
         self._limex_api_key = limex_api_key
         self._logger = structlog.get_logger(__name__)
         self._limex_client = limexhub.RestAPI(token=limex_api_key)

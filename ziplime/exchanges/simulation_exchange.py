@@ -18,7 +18,6 @@ from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.constants.period import Period
 from ziplime.data.services.data_source import DataSource
 
-from ziplime.domain.position import Position
 from ziplime.domain.portfolio import Portfolio
 from ziplime.domain.account import Account
 from ziplime.finance.commission import (
@@ -28,6 +27,8 @@ from ziplime.finance.commission import (
 from ziplime.finance.commission.no_commission import NoCommission
 from ziplime.finance.domain.commission import Commission
 from ziplime.finance.domain.order import Order
+from ziplime.finance.domain.order_status import OrderStatus
+from ziplime.finance.execution import ExecutionStyle
 from ziplime.finance.slippage.slippage_model import SlippageModel
 from ziplime.exchanges.exchange import Exchange
 from ziplime.gens.domain.trading_clock import TradingClock
@@ -81,10 +82,11 @@ class SimulationExchange(Exchange):
                              else PerOptionContract()),
         }
         self.cash_balance = cash_balance
+        self._start_cash_balance = cash_balance
         self.price_used_in_order_execution = price_used_in_order_execution
 
     def get_start_cash_balance(self) -> float:
-        return self.cash_balance
+        return self._start_cash_balance
 
     def get_current_cash_balance(self) -> float:
         return self.cash_balance
@@ -115,40 +117,59 @@ class SimulationExchange(Exchange):
         order.id = uuid.uuid4().hex
         return order
 
-    async def get_positions(self) -> dict[Asset, Position]:
-        pass
-
     async def get_portfolio(self) -> Portfolio:
-        positions = {}
         portfolio = Portfolio(start_date=datetime.datetime.now(tz=datetime.timezone.utc),
-                              starting_cash=self.cash_balance,
+                              starting_cash=self._start_cash_balance,
                               portfolio_value=self.cash_balance,
                               cash=self.cash_balance,
                               cash_flow=0.00,
                               pnl=0.00,
                               returns=0.00,
-                              positions_value=0.00,
-                              positions_exposure=0.00,
-                              positions=positions
+                              positions_value=0.0,
+                              positions_exposure=0.0,
+                              positions={}
                               )
         return portfolio
 
     async def get_account(self) -> Account:
-        pass
+        return Account(
+            settled_cash=self.cash_balance,
+            accrued_interest=0.0,
+            buying_power=self.cash_balance,
+            equity_with_loan=self.cash_balance,
+            total_positions_value=0.0,
+            total_positions_exposure=0.0,
+            regt_equity=self.cash_balance,
+            regt_margin=0.0,
+            initial_margin_requirement=0.0,
+            maintenance_margin_requirement=0.0,
+            available_funds=self.cash_balance,
+            excess_liquidity=self.cash_balance,
+            cushion=1.0 if self.cash_balance else 0.0,
+            day_trades_remaining=float("inf"),
+            leverage=0.0,
+            net_leverage=0.0,
+            net_liquidation=self.cash_balance,
+        )
 
-    def get_time_skew(self):
-        pass
+    async def order(self, asset: ExchangeAsset, amount: int,
+                    style: ExecutionStyle) -> Order:
+        """Create and submit an open simulated order."""
+        order = Order(
+            id=uuid.uuid4().hex,
+            dt=datetime.datetime.now(tz=datetime.timezone.utc),
+            asset=asset,
+            amount=int(amount),
+            filled=0,
+            commission=0.0,
+            execution_style=style,
+            status=OrderStatus.OPEN,
+            exchange_name=self.name,
+            trading_account_id=self.account_id,
+        )
+        return await self.submit_order(order)
 
-    async def order(self, asset, amount, style):
-        pass
-
-    def is_alive(self):
-        pass
-
-    async def get_orders(self) -> dict[str, Order]:
-        return {}
-
-    async def get_transactions(self, orders: dict[Asset, dict[str, Order]],
+    async def get_transactions(self, orders: dict[ExchangeAsset, dict[str, Order]],
                                current_dt: datetime.datetime, same_bar_execution: bool):
         """
         Creates a list of transactions based on the current open orders,
@@ -208,34 +229,19 @@ class SimulationExchange(Exchange):
                 order.filled += txn.amount
                 order.commission += additional_commission
                 order.dt = txn.dt
+                # self.cash_balance -= txn.amount * txn.price + additional_commission
                 transactions.append(txn)
                 if not order.open:
                     closed_orders.append(order)
 
         return transactions, commissions, closed_orders
 
-    async def get_orders_by_ids(self, order_ids: list[str]):
-        pass
-
-    async def get_transactions_by_order_ids(self, order_ids: list[str]):
-        pass
-
     async def cancel_order(self, order_id: str) -> None:
-        """Cancel an order at the venue. A simulated venue has nothing to tell, so this is a no-op.
-
-        The parameter is named to match :meth:`ziplime.exchanges.exchange.Exchange.cancel_order`,
-        which is how the blotter calls it. It used to be ``order_param``, so every call raised
-        ``TypeError: got an unexpected keyword argument 'order_id'`` -- reached whenever an order
-        was still open on a contract that expired, which is routine on any option book and never
-        happens on an equity one.
-        """
+        """Leave cancellation to the shared blotter, which owns simulated orders."""
         return None
 
-    def get_last_traded_dt(self, asset):
-        pass
-
-    async def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str], dt: datetime.datetime,
-                             data_frequency: datetime.timedelta = None) -> pl.DataFrame:
+    async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt: datetime.datetime,
+                             data_frequency: datetime.timedelta | Period = None) -> pl.DataFrame:
         return await self.get_data_by_limit(
             fields=fields,
             limit=1,
@@ -268,7 +274,7 @@ class SimulationExchange(Exchange):
                                 limit: int,
                                 end_date: datetime.datetime,
                                 frequency: datetime.timedelta | Period,
-                                assets: frozenset[Asset],
+                                assets: frozenset[ExchangeAsset],
                                 include_end_date: bool,
                                 ) -> pl.DataFrame:
         return await self.data_source.get_data_by_limit(fields=fields,

@@ -18,18 +18,14 @@ from ziplime.assets.models.merger_model import MergerModel
 from ziplime.assets.models.split_model import SplitModel
 from ziplime.assets.models.stock_dividend_payout_model import StockDividendPayoutModel
 from ziplime.lib.adjustment import Float64Multiply
-from ziplime.utils.functional import keysorted
 from ziplime.utils.numpy_utils import (
-    datetime64ns_dtype,
     float64_dtype,
-    int64_dtype,
     uint32_dtype,
     uint64_dtype,
 )
-from ziplime.utils.pandas_utils import empty_dataframe
-from ziplime.utils.sqlite_utils import group_into_chunks, SQLITE_MAX_VARIABLE_NUMBER
+from ziplime.utils.sqlite_utils import group_into_chunks
 
-from ziplime.data.adjustments import _lookup_dt, ADJ_QUERY_TEMPLATE, SID_QUERIES
+from ziplime.data.adjustments import _lookup_dt
 
 from ziplime.assets.repositories.adjustments_repository import AdjustmentRepository
 
