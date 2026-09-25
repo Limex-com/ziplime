@@ -255,6 +255,42 @@ class BarData:
             dt=self._get_current_minute(),
         )
 
+    async def returns(self, assets: list[Asset], bar_count: int, field: str = "close",
+                      data_source: str | None = None) -> dict:
+        """What each asset returned over the last ``bar_count`` bars.
+
+        ``{listing: (last / first) - 1}``, and the listings that cannot answer are simply absent:
+        one that has not started trading, one the vendor never filled, one whose window is all
+        zeros. That is the same rule :meth:`history` follows, kept here so a caller ranking a
+        universe does not have to re-derive it.
+
+        This exists because every cross-sectional strategy begins by writing the same twelve
+        lines -- pull a window, group the long frame by sid, drop the empties, divide the ends --
+        and those twelve lines are where the mistakes live. A single read serves the whole
+        universe, so the cost is one history call whatever the size of it.
+
+            momentum = await data.returns(assets=universe, bar_count=126)
+            best = sorted(momentum, key=momentum.get, reverse=True)[:10]
+        """
+        if not assets or bar_count < 2:
+            return {}
+        window = await self.history(assets=assets, bar_count=bar_count, fields=[field],
+                                    data_source=data_source)
+        if window is None or window.is_empty():
+            return {}
+
+        series: dict[int, list[float]] = {}
+        for row in window.sort("date").iter_rows(named=True):
+            value = row.get(field)
+            if value is not None and value > 0:
+                series.setdefault(row["sid"], []).append(float(value))
+
+        by_sid = {asset.sid: asset for asset in assets}
+        return {by_sid[sid]: prices[-1] / prices[0] - 1.0
+                for sid, prices in series.items()
+                if sid in by_sid and len(prices) >= 2 and prices[0] > 0}
+
+
     async def current_chain(self, continuous_future: ContinuousFuture,
                             data_source: str | None = None):
         """Return the active contracts of a chain, front contract first.

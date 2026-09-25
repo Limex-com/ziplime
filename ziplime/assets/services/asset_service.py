@@ -274,6 +274,10 @@ class AssetService:
     async def get_symbols_universe(self, name: str, dt: datetime.date) -> SymbolsUniverse | None:
         return await self._asset_repository.get_symbols_universe(name=name, dt=dt)
 
+    async def get_universe_symbols(self, name: str, dt: datetime.date,
+                                    mic: str | None = None) -> list[ExchangeAsset]:
+        return await self._asset_repository.get_universe_symbols(name=name, dt=dt, mic=mic)
+
     async def lifetimes(
         self,
         dates: pd.DatetimeIndex,

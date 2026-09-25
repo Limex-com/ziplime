@@ -1039,7 +1039,185 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         --------
         :func:`ziplime.api.set_symbol_lookup_date`
         """
-        return await self.asset_service.get_symbols_universe(name=name, dt=dt or self.simulation_dt)
+        # Memberships are dated with ``date`` objects, and ``simulation_dt`` is a datetime;
+        # comparing the two raises, so the default is narrowed here rather than in the caller.
+        return await self.asset_service.get_symbols_universe(
+            name=name, dt=dt or self._simulation_date())
+
+    def _simulation_date(self) -> datetime.date:
+        dt = self.simulation_dt
+        return dt.date() if isinstance(dt, datetime.datetime) else dt
+
+    async def _loaded_sids(self) -> set[int] | None:
+        """The instruments this run's market data holds, or ``None`` if that cannot be told.
+
+        The default source is the simulation's exchange, which wraps the bundle rather than being
+        one, so the bundle it reads is where the sids are.
+        """
+        try:
+            source = await self.current_data.resolve_data_source(None)
+        except Exception:
+            return None
+        for candidate in (source, getattr(source, "data_source", None)):
+            sid_indexes = getattr(candidate, "sid_indexes", None)
+            if sid_indexes:
+                return set(sid_indexes)
+        return None
+
+    @api_method
+    async def universe_symbols(self, name: str, dt: datetime.date = None,
+                               mic: str | None = None,
+                               tradeable: bool = True) -> list[ExchangeAsset]:
+        """The members of a named universe as listings, ordered by symbol.
+
+        The tradeable form of :meth:`symbols_universe`, which answers with
+        memberships: what a membership holds is the issuer, stored under the
+        company's name rather than its ticker, so it can be counted but not
+        priced or ordered. These go straight into ``data.current``,
+        ``data.history`` and :meth:`order`, exactly like :meth:`symbol`.
+
+        ``dt`` defaults to today's session, so a strategy calling this on every
+        rebalance follows the composition as it changes rather than freezing
+        the one it read in ``initialize`` -- which is the whole reason to name
+        a universe instead of a list of tickers.
+
+        The name takes a venue the way a ticker does -- ``"IMOEX@MISX"`` reads
+        like ``symbol("SBER@MISX")`` -- and an index universe usually wants
+        one: a member is an *issuer*, and issuers here can carry listings on
+        several markets. Worse, the asset import keys companies by ticker, so
+        Moscow's MAGN and an American MAGN are one issuer with two listings;
+        naming the venue is what keeps the other market out of a Moscow index.
+
+        **Only what this run can actually trade is returned.** A universe is a
+        reference list, not a promise of data: it carries companies listed on
+        several venues at once, and the vendor does not answer for every one of
+        them. Both are silent failures waiting to happen -- a history request
+        over several assets filters by sid, so a listing with no bars simply
+        contributes no rows, while ordering one **raises**. So the members are
+        filtered to the instruments the run's market data holds. Pass
+        ``tradeable=False`` for the reference list itself, and ``mic`` to pin
+        one venue.
+        """
+        if "@" in name:
+            name, venue = name.split("@", 1)
+            mic = mic or venue
+        listings = await self.asset_service.get_universe_symbols(
+            name=name, dt=dt or self._simulation_date(), mic=mic)
+        if not tradeable:
+            return listings
+        loaded = await self._loaded_sids()
+        if loaded is None:
+            return listings
+        return [listing for listing in listings if listing.sid in loaded]
+
+    @api_method
+    def is_month_start(self) -> bool:
+        """Whether this is the month's first trading session.
+
+        The gate a monthly strategy opens with, without the bookkeeping: no remembered month on
+        ``context``, no arithmetic on dates that a holiday makes wrong. Reads the calendar the
+        simulation runs on, so "the first session of September" is whatever that market says.
+        """
+        return self._is_period_start(unit="month")
+
+    @api_method
+    def is_week_start(self) -> bool:
+        """Whether this is the week's first trading session. See :meth:`is_month_start`."""
+        return self._is_period_start(unit="week")
+
+    def _is_period_start(self, unit: str) -> bool:
+        calendar = self.clock.trading_calendar
+        today = self._simulation_date()
+        try:
+            previous = calendar.previous_session(today)
+        except Exception:
+            # Before the first session the calendar knows: nothing precedes this one.
+            return True
+        previous = previous.date() if hasattr(previous, "date") else previous
+        if unit == "week":
+            return previous.isocalendar()[:2] != today.isocalendar()[:2]
+        return (previous.year, previous.month) != (today.year, today.month)
+
+    @api_method
+    async def front_contract(self, root_symbol: str, roll_before_days: int = 0,
+                             mic: str | None = None) -> ExchangeAsset | None:
+        """The nearest contract of ``root_symbol`` still alive ``roll_before_days`` from now.
+
+        :meth:`futures_chain` answers with the whole chain, settled deliveries included, and does
+        not filter by the simulation date -- so every futures strategy starts by picking the front
+        contract itself, and picking it wrong is how a backtest ends up holding a contract that
+        stopped existing. This is that choice, made once.
+
+        ``roll_before_days`` is the distance to keep from expiry, and what makes this the roll as
+        well as the pick: once the contract being held fails the test, the answer becomes the next
+        delivery, and the strategy rolls by ordering what it now returns.
+
+        Returns ``None`` when the chain has nothing left that far out.
+        """
+        chain = await self.futures_chain(root_symbol=root_symbol, mic=mic)
+        horizon = self._simulation_date() + datetime.timedelta(days=roll_before_days)
+        for contract in chain:
+            expiration = contract.asset.expiration_date
+            if isinstance(expiration, datetime.datetime):
+                expiration = expiration.date()
+            if expiration and expiration > horizon:
+                return contract
+        return None
+
+    @api_method
+    async def rebalance(self, weights: dict, style: ExecutionStyle = None,
+                        exchange_name: str | None = None) -> None:
+        """Hold exactly these weights, and nothing else.
+
+        ``{listing: share_of_the_portfolio}``. Every listing named is ordered to its target, and
+        **every position not named is closed** -- which is the half that strategies forget, so a
+        name drops out of the universe and quietly stays in the book forever.
+
+            await context.rebalance({listing: 0.1 for listing in winners})
+            await context.rebalance({})          # flat
+
+        Weights are shares of portfolio value, as in :meth:`order_target_percent`; they are not
+        checked against 1.0, because a futures book is levered by construction.
+        """
+        style = make_execution_style(style=style)
+        wanted = {listing: weight for listing, weight in (weights or {}).items()}
+
+        held = {position.asset for position in self.portfolio.positions.values()
+                if position.amount}
+        for listing in held - set(wanted):
+            wanted[listing] = 0.0
+
+        for listing, weight in wanted.items():
+            amount = await self.portfolio.get_asset_positions_amount(
+                listing, exchange_name=exchange_name)
+
+            # Closing is subtraction, not a target: it needs no price, no model and no
+            # rounding, and it works the same for a share and for a contract.
+            if not weight:
+                if amount:
+                    await self.order(asset=listing, amount=-amount, style=style,
+                                     exchange_name=exchange_name)
+                continue
+
+            # A future has no position value to take a percentage of -- what it has is
+            # exposure -- and `order_target_percent` asks the slippage model a question the
+            # futures models do not answer. So a weight on a contract is a share of the
+            # portfolio in *notional*, sized here.
+            if isinstance(listing.asset, FuturesContract):
+                quotes = await self.current_data.current(assets=[listing], fields=["price"])
+                prices = dict(zip(quotes["sid"].to_list(), quotes["price"].to_list()))
+                price = prices.get(listing.sid)
+                if not price or price <= 0:
+                    continue
+                target = self.contracts_for_notional(
+                    asset=listing, notional=self.portfolio.portfolio_value * weight, price=price)
+                if target != amount:
+                    await self.order(asset=listing, amount=target - amount, style=style,
+                                     exchange_name=exchange_name)
+                continue
+
+            await self.order_target_percent(asset=listing, target=weight, style=style,
+                                            exchange_name=exchange_name)
 
     @api_method
     async def sid(self, sid: int) -> Asset | None:
