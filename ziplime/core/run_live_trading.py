@@ -52,20 +52,23 @@ async def _run_live_trading(
         timedelta_diff_from_current_time=timedelta_diff_from_current_time
     )
 
-    if exchange is None:
-        exchange = LimeTraderSdkExchange(
-            name="LIME",
-            country_code="US",
-            trading_calendar=calendar,
-            data_bundle=data_bundle,
-            cash_balance=cash_balance,
-            clock=clock
-        )
-
     db_url = f"sqlite+aiosqlite:///{str(Path(Path.home(), ".ziplime", "assets.sqlite").absolute())}"
     assets_repository = SqlAlchemyAssetRepository(db_url=db_url, future_chain_predicates=CHAIN_PREDICATES)
     adjustments_repository = SqlAlchemyAdjustmentRepository(db_url=db_url)
     asset_service = AssetService(asset_repository=assets_repository, adjustments_repository=adjustments_repository)
+
+    if exchange is None:
+        exchange = LimeTraderSdkExchange(
+            name="LIME",
+            canonical_name="LIME",
+            country_code="US",
+            clock=clock,
+            trading_calendar=calendar,
+            start_cash_balance=cash_balance,
+            asset_service=asset_service,
+            is_default=True,
+            data_source=data_bundle,
+        )
 
     return await run_algorithm(
         algorithm=algo,
