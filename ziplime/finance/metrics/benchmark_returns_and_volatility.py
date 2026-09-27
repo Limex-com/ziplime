@@ -28,10 +28,9 @@ class BenchmarkReturnsAndVolatility:
             self, ledger: Ledger, emission_rate: datetime.timedelta, trading_calendar: ExchangeCalendar,
             sessions: pd.DatetimeIndex, benchmark_source: BenchmarkSource
     ):
-        daily_returns = benchmark_source.daily_returns(
-            start=sessions[0],
-            end=sessions[-1],
-        )
+        # One row per session; a benchmark day missing from the calendar would otherwise
+        # shift the whole series against `session_ix`.
+        daily_returns = benchmark_source.daily_returns_by_session(sessions)
         daily_returns = daily_returns.fill_nan(0.0)
         daily_returns_series = daily_returns.select("pct_change")
         if len(daily_returns_series) == 0:
