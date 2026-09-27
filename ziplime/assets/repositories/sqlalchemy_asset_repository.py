@@ -35,7 +35,7 @@ from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
 from ziplime.assets.entities.split import Split
-from ziplime.assets.entities.symbol_universe import SymbolsUniverse
+from ziplime.assets.entities.symbol_universe import SymbolsUniverse, universe_venue
 from ziplime.assets.entities.symbols_universe_asset import SymbolsUniverseAsset
 from ziplime.assets.models.asset_router import AssetRouter
 from ziplime.assets.entities.commodity import Commodity
@@ -1266,6 +1266,53 @@ class SqlAlchemyAssetRepository(AssetRepository):
             ],
             universe_type=universe.universe_type
         )
+
+    async def get_universe_symbols(self, name: str, dt: datetime.date,
+                                    mic: str | None = None) -> list[ExchangeAsset]:
+        """The universe's members on ``dt`` as **listings**, ordered by symbol.
+
+        :meth:`get_symbols_universe` answers with memberships, and what a
+        membership holds is the *issuer*: the asset DB stores it under the
+        company's name -- "Applied Materials, Inc." where a strategy would
+        write AMAT -- with no symbol, no venue and no sid. So a strategy could
+        read the composition and had nothing it could price or order.
+
+        This resolves the same members to the listings they trade as, which is
+        what ``data.current``, ``data.history`` and ``order`` all take. A
+        company listed on two venues contributes both, so pass ``mic`` to pin
+        the market -- the US universes carry the Moscow listings of American
+        companies as well as the American ones.
+        """
+        universe = await self.get_symbols_universe(name=name, dt=dt)
+        if universe is None:
+            return []
+        # A universe may declare the market it is an index of, as `index:MISX`. An index belongs
+        # to an exchange, and its members are issuers: without the venue, Moscow's IMOEX hands
+        # back the American listings of the companies whose tickers collide with its own.
+        mic = mic or universe_venue(universe)
+        asset_ids = [member.asset.id for member in universe.assets
+                     if getattr(member.asset, "id", None) is not None]
+        if not asset_ids:
+            return []
+
+        all_assets = await self.get_all_assets()
+        async with self.session_maker() as session:
+            q = select(ExchangeAssetModel).where(ExchangeAssetModel.asset_id.in_(asset_ids))
+            if mic is not None:
+                q = q.where(ExchangeAssetModel.mic == mic)
+            listings = list((await session.execute(q)).scalars())
+
+        result = [
+            ExchangeAsset(
+                sid=listing.sid, start_date=listing.start_date, first_traded=listing.first_traded,
+                end_date=listing.end_date, auto_close_date=listing.auto_close_date,
+                symbol=listing.symbol, exchange=await self.get_exchange_by_mic(mic=listing.mic),
+                asset=all_assets[listing.asset_id], quote=all_assets[listing.quote_id],
+                external_id=listing.external_id)
+            for listing in listings
+            if listing.asset_id in all_assets and listing.quote_id in all_assets
+        ]
+        return sorted(result, key=lambda listing: (listing.symbol or "", listing.mic))
 
     @aiocache.cached(cache=Cache.MEMORY)
     async def get_currencies_by_symbols(self, symbols: list[str]) -> list[Currency]:

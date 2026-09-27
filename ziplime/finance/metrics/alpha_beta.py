@@ -25,10 +25,11 @@ class AlphaBeta:
             self, ledger: Ledger, emission_rate: datetime.timedelta, trading_calendar: ExchangeCalendar,
             sessions: pd.DatetimeIndex, benchmark_source: BenchmarkSource
     ):
-        self._daily_returns_array = benchmark_source.daily_returns(
-            sessions[0],
-            sessions[-1],
-        ).select("pct_change")
+        # By session, not by benchmark bar: the metric reads this array by position against
+        # `session_ix`, and a benchmark that misses a session would shift every reading after it
+        # and break the last bar outright. See `BenchmarkSource.daily_returns_by_session`.
+        self._daily_returns_array = benchmark_source.daily_returns_by_session(
+            sessions).select("pct_change")
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
                    exchanges: dict[str, Exchange]):
