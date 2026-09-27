@@ -238,8 +238,11 @@ class DataCoverageTests(unittest.IsolatedAsyncioTestCase):
 
     def test_a_source_that_is_not_bar_shaped_has_no_opinion(self):
         from ziplime.data.services.data_source import DataSource
-        source = DataSource(name="events", start_date=datetime.date(2024, 1, 1),
-                            end_date=datetime.date(2024, 1, 4),
+        source = DataSource(
+                            name="events",
+                            start_date=datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc),
+                            end_date=datetime.datetime(2024, 1, 4, tzinfo=datetime.timezone.utc),
+                            trading_calendar=get_calendar(CALENDAR),
                             frequency=datetime.timedelta(days=1),
                             original_frequency=datetime.timedelta(days=1),
                             data_type=DataType.CUSTOM)

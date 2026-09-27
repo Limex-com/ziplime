@@ -12,12 +12,12 @@ from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.data.domain.data_bundle import DataBundle
 from ziplime.data.services.lime_trader_sdk_data_source import LimeTraderSdkDataSource
-from ziplime.domain.bar_data import BarData
 from ziplime.errors import SymbolNotFound
 
 from ziplime.domain.portfolio import Portfolio as ZpPortfolio
 from ziplime.domain.position import Position as ZpPosition
 from ziplime.domain.account import Account as ZpAccount
+from ziplime.constants.period import Period as ZpPeriod
 
 from lime_trader import LimeClient, AsyncLimeClient
 from lime_trader.models.accounts import AccountDetails, TradeSide
@@ -33,7 +33,6 @@ from ziplime.finance.domain.order import Order
 from ziplime.finance.domain.order_status import OrderStatus
 from ziplime.finance.domain.transaction import Transaction
 import pandas as pd
-import numpy as np
 import uuid
 
 from ziplime.finance.slippage.slippage_model import SlippageModel
@@ -352,13 +351,13 @@ class LimeTraderSdkExchange(Exchange):
             self._logger.error(e)
             return
 
-    async def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str], dt, data_frequency) -> pl.DataFrame:
+    async def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str], dt,
+                             data_frequency) -> pl.DataFrame:
         return self._lime_trader_sdk_data_source.get_spot_value(assets=assets, fields=fields, dt=dt,
                                                                 exchange_country=self.country_code,
                                                                 exchange_name=self.name,
                                                                 data_frequency=data_frequency
                                                                 )
-
 
     async def get_realtime_bars(self, assets, data_frequency):
         # TODO: cache the result. The caller
@@ -442,11 +441,12 @@ class LimeTraderSdkExchange(Exchange):
         )
 
     def get_scalar_asset_spot_value_sync(self, asset: ExchangeAsset, field: str, dt: datetime.datetime,
-                                               frequency: datetime.timedelta):
+                                         frequency: datetime.timedelta):
         # quote = self._sync_lime_sdk_client.market.get_current_quote(
         #     symbol=asset.get_symbol_by_exchange(exchange_name=self.name))
         quote = self._lime_trader_sdk_data_source.get_spot_value(
-            assets=frozenset({asset}),fields=frozenset({field}), dt=dt, data_frequency=None, exchange_country=self.country_code,
+            assets=frozenset({asset}), fields=frozenset({field}), dt=dt, data_frequency=None,
+            exchange_country=self.country_code,
             exchange_name=self.name)
         return quote
 
@@ -459,13 +459,13 @@ class LimeTraderSdkExchange(Exchange):
     # async def get_spot_values(self, assets: frozenset[Asset], fields: frozenset[str]):
     #     ...
 
-    async def get_data_by_limit(self, fields: frozenset[str],
-                          limit: int,
-                          end_date: datetime.datetime,
-                          frequency: datetime.timedelta,
-                          assets: frozenset[Asset],
-                          include_end_date: bool,
-                          ) -> pl.DataFrame:
+    async def get_data_by_limit(self, fields: frozenset[str] | None,
+                                limit: int,
+                                end_date: datetime.datetime,
+                                frequency: datetime.timedelta | ZpPeriod,
+                                assets: frozenset[ExchangeAsset],
+                                include_end_date: bool,
+                                ) -> pl.DataFrame:
         # TODO: cache the result. The caller
         # (DataPortalLive#get_history_window) makes use of only one
         # column at a time.

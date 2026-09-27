@@ -32,6 +32,7 @@ from ziplime.data.data_sources.huggingface.manifest import (
     NoKnowledgeDateError, _glob_matches, parse_manifest, resolve_entity_column,
     resolve_knowledge_column,
 )
+from ziplime.utils.calendar_utils import get_calendar
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "huggingface"
 FAR_PAST = datetime.date(1900, 1, 1)
@@ -257,7 +258,8 @@ class PointInTimeTests(unittest.IsolatedAsyncioTestCase):
             source, name="hf://test/set/features", revision=None, manifest=None,
             config="features", repo_files=(), knowledge_column="knowledge_date",
             entity_column="ticker", event_column="transaction_date", asset_service=None,
-            start_date=datetime.date(2024, 1, 1), end_date=datetime.date(2024, 12, 31))
+            start_date=datetime.date(2024, 1, 1), end_date=datetime.date(2024, 12, 31),
+            trading_calendar=get_calendar("XNYS"))
         source.data = pl.DataFrame({
             "date": [self.KNOWLEDGE],
             "sid": [asset.sid],
@@ -312,7 +314,8 @@ class WindowTests(unittest.TestCase):
         HuggingFaceDataSource.__init__(
             source, name="test", revision=None, manifest=None, config="features",
             repo_files=tuple(files), knowledge_column="knowledge_date", entity_column="ticker",
-            event_column=None, asset_service=None, start_date=start, end_date=end)
+            event_column=None, asset_service=None, start_date=start, end_date=end,
+            trading_calendar=get_calendar("XNYS"))
         return source
 
     def test_partitions_outside_the_window_are_skipped(self):

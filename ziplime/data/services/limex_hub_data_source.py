@@ -11,13 +11,14 @@ from joblib import Parallel, delayed
 
 import polars as pl
 from ziplime.data.services.data_bundle_source import DataBundleSource
+from ziplime.constants.period import Period
 
 
 def fetch_historical_limex_data_task(date_from: datetime.datetime,
                                      date_to: datetime.datetime,
                                      limex_api_key: str,
                                      symbol: str,
-                                     frequency: datetime.timedelta
+                                     frequency: datetime.timedelta | Period
                                      ) -> pl.DataFrame:
     limex_client = limexhub.RestAPI(token=limex_api_key)
     timeframe = 3
@@ -67,7 +68,7 @@ class LimexHubDataSource(DataBundleSource):
             self._maximum_threads = multiprocessing.cpu_count() * 2
 
     async def get_data(self, symbols: list[str],
-                       frequency: datetime.timedelta,
+                       frequency: datetime.timedelta | Period,
                        date_from: datetime.datetime,
                        date_to: datetime.datetime,
                        **kwargs

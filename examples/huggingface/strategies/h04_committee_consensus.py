@@ -79,7 +79,7 @@ async def initialize(context: TradingAlgorithm):
         purchases, name=f"congress:committee:{COMMITTEE_ID}",
         asset_service=context.asset_service,
         start_date=context.clock.start_session, end_date=context.clock.end_session,
-        session_timezone=str(context.clock.trading_calendar.tz),
+        trading_calendar=context.clock.trading_calendar,
         fields=["bioguide_id", "member_name", "ticker", "amount_usd"])
 
     print(f"Following {context.committee_name} -- {len(members)} members on the current roster, "

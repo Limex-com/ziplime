@@ -37,6 +37,7 @@ from ziplime.utils.bundle_utils import (
     get_asset_data_source, get_bundle_service, get_market_data_source,
 )
 from ziplime.utils.calendar_utils import get_calendar
+from ziplime.utils.date_utils import normalize_datetime
 
 #: Where bundles and the asset database live unless told otherwise.
 DEFAULT_STORAGE = Path(Path.home(), ".ziplime", "data")
@@ -222,8 +223,8 @@ async def ingest(bundle, symbols, trading_calendar, start_date, end_date, freque
             _fail(str(error))
 
         ingested = await ingest_market_data(
-            start_date=start_date.replace(tzinfo=calendar.tz),
-            end_date=end_date.replace(tzinfo=calendar.tz),
+            start_date=normalize_datetime(start_date, calendar.tz),
+            end_date=normalize_datetime(end_date, calendar.tz),
             trading_calendar=trading_calendar,
             bundle_name=bundle,
             # Plain tickers: the MIC was for resolving the listing, and a vendor asked for
@@ -369,8 +370,8 @@ async def run(algofile, bundle, bundle_version, symbols, start_date, end_date, t
     you expect. A bundle holding more than you name is fine -- the extra is simply not loaded.
     """
     calendar = get_calendar(trading_calendar)
-    start = start_date.replace(tzinfo=calendar.tz)
-    end = end_date.replace(tzinfo=calendar.tz)
+    start = normalize_datetime(start_date, calendar.tz)
+    end = normalize_datetime(end_date, calendar.tz)
     if start >= end:
         _fail(f"--start-date {start_date:%Y-%m-%d} is not before --end-date {end_date:%Y-%m-%d}.")
 

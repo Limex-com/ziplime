@@ -1,37 +1,28 @@
 import datetime
-import polars as pl
+from zoneinfo import ZoneInfo
 
-from ziplime.assets.entities.asset import Asset
+import polars as pl
+from exchange_calendars import ExchangeCalendar
+
 from ziplime.constants.data_type import DataType
 from ziplime.constants.period import Period
-from ziplime.utils.date_utils import period_to_timedelta
-
-
-def _as_instant(bound: datetime.date | datetime.datetime) -> datetime.datetime:
-    """Normalise a source's window bound to a timezone-aware instant.
-
-    The constructor is typed for ``datetime.date`` but every read compares these bounds against the
-    simulation clock, which is a timezone-aware ``datetime`` -- so a source built with plain dates
-    raised ``TypeError: can't compare datetime.datetime to datetime.date`` on its first read. A
-    bare date is taken as midnight UTC; a naive datetime as UTC; an aware one is left alone.
-    """
-    if isinstance(bound, datetime.datetime):
-        return bound if bound.tzinfo else bound.replace(tzinfo=datetime.timezone.utc)
-    return datetime.datetime.combine(bound, datetime.time.min, tzinfo=datetime.timezone.utc)
+from ziplime.utils.date_utils import normalize_datetime, period_to_timedelta
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 
 class DataSource:
 
-    def __init__(self, name: str, start_date: datetime.date, end_date: datetime.date,
+    def __init__(self, name: str, start_date: datetime.datetime, end_date: datetime.datetime,
                  frequency: datetime.timedelta | Period,
                  original_frequency: datetime.timedelta | Period,
                  data_type: DataType,
+                 trading_calendar: ExchangeCalendar,
                  aggregation_specification: dict[str, str] = None):
         """
         Attributes:
             name (str): The name of the data source.
-            start_date (datetime.date): Start date for the data.
-            end_date (datetime.date): End date for the data.
+            start_date (datetime.datetime): Start instant for the data.
+            end_date (datetime.datetime): End instant for the data.
             frequency (datetime.timedelta | Period): Desired data frequency, e.g., 1m, 1d,.
             original_frequency (datetime.timedelta | Period):
               The original frequency of data. Used when data in the source is different from the requested frequency.
@@ -42,13 +33,28 @@ class DataSource:
                 corresponding aggregation methods.
         """
         self.name = name
-        self.start_date = _as_instant(start_date)
-        self.end_date = _as_instant(end_date)
+        self.trading_calendar = trading_calendar
+        timezone = trading_calendar.tz
+        self.start_date = normalize_datetime(
+            start_date, timezone
+        )
+        self.end_date = normalize_datetime(
+            end_date, timezone
+        )
         self.frequency = frequency
         self.frequency_td = period_to_timedelta(self.frequency)
         self.data_type = data_type
         self.aggregation_specification = aggregation_specification
         self.original_frequency = original_frequency
+
+    def _normalize_query_datetime(self, value: datetime.datetime) -> datetime.datetime:
+        """Interpret query bounds in the calendar timezone and match the data column timezone."""
+        normalized = normalize_datetime(value, self.trading_calendar.tz)
+        date_dtype = self.get_dataframe().schema.get("date")
+        data_timezone = getattr(date_dtype, "time_zone", None)
+        if data_timezone is not None:
+            normalized = normalized.astimezone(ZoneInfo(data_timezone))
+        return normalized
 
     def get_dataframe(self) -> pl.DataFrame:
         return self.data
@@ -75,7 +81,7 @@ class DataSource:
                          from_date: datetime.datetime,
                          to_date: datetime.datetime,
                          frequency: datetime.timedelta | Period,
-                         assets: frozenset[Asset],
+                         assets: frozenset[ExchangeAsset],
                          include_bounds: bool,
                          ) -> pl.DataFrame:
         """
@@ -92,7 +98,7 @@ class DataSource:
             from_date (datetime.datetime): Start date for data filtration.
             to_date (datetime.datetime): End date for data filtration.
             frequency (datetime.timedelta | Period): Frequency for grouping the data.
-            assets (frozenset[Asset]): Set of assets to retrieve data for.
+            assets (frozenset[ExchangeAsset]): Set of assets to retrieve data for.
             include_bounds (bool): If True, includes boundary dates in the data; else
                 excludes them.
 
@@ -100,6 +106,8 @@ class DataSource:
             pl.DataFrame: A dataframe containing filtered and aggregated data sorted
             by date.
         """
+        from_date = self._normalize_query_datetime(from_date)
+        to_date = self._normalize_query_datetime(to_date)
         cols = set(fields.union({"date", "sid"}))
         if include_bounds:
             df = self.get_dataframe().select(pl.col(col) for col in cols).filter(
@@ -121,7 +129,7 @@ class DataSource:
                           limit: int,
                           end_date: datetime.datetime,
                           frequency: datetime.timedelta | Period,
-                          assets: frozenset[Asset],
+                          assets: frozenset[ExchangeAsset],
                           include_end_date: bool,
                           ) -> pl.DataFrame:
         """
@@ -139,12 +147,13 @@ class DataSource:
             limit (int): The maximum number of rows to retrieve for each asset.
             end_date (datetime.datetime): The end date for the data range.
             frequency (datetime.timedelta | Period): The required frequency for the retrieved data.
-            assets (frozenset[Asset]): A set of assets for which to retrieve the data.
+            assets (frozenset[ExchangeAsset]): A set of assets for which to retrieve the data.
             include_end_date (bool): Whether the data for the end_date is included in results.
 
         Returns:
             pl.DataFrame: The resulting data frame containing the requested data fields and filtered rows.
         """
+        end_date = self._normalize_query_datetime(end_date)
         frequency_td = period_to_timedelta(frequency)
         total_bar_count = limit
         if end_date > self.end_date:
@@ -183,7 +192,7 @@ class DataSource:
                                  since: datetime.timedelta,
                                  end_date: datetime.datetime,
                                  frequency: datetime.timedelta | Period,
-                                 assets: frozenset[Asset],
+                                 assets: frozenset[ExchangeAsset],
                                  include_end_date: bool,
                                  ) -> pl.DataFrame:
         """Fetch everything in the last ``since`` of calendar time, however many rows that is.
@@ -213,6 +222,7 @@ class DataSource:
         Returns:
             The rows in ``(end_date - since, end_date)``, sorted by date.
         """
+        end_date = self._normalize_query_datetime(end_date)
         if since <= datetime.timedelta(0):
             raise ValueError(f"since must be a positive duration, got {since!r}.")
 
@@ -235,7 +245,7 @@ class DataSource:
             ).agg(pl.col(field).last() for field in fields)
         return rows
 
-    def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str], dt: datetime.datetime,
+    async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt: datetime.datetime,
                        frequency: datetime.timedelta):
         """
         Retrieves the most recent spot value for specified assets and fields.
@@ -245,7 +255,7 @@ class DataSource:
         including, the given datetime.
 
         Args:
-            assets (frozenset[Asset]): A collection of Asset objects representing
+            assets (frozenset[ExchangeAsset]): A collection of Asset objects representing
                 the assets for which the spot value is requested.
             fields (frozenset[str]): A set of field names for which data is
                 retrieved.

@@ -71,7 +71,7 @@ async def initialize(context: TradingAlgorithm):
         disclosures, name=f"congress:{LEGISLATOR.lower()}",
         asset_service=context.asset_service,
         start_date=context.clock.start_session, end_date=context.clock.end_session,
-        session_timezone=str(context.clock.trading_calendar.tz),
+        trading_calendar=context.clock.trading_calendar,
         fields=["amount_usd", "direction", "transaction_type", "ticker", "transaction_date"],
         revision=None)
 

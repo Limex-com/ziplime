@@ -22,8 +22,8 @@ class DataBundle(DataSource):
 
     def __init__(self, name: str,
                  version: str,
-                 start_date: datetime.date,
-                 end_date: datetime.date,
+                 start_date: datetime.datetime,
+                 end_date: datetime.datetime,
                  trading_calendar: ExchangeCalendar,
                  frequency: datetime.timedelta | Period,
                  original_frequency: datetime.timedelta | Period,
@@ -36,14 +36,12 @@ class DataBundle(DataSource):
         super().__init__(name=name,
                          start_date=start_date,
                          end_date=end_date,
+                         trading_calendar=trading_calendar,
                          frequency=frequency,
                          data_type=data_type,
                          original_frequency=original_frequency
                          )
         self.version = version
-        self.start_date = start_date
-        self.end_date = end_date
-        self.trading_calendar = trading_calendar
         self.frequency = frequency
         self.frequency_td = period_to_timedelta(self.frequency)
         self.timestamp = timestamp
@@ -194,7 +192,7 @@ class DataBundle(DataSource):
                          from_date: datetime.datetime,
                          to_date: datetime.datetime,
                          frequency: datetime.timedelta | Period,
-                         assets: frozenset[Asset],
+                         assets: frozenset[ExchangeAsset],
                          include_bounds: bool,
                          ) -> pl.DataFrame:
         return self.get_data_by_date_and_sids(fields=fields, from_date=from_date,
@@ -237,7 +235,7 @@ class DataBundle(DataSource):
                                   limit: int,
                                   end_date: datetime.datetime,
                                   frequency: datetime.timedelta | Period,
-                                  assets: frozenset[Asset],
+                                  assets: frozenset[ExchangeAsset],
                                   include_end_date: bool,
                                   ) -> pl.DataFrame:
 
@@ -506,8 +504,8 @@ class DataBundle(DataSource):
         return datetime.datetime.combine(value, datetime.time.min,
                                          tzinfo=self.trading_calendar.tz)
 
-    def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str], dt: datetime.datetime,
-                       frequency: datetime.timedelta):
+    async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt: datetime.datetime,
+                       frequency: datetime.timedelta | Period):
         """Public API method that returns a scalar value representing the value
         of the desired asset's field at either the given dt.
 

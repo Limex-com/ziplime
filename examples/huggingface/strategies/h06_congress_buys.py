@@ -64,7 +64,7 @@ async def initialize(context: TradingAlgorithm):
     context.buys = await mount_disclosures(
         purchases, name="congress:buys", asset_service=context.asset_service,
         start_date=context.clock.start_session, end_date=context.clock.end_session,
-        session_timezone=str(context.clock.trading_calendar.tz),
+        trading_calendar=context.clock.trading_calendar,
         fields=["amount_usd", "ticker"])
     context.reported = False
     context.schedule_function(rebalance, date_rules.week_start())

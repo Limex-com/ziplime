@@ -186,7 +186,7 @@ async def mount(context, statements: pl.DataFrame | None = None,
         frame=frame, name=name, knowledge_column="knowledge_date", entity_column="ticker",
         event_column=None, asset_service=context.asset_service,
         start_date=context.clock.start_session, end_date=context.clock.end_session,
-        session_timezone=str(context.clock.trading_calendar.tz),
+        trading_calendar=context.clock.trading_calendar,
         fields=FIELDS,
         # The source resolves its own current view, so a strategy just calls `data.current`.
         # Coalescing is not a preference here: a later filing restating a period reports fewer

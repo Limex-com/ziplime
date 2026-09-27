@@ -656,7 +656,7 @@ class FundamentalsSpeedTests(unittest.IsolatedAsyncioTestCase):
             frame=frame, name="fundamentals", knowledge_column="knowledge_date",
             entity_column="ticker", event_column=None, asset_service=self.asset_service,
             start_date=self.BUNDLE_START, end_date=self.END,
-            session_timezone=str(self.calendar.tz), fields=self.FIELDS,
+            trading_calendar=self.calendar, fields=self.FIELDS,
             resolution=Resolution.COALESCE)
 
     async def run_strategy(self, fixture: str):
