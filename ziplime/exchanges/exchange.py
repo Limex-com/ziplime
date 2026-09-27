@@ -19,6 +19,10 @@ from ziplime.constants.period import Period
 
 class Exchange(DataSource, ABC):
 
+    #: A venue that trades for real. Its market data comes from the venue itself, so any
+    #: bundle behind it is a warm-up window, not a record of where instruments stop trading.
+    live: bool = False
+
     def __init__(self, name: str, canonical_name: str, country_code: str,
                  clock: TradingClock,
                  trading_calendar: ExchangeCalendar,
@@ -38,10 +42,14 @@ class Exchange(DataSource, ABC):
     def last_available_bar(self, sid: int | None = None) -> datetime.datetime | None:
         """Where the market data behind this venue stops. Delegated to the data source.
 
-        A live venue has no bundle behind it and answers ``None``, which callers read as "no
-        opinion" -- a live run learns that an instrument stopped trading from the venue, not by
-        inspecting a frame.
+        A live venue answers ``None``, which callers read as "no opinion" -- a live run learns
+        that an instrument stopped trading from the venue, not by inspecting a frame. That holds
+        even with a bundle behind it: answering with the bundle's end made every instrument read
+        as delisted the day after the bundle was built, closed at its last mark and never traded
+        again.
         """
+        if self.live:
+            return None
         data_source = getattr(self, "data_source", None)
         if data_source is None:
             return None
