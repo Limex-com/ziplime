@@ -16,7 +16,6 @@ TRADING_CALENDAR = "XNYS"
 DEMO_TICKERS = ["ZLB26", "ZLZ26", "ZLA27", "ZLO27", "ZLS25"]
 
 
-
 #: Window the strategy examples run over. Every demo issue is alive across it, ZLS25 matures
 #: inside it, and ZLA27 pays two amortization instalments during it.
 EXAMPLE_START = datetime.date(2023, 6, 1)

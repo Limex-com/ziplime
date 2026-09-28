@@ -39,7 +39,7 @@ async def _run_live_trading(
     data_bundle = None
     if bundle_name is not None:
         data_bundle, missing_data = await bundle_service.load_bundle(bundle_name=bundle_name, bundle_version=None,
-                                                       data_type=DataType.CUSTOM)
+                                                                     data_type=DataType.CUSTOM)
 
     algo = AlgorithmFile(algorithm_file=algorithm_file, algorithm_config_file=config_file)
     timedelta_diff_from_current_time = -datetime.timedelta(seconds=0)

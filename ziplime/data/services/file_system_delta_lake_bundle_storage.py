@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator, Sequence, Literal, Self
 from zoneinfo import ZoneInfo
 
 import structlog
-from polars import CredentialProviderFunction, Expr
+from polars import CredentialProviderFunction
 from polars._typing import ParquetCompression
 import polars as pl
 
@@ -32,7 +32,7 @@ class FileSystemDeltaLakeBundleStorage(BundleStorage):
                  partition_chunk_size_bytes: int = 4_294_967_296,
                  storage_options: dict[str, Any] | None = None,
                  credential_provider: (
-                         CredentialProviderFunction | Literal["auto"] | None
+                     CredentialProviderFunction | Literal["auto"] | None
                  ) = "auto", ):
         super().__init__()
         self.base_data_path = base_data_path
@@ -149,14 +149,14 @@ class FileSystemDeltaLakeBundleStorage(BundleStorage):
                 if start_auction_delta is not None:
                     pl_parquet = pl_parquet.filter(
                         pl.col("date") >= (
-                                pl.col("date").min().over(pl.col("date").dt.date()) + pl.duration(
-                            seconds=start_auction_delta.total_seconds())
+                            pl.col("date").min().over(pl.col("date").dt.date()) + pl.duration(
+                                seconds=start_auction_delta.total_seconds())
                         )
                     )
                 if end_auction_delta is not None:
                     pl_parquet = pl_parquet.filter(pl.col("date") <= (
-                            pl.col("date").max().over(pl.col("date").dt.date()) - pl.duration(
-                        seconds=end_auction_delta.total_seconds())
+                        pl.col("date").max().over(pl.col("date").dt.date()) - pl.duration(
+                            seconds=end_auction_delta.total_seconds())
                     ))
 
                 if not aggregations and data_bundle.data_type == DataType.MARKET_DATA:
@@ -263,7 +263,7 @@ class FileSystemDeltaLakeBundleStorage(BundleStorage):
         if data_bundle.data_type != DataType.MARKET_DATA:
             raise ValueError(f"Bundle {data_bundle.name} is not MARKET_DATA.")
         source = pl.scan_delta(self.get_data_bundle_path(data_bundle))
-        schema = source.collect_schema()
+        source.collect_schema()
         return (
             source.select("sid")
             .unique()
@@ -348,7 +348,7 @@ class FileSystemDeltaLakeBundleStorage(BundleStorage):
         return cls(base_data_path=data["base_data_path"])
 
     def get_data_bundle_path(self, data_bundle: DataBundle) -> Path:
-        return Path(self.base_data_path, "data_bundle", data_bundle.name, data_bundle.version, f"data.delta")
+        return Path(self.base_data_path, "data_bundle", data_bundle.name, data_bundle.version, "data.delta")
 
     def get_bundle_version_path(self, bundle_name: str, bundle_version: str) -> Path:
         """Where one version's data lives -- the parent of its delta table."""

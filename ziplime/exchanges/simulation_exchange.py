@@ -1,5 +1,4 @@
 import datetime
-from functools import lru_cache
 from typing import Literal
 
 import aiocache
@@ -46,7 +45,7 @@ class SimulationExchange(Exchange):
                  future_slippage: SlippageModel,
                  equity_commission: EquityCommissionModel,
                  future_commission: FutureCommissionModel,
-                 account_id:str,
+                 account_id: str,
                  is_default: bool,
                  bond_slippage: SlippageModel = None,
                  bond_commission: BondCommissionModel = None,
@@ -261,13 +260,14 @@ class SimulationExchange(Exchange):
                                  include_end_date: bool,
                                  source: str
                                  ) -> pl.DataFrame:
-        return await self.data_source.get_data_by_limit(fields=fields,
-                                                        limit=limit,
-                                                        end_date=end_date,
-                                                        frequency=frequency,
-                                                        assets=assets,
-                                                        include_end_date=include_end_date,
-                                                        )
+        return self.data_source.get_data_by_date(
+            fields=fields,
+            from_date=start_date,
+            to_date=end_date,
+            frequency=frequency,
+            assets=assets,
+            include_bounds=include_end_date,
+        )
 
     @aiocache.cached(cache=Cache.MEMORY)
     async def get_data_by_limit(self, fields: frozenset[str],

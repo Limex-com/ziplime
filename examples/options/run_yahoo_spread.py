@@ -132,7 +132,7 @@ async def main():
 
         perf = result.perf
         transactions = [t for row in perf["transactions"] for t in row]
-        print(f"\n=== BULL CALL SPREAD ON YAHOO DATA ===")
+        print("\n=== BULL CALL SPREAD ON YAHOO DATA ===")
         print(f"  transactions  {len(transactions)}")
         for transaction in transactions:
             side = "buy " if transaction.amount > 0 else "sell"

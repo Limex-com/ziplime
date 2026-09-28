@@ -227,7 +227,7 @@ class Pipeline:
         columns[SCREEN_NAME] = screen
         return columns
 
-    def show_graph(self, format: Literal["svg", "png", "jpeg"]="svg"):
+    def show_graph(self, format: Literal["svg", "png", "jpeg"] = "svg"):
         """
         Render this Pipeline as a DAG.
 

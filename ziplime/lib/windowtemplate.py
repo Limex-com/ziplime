@@ -46,13 +46,13 @@ class AdjustedArrayWindow:
     #     ndarray output
 
     def __init__(self,
-                  data:np.ndarray,
-                  view_kwargs: dict,
-                  adjustments:dict,
-                  offset: int,
-                  window_length:int,
-                  perspective_offset: int,
-                  rounding_places):
+                 data: np.ndarray,
+                 view_kwargs: dict,
+                 adjustments: dict,
+                 offset: int,
+                 window_length: int,
+                 perspective_offset: int,
+                 rounding_places):
         self.data = data
         self.view_kwargs = view_kwargs
         self.adjustments = adjustments

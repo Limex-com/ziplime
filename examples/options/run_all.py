@@ -39,7 +39,8 @@ async def main(only: list[str] | None = None, verbose: bool = False):
     print("=" * 100)
     print(SYNTHETIC_DATA_WARNING)
     print("=" * 100)
-    header = f"{'strategy':<22} {'sess':>4} {'bars':>5} {'listed':>7} {'trades':>7} {'lots':>6} {'names':>6}  description"
+    header = (f"{'strategy':<22} {'sess':>4} {'bars':>5} {'listed':>7} {'trades':>7} "
+              f"{'lots':>6} {'names':>6}  description")
     print(header)
     print("-" * len(header))
     for row in rows:

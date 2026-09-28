@@ -33,4 +33,3 @@ class Quantiles(SingleInputMixin, Classifier):
     def graph_repr(self):
         """Short repr to use when rendering Pipeline graphs."""
         return type(self).__name__ + "(%d)" % self.params["bins"]
-

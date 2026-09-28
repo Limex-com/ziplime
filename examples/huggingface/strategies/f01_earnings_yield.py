@@ -34,7 +34,10 @@ from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
 
-STRATEGY_INFO = {"window": "fundamentals", "description": "Hold the highest earnings yield: annual net income over market value"}
+STRATEGY_INFO = {
+    "window": "fundamentals",
+    "description": "Hold the highest earnings yield: annual net income over market value",
+}
 
 #: Ignore a company whose freshest statement is older than this. Annual filings, so a year and a
 #: half allows for a late filer without letting a company that stopped reporting in 2015 sit in

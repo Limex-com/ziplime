@@ -8,7 +8,7 @@ import unittest
 import polars as pl
 
 from futures_fixtures import (
-    StubAssetService, make_bundle, make_future, make_ledger, mark, session, settle, trade,
+    StubAssetService, make_bundle, make_future, make_ledger, session, settle, trade,
 )
 
 from ziplime.assets.domain.continuous_future import ContinuousFuture

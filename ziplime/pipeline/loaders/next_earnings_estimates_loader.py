@@ -1,5 +1,3 @@
-import pandas as pd
-
 from ziplime.pipeline.common import (
     EVENT_DATE_FIELD_NAME,
     SID_FIELD_NAME, SIMULATION_DATES,

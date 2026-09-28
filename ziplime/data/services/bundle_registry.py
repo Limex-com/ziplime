@@ -94,7 +94,9 @@ class BundleRegistry(abc.ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_bundle_metadata(self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool) -> dict[str, Any]:
+    async def get_bundle_metadata(
+        self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool,
+    ) -> dict[str, Any]:
         """
         Method for retrieving metadata about a data bundle.
 

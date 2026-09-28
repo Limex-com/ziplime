@@ -22,11 +22,11 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from . import code_rules, docs, engine, formatting, workspace
-from .errors import InvalidArguments, NotFound, ZiplimeMcpError
+from .errors import InvalidArguments, ZiplimeMcpError
 
 VERSION = "0.1.0"
 
-INSTRUCTIONS = f"""\
+INSTRUCTIONS = """\
 ziplime, running locally. Backtesting on your own machine, with your own data.
 
 THE LOOP, IN THE ORDER IT HAPPENS
@@ -476,7 +476,7 @@ async def list_backtests(strategy: str | None = None) -> dict:
             "strategy": row.get("strategy"),
             "ran_at": row.get("ran_at"),
             "window": f"{row.get('parameters', {}).get('start')} → "
-                      f"{row.get('parameters', {}).get('end')}",
+            f"{row.get('parameters', {}).get('end')}",
             "summary": row.get("summary"),
             "errors": len(row.get("errors") or []),
         }

@@ -9,4 +9,3 @@ class OrderModel(BaseModel):
 
     base_asset_symbol: Mapped[str]
     quote_asset_symbol: Mapped[str]
-

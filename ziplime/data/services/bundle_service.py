@@ -12,13 +12,6 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from typing import Sequence
 
 from ziplime.assets.domain.asset_type import AssetType
-
-
-def _asset_type_names(asset_type: "AssetType | Sequence[AssetType]") -> str:
-    """Render one or several asset types for an error message."""
-    if isinstance(asset_type, AssetType):
-        return asset_type.value
-    return " / ".join(candidate.value for candidate in asset_type)
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.constants.data_type import DataType
 from ziplime.constants.period import Period
@@ -31,6 +24,13 @@ from ziplime.utils.date_utils import normalize_datetime, period_to_timedelta
 from ziplime.utils.data_utils import _backfill_symbol_data, backfill_sid_data
 from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.utils.calendar_utils import get_calendar
+
+
+def _asset_type_names(asset_type: "AssetType | Sequence[AssetType]") -> str:
+    """Render one or several asset types for an error message."""
+    if isinstance(asset_type, AssetType):
+        return asset_type.value
+    return " / ".join(candidate.value for candidate in asset_type)
 
 
 class BundleService:
@@ -52,7 +52,6 @@ class BundleService:
         self._logger = structlog.get_logger(__name__)
 
     async def list_bundles(self) -> list[dict[str, Any]]:
-
         """Retrieves a list of bundles available in the bundle registry.
 
         Returns:
@@ -210,8 +209,10 @@ class BundleService:
                                         merge: bool,
                                         merge_columns: list[str]
                                         ):
-        """Ingests a custom data bundle into the specified storage. This function processes and validates the provided data,
-        ensures it aligns with the given trading calendar and frequency, and stores it using the provided storage system.
+        """Ingests a custom data bundle into the specified storage.
+
+        Processes and validates the provided data, ensures it aligns with the given trading calendar and frequency,
+        and stores it using the provided storage system.
 
         Args:
             name: str
@@ -249,8 +250,9 @@ class BundleService:
 
         Raises:
             ValueError:
-                - Raised when date_start is before the first session of the trading calendar or when date_end is past the last session.
-                - Also raised when required data columns are missing or when neither a symbol nor sid column is provided.
+                - Raised when date_start is before the first session of the trading calendar or when date_end is
+                  past the last session.
+                - Also raised when required columns are missing or when neither a symbol nor sid column is provided.
 
         Returns:
             DataBundle:
@@ -316,12 +318,10 @@ class BundleService:
         if missing:
             raise ValueError(f"Ingested data is missing required columns: {missing}. Cannot ingest bundle.")
         if "symbol" not in data.columns and "sid" not in data.columns:
-            raise ValueError(f"When ingesting custom bundle you must supply either a symbol or a sid column.")
+            raise ValueError("When ingesting custom bundle you must supply either a symbol or a sid column.")
 
         sid_id = "sid" in data.columns
-        symbol_id = "symbol" in data.columns
-
-        asset_identifiers = list(data["sid"].unique()) if sid_id else list(data["symbol"].unique())
+        # _ = list(data["sid"].unique()) if sid_id else list(data["symbol"].unique())
 
         if sid_id:
             data = await _backfill_symbol_data(data=data, asset_service=asset_service,
@@ -377,7 +377,6 @@ class BundleService:
                                         asset_type: AssetType | Sequence[AssetType] = AssetType.EQUITY,
                                         assets: list[ExchangeAsset] | None = None,
                                         ):
-
         """
         Asynchronously ingests a market data bundle based on provided parameters and performs validation, repair,
         and transformation of data before storing it and registering the bundle.
@@ -395,8 +394,8 @@ class BundleService:
             symbols (list[str]): The list of symbols for the equities to be included in the data bundle.
             data_bundle_source (DataBundleSource): The source from which market data will be retrieved.
             frequency (datetime.timedelta): The frequency of the market data bars (e.g., 1m, 1d etc.).
-            bundle_storage (BundleStorage): The storage component to persist the ingested and processed market data bundle.
-            asset_service (AssetService): The service to retrieve asset metadata such as equities by symbols and exchange mapping.
+            bundle_storage (BundleStorage): Storage for the ingested and processed market data bundle.
+            asset_service (AssetService): Retrieves asset metadata such as equities by symbols and exchange mapping.
             forward_fill_missing_ohlcv_data (bool): If True, fills missing OHLCV data forward.
             assets (list[ExchangeAsset] | None): Listings the symbols refer to, already resolved.
                 Preferred over ``asset_type``, and required in practice for a bundle spanning
@@ -446,7 +445,9 @@ class BundleService:
 
         if data.is_empty():
             self._logger.warning(
-                f"No data for symbols={symbols}, frequency={frequency}, date_from={date_start}, date_end={date_end} found. Skipping ingestion.")
+                f"No data for symbols={symbols}, frequency={frequency}, date_from={date_start}, "
+                f"date_end={date_end} found. Skipping ingestion."
+            )
             return
 
         required_columns = [
@@ -493,7 +494,9 @@ class BundleService:
                 missing_sessions = sorted(set(required_sessions["date"]) - set(symbol_data["date"]))
                 if len(missing_sessions) > 0:
                     self._logger.warning(
-                        f"Data for symbol {symbol} is missing on ticks ({len(missing_sessions)}): {[missing_session.isoformat() for missing_session in missing_sessions]}")
+                        f"Data for symbol {symbol} is missing on ticks ({len(missing_sessions)}): "
+                        f"{[missing_session.isoformat() for missing_session in missing_sessions]}"
+                    )
                     new_rows_df = pl.DataFrame({"date": missing_sessions, "symbol": symbol, "mic": exchange_mic},
                                                schema_overrides={"date": data.schema["date"]})
 
@@ -584,7 +587,8 @@ class BundleService:
               Filter data bundle to include only data starting with specific date. Defaults to None.
             end_date (datetime.datetime | None):
               Filter data bundle to include only data till specific date. Defaults to None.
-            frequency (datetime.timedelta | Period | None): Desired frequency for data. Defaults to None (frequency in which bundle was ingested will be used).
+            frequency (datetime.timedelta | Period | None): Desired frequency for data. Defaults to None
+              (the frequency in which the bundle was ingested).
             start_auction_delta (datetime.timedelta):
                Used when requested frequency is greater than ingested frequency.
                It allows defining custom start time for each frequency group.
@@ -649,7 +653,7 @@ class BundleService:
                                         start=start_date.date() - datetime.timedelta(days=30))
 
         frequency_timedelta = datetime.timedelta(seconds=int(bundle_metadata["frequency_seconds"])) if bundle_metadata[
-                                                                                                           "frequency_seconds"] is not None else None
+            "frequency_seconds"] is not None else None
         frequency_text = bundle_metadata.get("frequency_text", None)
         timestamp = bundle_metadata["timestamp"].replace(tzinfo=trading_calendar.tz)
         data_type = DataType(bundle_metadata["data_type"])
@@ -746,11 +750,13 @@ class BundleService:
             if len(missing_sessions) > 0:
                 missing_data_per_symbol[asset] = (missing_sessions[0], missing_sessions[-1])
                 self._logger.warning(
-                    f"Data for symbol {asset.symbol}@{asset.mic} is missing on ticks ({len(missing_sessions)}): {[missing_session.isoformat() for missing_session in missing_sessions]}")
+                    f"Data for symbol {asset.symbol}@{asset.mic} is missing on ticks ({len(missing_sessions)}): "
+                    f"{[missing_session.isoformat() for missing_session in missing_sessions]}"
+                )
         missing_sids = set([asset.sid for asset in assets]) - set(data["sid"].unique())
         if missing_sids:
             missing_assets = [asset for asset in assets if asset.sid in missing_sids]
-            missing_symbols = [f'{asset.symbol}@{asset.mic}' for asset in missing_assets]
+            # _ = [f'{asset.symbol}@{asset.mic}' for asset in missing_assets]
             for asset in missing_assets:
                 missing_data_per_symbol[asset] = (start_date, end_date)
 

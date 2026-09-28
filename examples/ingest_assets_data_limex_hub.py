@@ -14,9 +14,12 @@ async def ingest_assets_data_limex_hub():
         db_path=str(pathlib.Path(__file__).parent.parent.resolve().joinpath("data", "assets.sqlite"))
     )
     await ingest_assets(asset_service=asset_service, asset_data_source=asset_data_source)
-    await ingest_symbol_universe(asset_service=asset_service, asset_data_source=asset_data_source, symbol_universe_name="Q100US")
-    await ingest_symbol_universe(asset_service=asset_service, asset_data_source=asset_data_source, symbol_universe_name="Q500US")
-    await ingest_symbol_universe(asset_service=asset_service, asset_data_source=asset_data_source, symbol_universe_name="Q1500US")
+    await ingest_symbol_universe(
+        asset_service=asset_service, asset_data_source=asset_data_source, symbol_universe_name="Q100US")
+    await ingest_symbol_universe(
+        asset_service=asset_service, asset_data_source=asset_data_source, symbol_universe_name="Q500US")
+    await ingest_symbol_universe(
+        asset_service=asset_service, asset_data_source=asset_data_source, symbol_universe_name="Q1500US")
 
 
 if __name__ == "__main__":

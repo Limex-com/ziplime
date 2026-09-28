@@ -128,7 +128,7 @@ class Exchange(DataSource, ABC):
     async def get_data_by_limit(self, fields: frozenset[str] | None,
                                 limit: int,
                                 end_date: datetime.datetime,
-                                frequency: datetime.timedelta  | Period,
+                                frequency: datetime.timedelta | Period,
                                 assets: frozenset[ExchangeAsset],
                                 include_end_date: bool,
                                 ) -> pl.DataFrame:

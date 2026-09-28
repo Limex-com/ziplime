@@ -2,7 +2,7 @@ import datetime
 
 from sqlalchemy.orm import Mapped
 
-from ziplime.core.db.annotated_types import DateIndexed, IntegerIndexed, StringPK, AssetRouterFK, IntegerPK
+from ziplime.core.db.annotated_types import DateIndexed, AssetRouterFK, IntegerPK
 from ziplime.core.db.base_model import BaseModel
 
 

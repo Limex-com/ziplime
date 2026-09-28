@@ -137,7 +137,8 @@ class MetricsTracker:
         packet = {
             "period_start": self._first_session,
             "period_end": self._last_session,
-            "capital_base": list(self.exchanges.values())[0].get_start_cash_balance(), # TODO: add support for multiple exchanges
+            # TODO: add support for multiple exchanges
+            "capital_base": list(self.exchanges.values())[0].get_start_cash_balance(),
             "minute_perf": {
                 "period_open": self._market_open,
                 "period_close": dt,
@@ -189,7 +190,6 @@ class MetricsTracker:
         A daily perf packet.
         """
 
-
         session_ix = self._session_count
         # increment the day counter before we move markers forward.
         self._session_count += 1
@@ -197,7 +197,8 @@ class MetricsTracker:
         packet = {
             "period_start": self._first_session,
             "period_end": self._last_session,
-            "capital_base": list(self.exchanges.values())[0].get_start_cash_balance(), # TODO: add support for multiple exchanges
+            # TODO: add support for multiple exchanges
+            "capital_base": list(self.exchanges.values())[0].get_start_cash_balance(),
             "daily_perf": {
                 "period_open": self._market_open,
                 "period_close": dt,
@@ -228,7 +229,8 @@ class MetricsTracker:
         self._logger.info(
             f"Simulated {self._session_count} trading days\n first open: "
             f"{self._trading_calendar.session_open(self._first_session).astimezone(tz=self._trading_calendar.tz)}\n "
-            f"last close: {self._trading_calendar.session_close(self._last_session).astimezone(tz=self._trading_calendar.tz)}",
+            "last close: "
+            f"{self._trading_calendar.session_close(self._last_session).astimezone(tz=self._trading_calendar.tz)}",
         )
 
         packet = {}

@@ -38,5 +38,4 @@ class Position:
 
     def __repr__(self):
         return f"asset: {self.asset}, amount: {self.amount}, cost_basis: {self.cost_basis}," \
-               f"last_sale_price: {self.last_sale_price}"
-
+            f"last_sale_price: {self.last_sale_price}"

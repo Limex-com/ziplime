@@ -1,10 +1,10 @@
 import enum
 import os
 
-import structlog
 from alembic import context
 from sqlalchemy import engine_from_config, pool
-from logging.config import fileConfig
+
+from ziplime.core.db.base import BaseModel
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -22,8 +22,6 @@ config = context.config
 # target_metadata = mymodel.Base.metadata
 # target_metadata = None
 
-from ziplime.core.db.base import BaseModel
-
 target_metadata = BaseModel.metadata
 x_args = context.get_x_argument(as_dictionary=True)
 
@@ -31,6 +29,7 @@ x_args = context.get_x_argument(as_dictionary=True)
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
 # ... etc.
+
 
 def include_object(object, name, type_, reflected, compare_to):
     """
@@ -78,7 +77,7 @@ def my_compare_type(context, inspected_column,
     # or None to allow the default implementation to compare these
     # types. a return value of True means the two types do not
     # match and should result in a type change operation.
-    if type(metadata_column.type.python_type) == enum.EnumType and max(
+    if type(metadata_column.type.python_type) is enum.EnumType and max(
             len(v) for v in metadata_column.type.enums) != inspected_column.type.length:
         return True
     return None

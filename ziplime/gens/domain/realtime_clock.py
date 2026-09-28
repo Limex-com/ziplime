@@ -117,7 +117,7 @@ class RealtimeClock(TradingClock):
                 self._logger.info(f"Current time {current_time} is not in trading hours, waiting till market hours.")
                 current_time = self._sleep_and_increase_time(sleep_seconds=1)
             elif self.market_opens[current_session_index] <= current_time <= self.market_closes[
-                current_session_index] and not self.market_opens_yielded[current_session_index]:
+                    current_session_index] and not self.market_opens_yielded[current_session_index]:
                 self.market_opens_yielded[current_session_index] = True
                 yield current_time.date(), SimulationEvent.SESSION_START
             elif self.market_opens[current_session_index] <= current_time <= self.market_closes[current_session_index]:

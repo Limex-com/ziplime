@@ -1,14 +1,9 @@
-import datetime
-import logging
-
-import numpy as np
-import polars as pl
 import structlog
 from pydantic import BaseModel
 
 from ziplime.config.base_algorithm_config import BaseAlgorithmConfig
 from ziplime.domain.bar_data import BarData
-from ziplime.finance.execution import MarketOrder, LimitOrder
+from ziplime.finance.execution import MarketOrder
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 logger = structlog.get_logger(__name__)
@@ -39,12 +34,12 @@ async def initialize(context: TradingAlgorithm):
 
 async def handle_data(context: TradingAlgorithm, data: BarData):
     num_assets = len(context.assets)
-    target_percent = 1.0 / num_assets
+    _ = 1.0 / num_assets
     if context.i == 0:
         await context.order_target_percent(asset=context.assets[0], style=MarketOrder(), target=1)
     if context.i == 1:
         await context.order_target_percent(asset=context.assets[0], style=MarketOrder(), target=0.5)
-    context.i+=1
+    context.i += 1
 
     # print(context.portfolio)
     # result = await context.order(exchange_name="grpc_exchange",
@@ -53,9 +48,11 @@ async def handle_data(context: TradingAlgorithm, data: BarData):
     #               amount=-1,
     #               ),
     # await context.order_target(asset=context.assets[1], exchange_name="grpc_exchange",
-    #                      style=LimitOrder(limit_price=current_prices.filter(pl.col("symbol") == "GMKN")[0]["price"][0]), target=1)
+    #                      style=LimitOrder(limit_price=current_prices.filter(
+    #                          pl.col("symbol") == "GMKN")[0]["price"][0]), target=1)
     # await context.order_target(asset=context.assets[1], exchange_name="grpc_exchange",
-    #                      style=LimitOrder(limit_price=current_prices.filter(pl.col("symbol") == "MGNT")[0]["price"][0]), target=2)
+    #                      style=LimitOrder(limit_price=current_prices.filter(
+    #                          pl.col("symbol") == "MGNT")[0]["price"][0]), target=2)
     # await context.order_target(asset=context.assets[1], exchange_name="grpc_exchange",
     #                      style=MarketOrder(), target=1)
 

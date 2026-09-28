@@ -30,7 +30,6 @@ STRATEGY_INFO = {
 }
 
 
-
 async def initialize(context: TradingAlgorithm):
     context.universe = [await context.symbol(ticker, mic=mic)
                         for ticker, mic in CONGRESS_UNIVERSE]

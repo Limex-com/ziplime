@@ -332,5 +332,6 @@ class SqlAlchemyAssetRepositoryTests(unittest.IsolatedAsyncioTestCase):
             await self.repository.get_exchange_asset_by_symbol(
                 AssetSymbol("LIFE", "XLIFE"), AssetType.COMMODITY)
 
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -22,7 +22,7 @@ class FileSystemBundleRegistry(BundleRegistry):
         os.makedirs(self.get_bundle_registry_path(), exist_ok=True)
 
     async def get_bundle_metadata(self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool) -> dict[
-        str, Any]:
+            str, Any]:
         frequency_seconds = None
         frequency_text = None
         if type(data_bundle.frequency) is datetime.timedelta:
@@ -37,11 +37,6 @@ class FileSystemBundleRegistry(BundleRegistry):
             "bundle_storage_class": f"{bundle_storage.__class__.__module__}.{bundle_storage.__class__.__name__}",
             "bundle_storage_data": await bundle_storage.to_json(data_bundle=data_bundle),
 
-            # "asset_repository_class": f"{data_bundle.asset_repository.__class__.__module__}.{data_bundle.asset_repository.__class__.__name__}",
-            # "asset_repository_data": data_bundle.asset_repository.to_json(),
-            #
-            # "adjustment_repository_class": f"{data_bundle.adjustment_repository.__class__.__module__}.{data_bundle.adjustment_repository.__class__.__name__}",
-            # "adjustment_repository_data": data_bundle.adjustment_repository.to_json(),
             "start_date": data_bundle.start_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end_date": data_bundle.end_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "trading_calendar_name": data_bundle.trading_calendar.name,

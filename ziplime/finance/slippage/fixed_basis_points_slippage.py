@@ -68,8 +68,12 @@ class FixedBasisPointsSlippage(SlippageModel):
             volume_limit=self.volume_limit,
         )
 
-    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: Order, price: float=None) -> tuple[float, float]:
-        current_val = await exchange.get_spot_value(assets=frozenset({order.asset}), fields=frozenset({"open","close", "volume"}), dt=dt)
+    async def process_order(
+            self, exchange: Exchange, dt: datetime.datetime, order: Order, price: float = None,
+    ) -> tuple[float, float]:
+        current_val = await exchange.get_spot_value(
+            assets=frozenset({order.asset}), fields=frozenset({"open", "close", "volume"}), dt=dt,
+        )
         volume = current_val["volume"][0]
         max_volume = int(self.volume_limit * volume)
         if price is None:
@@ -84,11 +88,14 @@ class FixedBasisPointsSlippage(SlippageModel):
             shares_to_fill * order.direction,
         )
 
-    async def order_target_percentage_maximum_quantity(self, exchange: Exchange, dt: datetime.datetime, asset: ExchangeAsset,
-                                percentage: float,
-                                available_cash: float) -> tuple[float, float]:
+    async def order_target_percentage_maximum_quantity(
+            self, exchange: Exchange, dt: datetime.datetime, asset: ExchangeAsset,
+            percentage: float, available_cash: float,
+    ) -> tuple[float, float]:
 
-        current_val = await exchange.get_spot_value(assets=frozenset({asset}), fields=frozenset({"close", "volume", }), dt=dt)
+        current_val = await exchange.get_spot_value(
+            assets=frozenset({asset}), fields=frozenset({"close", "volume"}), dt=dt,
+        )
         volume = current_val["volume"][0]
         max_volume = int(self.volume_limit * volume)
 
@@ -97,7 +104,7 @@ class FixedBasisPointsSlippage(SlippageModel):
         slippage = self.percentage * math.copysign(1, 1)  # +1 for buy, -1 for sell if needed
         price_with_slippage = price * (1 + slippage)
 
-        target_cash = available_cash #* percentage
+        target_cash = available_cash  # * percentage
         max_quantity = target_cash / price_with_slippage
         # A volume cap bounds how much of an order can fill; it must never turn the order around.
         # `max_volume - volume_for_bar` goes negative on a thin bar once part of the limit is

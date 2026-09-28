@@ -126,12 +126,12 @@ class DataSource:
         return df.sort(by="date")
 
     async def get_data_by_limit(self, fields: frozenset[str] | None,
-                          limit: int,
-                          end_date: datetime.datetime,
-                          frequency: datetime.timedelta | Period,
-                          assets: frozenset[ExchangeAsset],
-                          include_end_date: bool,
-                          ) -> pl.DataFrame:
+                                limit: int,
+                                end_date: datetime.datetime,
+                                frequency: datetime.timedelta | Period,
+                                assets: frozenset[ExchangeAsset],
+                                include_end_date: bool,
+                                ) -> pl.DataFrame:
         """
         Fetch data for a specified set of assets, fields, and parameters, limiting the number of entries.
 
@@ -246,7 +246,7 @@ class DataSource:
         return rows
 
     async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt: datetime.datetime,
-                       frequency: datetime.timedelta):
+                             frequency: datetime.timedelta):
         """
         Retrieves the most recent spot value for specified assets and fields.
 

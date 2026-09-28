@@ -6,6 +6,7 @@ from ziplime.data.data_sources.yahoo.yahoo_finance_asset_data_source import (
 )
 from ziplime.data.data_sources.yahoo.yahoo_finance_data_source import YahooFinanceDataSource
 
+
 def _market_data_source(assets=None, **kwargs) -> YahooFinanceDataSource:
     """Build the bar source, pre-loading each listing's exchange when assets are given.
 

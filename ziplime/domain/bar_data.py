@@ -7,12 +7,10 @@ from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.domain.continuous_future import ContinuousFuture
 from contextlib import contextmanager
-import numpy as np
 
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.constants.period import Period
-from ziplime.data.domain.data_bundle import DataBundle
 from ziplime.data.services.data_source import DataSource
 
 
@@ -180,7 +178,7 @@ class BarData:
         return dt
 
     async def current(self, assets: list[Asset], fields: list[str],
-                data_source: str | None = None) -> pl.DataFrame:
+                      data_source: str | None = None) -> pl.DataFrame:
         """Returns the "current" value of the given fields for the given assets
         at the current simulation time.
 
@@ -289,7 +287,6 @@ class BarData:
         return {by_sid[sid]: prices[-1] / prices[0] - 1.0
                 for sid, prices in series.items()
                 if sid in by_sid and len(prices) >= 2 and prices[0] > 0}
-
 
     async def current_chain(self, continuous_future: ContinuousFuture,
                             data_source: str | None = None):
@@ -418,11 +415,11 @@ class BarData:
         return self._trading_calendar.is_session(session_label)
 
     async def history(self, assets: list[Asset], bar_count: int | None = None,
-                frequency: datetime.timedelta | Period = datetime.timedelta(days=1),
-                fields: list[str] | None=None,
-                data_source: str | None = None,
-                since: datetime.timedelta | None = None,
-                ) -> pl.DataFrame:
+                      frequency: datetime.timedelta | Period = datetime.timedelta(days=1),
+                      fields: list[str] | None = None,
+                      data_source: str | None = None,
+                      since: datetime.timedelta | None = None,
+                      ) -> pl.DataFrame:
         """Returns a trailing window of length ``bar_count`` with data for
         the given assets, fields, and frequency, adjusted for splits, dividends,
         and mergers as of the current simulation time.
@@ -510,12 +507,12 @@ class BarData:
                 frequency=frequency, fields=fields, include_end_date=False)
 
         df = await source.get_data_by_limit(assets=assets,
-                                                         end_date=self._get_current_minute(),
-                                                         limit=bar_count,
-                                                         frequency=frequency,
-                                                         fields=fields,
-                                                         include_end_date=False
-                                                         )
+                                            end_date=self._get_current_minute(),
+                                            limit=bar_count,
+                                            frequency=frequency,
+                                            fields=fields,
+                                            include_end_date=False
+                                            )
 
         # See `current`: the `_adjust_minutes` branch that stood here referred to
         # `self.exchanges[exchange_name]`, with no `exchange_name` in scope, and raised `NameError`

@@ -49,7 +49,7 @@ def fetch_historical_limex_data_task(date_from: datetime.datetime,
         )
         df = df.with_columns(
             pl.lit(symbol).alias("symbol"),
-            pl.lit("XNGS").alias("mic"), # TODO: return mic from LimexHub
+            pl.lit("XNGS").alias("mic"),  # TODO: return mic from LimexHub
             pl.col("close").alias("price"),
             date=pl.col("date").dt.replace_time_zone(str(date_from.tzinfo)),
         ).filter(pl.col("date") >= date_from, pl.col("date") <= date_to)
@@ -81,9 +81,10 @@ class LimexHubDataSource(DataBundleSource):
                                                           symbol=symbol,
                                                           frequency=frequency)
                 return result
-            except Exception as e:
+            except Exception:
                 self._logger.exception(
-                    f"Exception fetching historical data for symbol {symbol}, date_from={date_from}, date_to={date_to}. Skipping."
+                    f"Exception fetching historical data for symbol {symbol}, "
+                    f"date_from={date_from}, date_to={date_to}. Skipping."
                 )
                 return None
 

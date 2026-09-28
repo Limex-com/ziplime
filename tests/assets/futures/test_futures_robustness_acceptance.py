@@ -9,7 +9,7 @@ import polars as pl
 
 from futures_fixtures import make_bundle, make_future, session
 
-from ziplime.assets.domain.roll_finder import CalendarRollFinder, VolumeRollFinder
+from ziplime.assets.domain.roll_finder import VolumeRollFinder
 
 BASE = [datetime.date(2023, 6, d) for d in (12, 13, 14, 15, 16, 20, 21, 22)]
 EXTRA = [datetime.date(2023, 6, d) for d in (23, 26, 27, 28, 29, 30)]

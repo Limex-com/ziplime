@@ -14,7 +14,7 @@ from ziplime.pipeline.expression import (
     NUMEXPR_MATH_FUNCS,
     unary_op_name,
 )
-from ziplime.pipeline.terms.filters import   NumExprFilter
+from ziplime.pipeline.terms.filters import NumExprFilter
 
 from ziplime.utils.functional import with_doc, with_name
 from ziplime.utils.numpy_utils import (
@@ -117,7 +117,6 @@ factor : ziplime.pipeline.Factor
 
 
 def binary_operator(op):
-
     """
     Factory function for making binary operator methods on a Factor subclass.
 

@@ -195,8 +195,8 @@ class DataBundle(DataSource):
                          assets: frozenset[ExchangeAsset],
                          include_bounds: bool,
                          ) -> pl.DataFrame:
-        return self.get_data_by_date_and_sids(fields=fields, from_date=from_date,
-                                              to_date=to_date, frequency=frequency,
+        return self.get_data_by_date_and_sids(fields=fields, start_date=from_date,
+                                              end_date=to_date, frequency=frequency,
                                               sids=frozenset(asset.sid for asset in assets),
                                               include_bounds=include_bounds)
         cols = set(fields.union({"date", "sid"}))
@@ -317,7 +317,10 @@ class DataBundle(DataSource):
                 try:
                     sid_index = self.sid_indexes[asset_sid]
                 except KeyError:
-                    raise ValueError(f"Data for asset sid={asset_sid}, symbol={assets_list[0].symbol}, mic={assets_list[0].mic} requested but it is not found in the loaded bundle.")
+                    raise ValueError(
+                        f"Data for asset sid={asset_sid}, symbol={assets_list[0].symbol}, "
+                        f"mic={assets_list[0].mic} requested but it is not found in the loaded bundle."
+                    )
                 df_raw = self.get_dataframe()[sid_index[0]:sid_index[1]].select(pl.col(col) for col in cols).filter(
                     pl.col("date") <= end_date,
                 ).tail(total_bar_count)
@@ -505,7 +508,7 @@ class DataBundle(DataSource):
                                          tzinfo=self.trading_calendar.tz)
 
     async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt: datetime.datetime,
-                       frequency: datetime.timedelta | Period):
+                             frequency: datetime.timedelta | Period):
         """Public API method that returns a scalar value representing the value
         of the desired asset's field at either the given dt.
 

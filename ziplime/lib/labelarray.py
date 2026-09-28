@@ -2,7 +2,7 @@
 An ndarray subclass for working with arrays of strings.
 """
 
-from functools import partial, total_ordering
+from functools import total_ordering
 from operator import eq, ne
 import re
 
@@ -140,7 +140,9 @@ class LabelArray(ndarray):
     #     # in place.
     #     categories=coerce((list, np.ndarray, set), list),
     # )
-    def __new__(cls, values: np.ndarray, missing_value: SUPPORTED_SCALAR_TYPES, categories: list|None=None, sort=True):
+    def __new__(
+        cls, values: np.ndarray, missing_value: SUPPORTED_SCALAR_TYPES, categories: list | None = None, sort=True
+    ):
 
         # Numpy's fixed-width string types aren't very efficient. Working with
         # object arrays is faster than bytes or unicode arrays in almost all
@@ -758,8 +760,8 @@ class LabelArray(ndarray):
 
     # These types all implement an O(N) __contains__, so pre-emptively
     # coerce to `set`.
-    #@preprocess(container=coerce((list, tuple, np.ndarray), set))
-    def element_of(self, container:set):
+    # @preprocess(container=coerce((list, tuple, np.ndarray), set))
+    def element_of(self, container: set):
         """
         Check if each element of self is an of ``container``.
 

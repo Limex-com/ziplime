@@ -6,7 +6,6 @@ from ziplime.utils.numpy_utils import (
 )
 
 
-
 class Everything(Classifier):
     """
     A trivial classifier that classifies everything the same.

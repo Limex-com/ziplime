@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Mapped
 
-from ziplime.core.db.annotated_types import DateIndexed, IntegerIndexed, StringPK, IntegerPK, AssetRouterFK
+from ziplime.core.db.annotated_types import DateIndexed, IntegerPK, AssetRouterFK
 from ziplime.core.db.base_model import BaseModel
 
 

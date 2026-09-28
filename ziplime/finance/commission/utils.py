@@ -36,10 +36,3 @@ def calculate_per_unit_commission(
         else:
             # we've exceeded the threshold, so pay more commission.
             return per_unit_total - order.commission
-
-
-
-
-
-
-

@@ -4,7 +4,6 @@ from abc import abstractmethod
 
 import numpy as np
 
-from ziplime.errors import HistoryWindowStartsBeforeData
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.slippage.slippage_model import SlippageModel, SQRT_252
 from ziplime.finance.utils import fill_price_worse_than_limit_price
@@ -165,4 +164,3 @@ class MarketImpactBase(SlippageModel):
             self._window_data_cache.set(asset, values, cache_key)
 
         return values["volume"], values["close"]
-

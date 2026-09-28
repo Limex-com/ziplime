@@ -72,4 +72,3 @@ class CustomFilter(PositiveWindowLengthMixin, CustomTermMixin, Filter):
                     hint="Did you mean to create a CustomFactor?",
                 ) from exc
             raise
-

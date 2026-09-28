@@ -2,6 +2,7 @@
 from .iface import PipelineHooks
 from .no import NoHooks
 
+
 class DelegatingHooks(PipelineHooks):
     """A PipelineHooks that delegates to one or more other hooks.
 
@@ -24,5 +25,3 @@ class DelegatingHooks(PipelineHooks):
             self = super(DelegatingHooks, cls).__new__(cls)
             self._hooks = hooks
             return self
-
-

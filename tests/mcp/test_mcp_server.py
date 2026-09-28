@@ -5,12 +5,11 @@ minutes, and a test suite that needs either stops being run. What is covered is
 everything that can be wrong without them: the tool surface a client sees, the
 code checker, the workspace, the formatting, and the error contract.
 """
-import json
-
 import pytest
 
 from ziplime.mcp import code_rules, formatting, workspace
 from ziplime.mcp.errors import InvalidArguments, NotFound, ZiplimeMcpError
+
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):

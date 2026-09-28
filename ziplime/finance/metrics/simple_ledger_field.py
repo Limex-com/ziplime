@@ -22,7 +22,6 @@ class SimpleLedgerField:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-
     def __init__(self, ledger_field, packet_field=None):
         self._get_ledger_field = op.attrgetter(ledger_field)
         if packet_field is None:

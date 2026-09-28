@@ -13,7 +13,6 @@ class Transaction:
     exchange_name: str
     trading_account_id: str
 
-
     order_id: str = None
     asset: ExchangeAsset = None
     commission: float | None = None

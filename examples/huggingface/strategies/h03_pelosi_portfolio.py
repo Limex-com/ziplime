@@ -64,9 +64,10 @@ async def initialize(context: TradingAlgorithm):
 
     disclosures = await load_disclosures(
         revision=CONGRESS_REVISION,
-        row_filter=(pl.col("member_last_name").str.to_lowercase() == LEGISLATOR.lower())
-                   # Shares only. A call option is not the same position as the stock.
-                   & (~pl.col("is_option").fill_null(False)))
+        row_filter=(
+            (pl.col("member_last_name").str.to_lowercase() == LEGISLATOR.lower())
+            # Shares only. A call option is not the same position as the stock.
+            & (~pl.col("is_option").fill_null(False))))
     context.pelosi = await mount_disclosures(
         disclosures, name=f"congress:{LEGISLATOR.lower()}",
         asset_service=context.asset_service,

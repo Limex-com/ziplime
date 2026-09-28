@@ -61,6 +61,7 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 _logger = structlog.get_logger(__name__)
 
+
 class Resolution(enum.Enum):
     """How a window of rows collapses into "the value now".
 

@@ -257,8 +257,8 @@ class SimplePipelineEngine(PipelineEngine):
             self,
             get_loader: Callable,
             asset_service: AssetService,
-            default_domain: Domain=GENERIC,
-            populate_initial_workspace: Callable=None,
+            default_domain: Domain = GENERIC,
+            populate_initial_workspace: Callable = None,
             default_hooks=None,
     ):
         self._get_loader = get_loader
@@ -442,7 +442,9 @@ class SimplePipelineEngine(PipelineEngine):
             assets=sids,
         )
 
-    async def _compute_root_mask(self, domain: Domain, start_date: datetime.date, end_date: datetime.date, extra_rows: int):
+    async def _compute_root_mask(
+        self, domain: Domain, start_date: datetime.date, end_date: datetime.date, extra_rows: int
+    ):
         """Compute a lifetimes matrix from our AssetFinder, then drop columns that
         didn't exist at all during the query dates.
 
@@ -730,7 +732,9 @@ class SimplePipelineEngine(PipelineEngine):
             out[name] = workspace[term][graph_extra_rows[term]:]
         return out
 
-    async def _to_narrow(self, terms: dict[str, Term], data: dict[str, AdjustedArray], mask, dates: numpy.ndarray, assets: numpy.ndarray):
+    async def _to_narrow(
+        self, terms: dict[str, Term], data: dict[str, AdjustedArray], mask, dates: numpy.ndarray, assets: numpy.ndarray
+    ):
         """
         Convert raw computed pipeline results into a DataFrame for public APIs.
 
@@ -790,7 +794,13 @@ class SimplePipelineEngine(PipelineEngine):
             data=final_columns, index=index, columns=final_columns.keys()
         )
 
-    def _validate_compute_chunk_params(self, graph: ExecutionPlan, dates: pd.DatetimeIndex, sids: pd.Index, initial_workspace: dict[Term, AdjustedArray]):
+    def _validate_compute_chunk_params(
+        self,
+        graph: ExecutionPlan,
+        dates: pd.DatetimeIndex,
+        sids: pd.Index,
+        initial_workspace: dict[Term, AdjustedArray],
+    ):
         """
         Verify that the values passed to compute_chunk are well-formed.
         """

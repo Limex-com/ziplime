@@ -88,7 +88,7 @@ async def run_simulation(
         exchange (Exchange, optional): Exchange instance to use for the simulation. Defaults to None.
         config_file (str | None, optional): Path to the configuration file for the algorithm. Defaults to None.
         benchmark_asset_symbol (str | None, optional): Symbol for an asset to use as the benchmark. Defaults to None.
-        benchmark_returns (pl.Series | None, optional): Custom benchmark returns to use for evaluation. Defaults to None.
+        benchmark_returns (pl.Series | None, optional): Custom benchmark returns for evaluation. Defaults to None.
         asset_service (AssetService): Service for managing assets.
         equity_commission: Model used to calculate fees when trading equities.
                            If not specified, ziplime.finance.commission.PerShare model is used with a default
@@ -240,7 +240,7 @@ async def run_simulation_iter(
         exchange (Exchange, optional): Exchange instance to use for the simulation. Defaults to None.
         config_file (str | None, optional): Path to the configuration file for the algorithm. Defaults to None.
         benchmark_asset_symbol (str | None, optional): Symbol for an asset to use as the benchmark. Defaults to None.
-        benchmark_returns (pl.Series | None, optional): Custom benchmark returns to use for evaluation. Defaults to None.
+        benchmark_returns (pl.Series | None, optional): Custom benchmark returns for evaluation. Defaults to None.
         asset_service (AssetService): Service for managing assets.
         equity_commission: Model used to calculate fees when trading equities.
                            If not specified, ziplime.finance.commission.PerShare model is used with a default
@@ -330,7 +330,7 @@ async def run_simulation_iter(
             custom_data_sources=custom_data_sources,
             max_leverage=max_leverage,
             same_bar_execution=same_bar_execution,
-        futures_margin_model=futures_margin_model,
+            futures_margin_model=futures_margin_model,
             price_used_in_order_execution=price_used_in_order_execution,
             exchange_repository=exchange_repository
     ):

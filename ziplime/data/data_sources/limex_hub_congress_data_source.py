@@ -5,7 +5,6 @@ import sys
 from typing import Self
 
 import limexhub
-import requests
 import structlog
 from asyncclick import progressbar
 from joblib import Parallel, delayed
@@ -63,7 +62,10 @@ def fetch_congress_data_task(
 
     df = df.with_columns(
         pl.lit(symbol).alias("symbol"),
-        date=pl.col("notification_date").str.to_datetime(format="%Y-%m-%d", strict=False).dt.replace_time_zone(str(date_from.tzinfo)),
+        date=(
+            pl.col("notification_date").str.to_datetime(format="%Y-%m-%d", strict=False)
+            .dt.replace_time_zone(str(date_from.tzinfo))
+        ),
         amount=((pl.col("min_amount_usd") + pl.col("max_amount_usd")) / 2),
     ).filter(
         pl.col("date") >= date_from,

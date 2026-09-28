@@ -48,7 +48,8 @@ def test_realtime_clock_emits_before_trading_start_session_and_close_events(monk
 
     monkeypatch.setattr(realtime_clock_module.datetime, "datetime", FrozenDateTime)
     monkeypatch.setattr(realtime_clock_module.time, "sleep", lambda seconds: None)
-    clock._sleep_and_increase_time = lambda sleep_seconds: fake_now.__setitem__("value", fake_now["value"] + datetime.timedelta(minutes=1)) or fake_now["value"]
+    clock._sleep_and_increase_time = lambda sleep_seconds: fake_now.__setitem__(
+        "value", fake_now["value"] + datetime.timedelta(minutes=1)) or fake_now["value"]
 
     events = list(clock)
 

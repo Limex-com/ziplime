@@ -19,6 +19,7 @@ Each guard here was paid for once:
 """
 import datetime  # noqa: F401  (kept for callers that pass timedeltas through)
 
+
 async def priced(context, data) -> dict[int, float]:
     """Instruments with a live quote today, keyed by sid.
 

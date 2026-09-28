@@ -32,8 +32,6 @@ on dictionary iteration, which is reproducible within a process and not between 
 """
 from __future__ import annotations
 
-import datetime
-
 import numpy as np
 import pandas as pd
 import structlog

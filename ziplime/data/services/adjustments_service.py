@@ -380,13 +380,14 @@ class AdjustmentsService:
             assets_by_id[asset.id] = asset
             sids_by_asset_id.setdefault(asset.id, []).append(exchange_asset.sid)
 
-
         price_columns = [column for column in ("open", "high", "low", "close", "price") if column in data.columns]
         volume_column = "volume" if "volume" in data.columns else None
 
         assets = list(assets_by_id.values())
         ex_date_from = data_bundle.start_date.date()
-        ex_date_to = data_bundle.end_date.date() if isinstance(data_bundle.end_date, datetime.datetime) else data_bundle.end_date
+        ex_date_to = (
+            data_bundle.end_date.date() if isinstance(data_bundle.end_date, datetime.datetime) else data_bundle.end_date
+        )
 
         dividends = await self._asset_service.get_dividends_by_assets_and_ex_date_between(
             assets=assets,

@@ -722,7 +722,6 @@ class PremiumStyleAccountingTests(unittest.TestCase):
         self.assertAlmostEqual(margined._get_payout_total(margined.position_tracker.positions), 14.1)
 
 
-
 def native_named_venue(name: str = "XTST"):
     """A margined, European, cash-settled venue that names contracts its own way.
 
@@ -848,7 +847,6 @@ class NativeNamingChainGenerationTests(unittest.TestCase):
     """
 
     def setUp(self):
-        from ziplime.data.data_sources.options import venues
         from ziplime.data.data_sources.options.synthetic import (
             ChainSpec, SyntheticOptionChainSource,
         )
@@ -887,7 +885,6 @@ class NativeNamingChainGenerationTests(unittest.TestCase):
         frame = asyncio.run(self.source.bars(specs, self.source._bars["date"]))
         self.assertTrue(frame.height)
         self.assertTrue(all(s.startswith("AB-") for s in frame["symbol"].unique()))
-
 
 
 class NoArbitrageTests(unittest.TestCase):
@@ -987,9 +984,11 @@ class NoArbitrageTests(unittest.TestCase):
         from ziplime.data.data_sources.options.surface import VolatilitySurface
 
         surface = VolatilitySurface()
-        spread_at = lambda years: (
-            surface.implied_volatility(0.25, 300.0, 285.0, years)
-            - surface.implied_volatility(0.25, 300.0, 300.0, years))
+
+        def spread_at(years):
+            return (surface.implied_volatility(0.25, 300.0, 285.0, years)
+                    - surface.implied_volatility(0.25, 300.0, 300.0, years))
+
         self.assertGreater(spread_at(1 / 365), spread_at(30 / 365))
 
 

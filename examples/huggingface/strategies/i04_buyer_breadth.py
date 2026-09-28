@@ -21,7 +21,10 @@ from ziplime.api import date_rules  # noqa: E402
 from ziplime.domain.bar_data import BarData  # noqa: E402
 from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
 
-STRATEGY_INFO = {"window": "insider10", "description": "Hold names with several distinct insider buyers over the past 30 days"}
+STRATEGY_INFO = {
+    "window": "insider10",
+    "description": "Hold names with several distinct insider buyers over the past 30 days",
+}
 
 WINDOW = datetime.timedelta(days=30)
 HOLD_FOR = datetime.timedelta(days=90)

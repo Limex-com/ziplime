@@ -59,16 +59,16 @@ class CSVDataSource(DataSource):
         )
 
         df = await _process_data(data=df,
-                           date_start=df["date"].min(),
-                           date_end=df["date"].max(),
-                           data_frequency_use_window_end=self._data_frequency_use_window_end,
-                           frequency=self.frequency,
-                           trading_calendar=self._trading_calendar,
-                           asset_service=self._asset_service,
-                           name=self.name,
-                           symbols=self._symbols,
+                                 date_start=df["date"].min(),
+                                 date_end=df["date"].max(),
+                                 data_frequency_use_window_end=self._data_frequency_use_window_end,
+                                 frequency=self.frequency,
+                                 trading_calendar=self._trading_calendar,
+                                 asset_service=self._asset_service,
+                                 name=self.name,
+                                 symbols=self._symbols,
 
-                           )
+                                 )
         self.data = df
         self.start_date = self.data["date"].min()
         self.end_date = self.data["date"].max()

@@ -21,8 +21,6 @@ The knowledge column is ``feature_available_at``, chosen automatically by the ad
 midnight New York at the start of the day *after* the events it aggregates, which is the first
 moment the row could have been read. ``knowledge_day`` would be up to a day early.
 """
-import datetime
-
 from ziplime.data.data_sources.huggingface.huggingface_data_source import HuggingFaceDataSource
 
 DATASET = "ZipLime/insider-trading"

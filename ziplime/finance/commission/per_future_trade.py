@@ -15,7 +15,7 @@ class PerFutureTrade(PerContract):
         symbols to the commission cost for trading contracts of that symbol.
     """
 
-    def __init__(self, cost,):#=DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE):
+    def __init__(self, cost,):  # =DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE):
         # The per-trade cost can be represented as the exchange fee in a
         # per-contract model because the exchange fee is just a one time cost
         # incurred on the first fill.

@@ -8,8 +8,8 @@ class MaxLeverage(AccountControl):
     by the algorithm.
     """
 
-    def __init__(self, max_leverage:float, fail_on_error: bool = True,
-                 logger = structlog.get_logger(__name__)):
+    def __init__(self, max_leverage: float, fail_on_error: bool = True,
+                 logger=structlog.get_logger(__name__)):
         """max_leverage is the gross leverage in decimal form. For example,
         2, limits an algorithm to trading at most double the account value.
         """
@@ -28,7 +28,13 @@ class MaxLeverage(AccountControl):
         """Fail if the leverage is greater than the allowed leverage."""
         if _account.leverage > self.max_leverage:
             if self.fail_on_error:
-                self._logger.error(f"Current leverage {_account.leverage} exceeds max_leverage of {self.max_leverage}.", dt=_algo_current_data.current_dt)
+                self._logger.error(
+                    f"Current leverage {_account.leverage} exceeds max_leverage of {self.max_leverage}.",
+                    dt=_algo_current_data.current_dt,
+                )
                 self.fail()
             else:
-                self._logger.warning(f"Current leverage {_account.leverage} exceeds max_leverage of {self.max_leverage}.", dt=_algo_current_data.current_dt)
+                self._logger.warning(
+                    f"Current leverage {_account.leverage} exceeds max_leverage of {self.max_leverage}.",
+                    dt=_algo_current_data.current_dt,
+                )

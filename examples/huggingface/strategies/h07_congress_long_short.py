@@ -56,8 +56,9 @@ async def initialize(context: TradingAlgorithm):
                         for ticker, mic in CONGRESS_UNIVERSE]
     disclosures = await load_disclosures(
         revision=CONGRESS_REVISION,
-        row_filter=pl.col("transaction_type").is_in(["purchase", *SALES])
-                   & (~pl.col("is_option").fill_null(False)))
+        row_filter=(
+            pl.col("transaction_type").is_in(["purchase", *SALES])
+            & (~pl.col("is_option").fill_null(False))))
     context.flow = await mount_disclosures(
         disclosures, name="congress:flow", asset_service=context.asset_service,
         start_date=context.clock.start_session, end_date=context.clock.end_session,

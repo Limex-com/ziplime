@@ -102,9 +102,10 @@ class PerContract(FutureCommissionModel):
             initial_commission=exchange_fee,
             min_trade_cost=self.min_trade_cost,
         )
+
     def calculate_for_asset(self, asset: ExchangeAsset, quantity: int, transaction_amount: float) -> float:
         root_symbol = asset.asset.root_symbol
         cost_per_contract = self._cost_per_contract[root_symbol]
         exchange_fee = self._exchange_fee[root_symbol]
 
-        return max(self.min_trade_cost, abs(quantity * cost_per_contract)  + exchange_fee)
+        return max(self.min_trade_cost, abs(quantity * cost_per_contract) + exchange_fee)

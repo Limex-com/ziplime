@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from ziplime.assets.entities.asset import Asset
 
+
 @dataclass(frozen=True)
 class SymbolsUniverseAsset:
     symbol_universe_name: str

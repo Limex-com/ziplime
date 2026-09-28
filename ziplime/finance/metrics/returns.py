@@ -12,7 +12,6 @@ class Returns:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-
     # def _end_of_period(field, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
     #                    data_bundle: BundleData):
     #     packet[field]["returns"] = ledger.todays_returns

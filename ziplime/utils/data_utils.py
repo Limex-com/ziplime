@@ -9,6 +9,8 @@ from ziplime.constants.period import Period
 from ziplime.assets.entities.asset_symbol import AssetSymbol
 
 _logger = structlog.get_logger(__name__)
+
+
 async def _process_data(data: pl.DataFrame,
                         date_start: datetime.datetime,
                         date_end: datetime.datetime,
@@ -20,7 +22,7 @@ async def _process_data(data: pl.DataFrame,
                         frequency: datetime.timedelta | Period, ):
     """Ingest data for a given bundle.        """
     _logger.info(f"Ingesting custom bundle: name={name}, date_start={date_start}, date_end={date_end}, "
-                      f"symbols={symbols}, frequency={frequency}")
+                 f"symbols={symbols}, frequency={frequency}")
     if date_start < trading_calendar.first_session.replace(tzinfo=trading_calendar.tz):
         raise ValueError(
             f"Date start must be after first session of trading calendar. "
@@ -43,8 +45,10 @@ async def _process_data(data: pl.DataFrame,
     # repair data
     all_bars = [
         s for s in pl.from_pandas(
-            trading_calendar.sessions_minutes(start=date_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None),
-                                              end=date_end.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)).tz_convert(trading_calendar.tz)
+            trading_calendar.sessions_minutes(
+                start=date_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None),
+                end=date_end.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None),
+            ).tz_convert(trading_calendar.tz)
         ) if s >= date_start and s <= date_end
     ]
 
@@ -71,19 +75,15 @@ async def _process_data(data: pl.DataFrame,
     if missing:
         raise ValueError(f"Ingested data is missing required columns: {missing}. Cannot ingest bundle.")
     if "symbol" not in data.columns and "sid" not in data.columns:
-        raise ValueError(f"When ingesting custom bundle you must supply either a symbol or a sid column.")
+        raise ValueError("When ingesting custom bundle you must supply either a symbol or a sid column.")
 
     sid_id = "sid" in data.columns
-    symbol_id = "symbol" in data.columns
-
-    asset_identifiers = list(data["sid"].unique()) if sid_id else list(data["symbol"].unique())
-
     if sid_id:
         data = await _backfill_symbol_data(data=data, asset_service=asset_service,
                                            required_sessions=required_sessions)
     else:
         data = await backfill_sid_data(data=data, asset_service=asset_service,
-                                             required_sessions=required_sessions)
+                                       required_sessions=required_sessions)
     return data
 
 

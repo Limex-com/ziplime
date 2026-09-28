@@ -64,9 +64,6 @@ async def ingest_assets(asset_service: AssetService, asset_data_source: AssetDat
     Raises:
         Exception: Propagates any exceptions raised during data fetching or saving processes where applicable.
     """
-    asset_start_date = datetime.datetime(year=1900, month=1, day=1, tzinfo=datetime.timezone.utc)
-    asset_end_date = datetime.datetime(year=2099, month=1, day=1, tzinfo=datetime.timezone.utc)
-
     exchanges = await asset_data_source.get_exchanges()
     if len(exchanges) > 0:
         await asset_service.save_exchanges(exchanges=exchanges)

@@ -8,8 +8,6 @@ from ziplime.errors import IncompatibleTerms
 from ziplime.pipeline.terms.factors import CustomFactor
 
 
-
-
 class RollingLinearRegression(CustomFactor):
     """
     A Factor that performs an ordinary least-squares regression predicting the

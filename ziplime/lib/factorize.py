@@ -5,8 +5,10 @@ import numpy as np
 
 from ziplime.utils.numpy_utils import unsigned_int_dtype_with_size_in_bytes
 
+
 def log2(d: float) -> float:
     return np.log(d) / np.log(2)
+
 
 def smallest_uint_that_can_hold(maxval: int):
     """Choose the smallest numpy unsigned int dtype that can hold ``maxval``.
@@ -29,6 +31,7 @@ def smallest_uint_that_can_hold(maxval: int):
 #     np.uint16_t
 #     np.uint32_t
 #     np.uint64_t
+
 
 class _NoneFirstSortKey:
     """Box to sort ``None`` to the front of the categories list.
@@ -60,16 +63,17 @@ class _NoneFirstSortKey:
     def __ge__(self, other):
         return self > other or self == other
 
+
 def factorize_strings_known_impl(values: np.ndarray,
-                                   nvalues: int,
-                                  categories:list,
-                                  missing_value,
-                                  sort: int,
-                                  codes:np.ndarray):
+                                 nvalues: int,
+                                 categories: list,
+                                 missing_value,
+                                 sort: int,
+                                 codes: np.ndarray):
     if sort:
         categories = sorted(categories, key=lambda x: (x is None, x))
 
-    reverse_categories = dict(        zip(categories, range(len(categories)))    )
+    reverse_categories = dict(zip(categories, range(len(categories))))
     missing_code = reverse_categories[missing_value]
 
     for i in range(nvalues):
@@ -77,10 +81,11 @@ def factorize_strings_known_impl(values: np.ndarray,
 
     return codes, np.asarray(categories, dtype=object), reverse_categories
 
+
 def factorize_strings_known_categories(values: np.ndarray,
-                                         categories: list,
-                                         missing_value,
-                                         sort:int):
+                                       categories: list,
+                                       missing_value,
+                                       sort: int):
     """
     Factorize an array whose categories are already known.
 
@@ -131,10 +136,11 @@ def factorize_strings_known_categories(values: np.ndarray,
     else:
         raise ValueError('ncategories larger than uint64')
 
-def factorize_strings_impl( values: np.ndarray,
-                            missing_value,
-                            sort: int,
-                            codes: np.ndarray):
+
+def factorize_strings_impl(values: np.ndarray,
+                           missing_value,
+                           sort: int,
+                           codes: np.ndarray):
     categories = [missing_value]
     reverse_categories = {missing_value: 0}
 
@@ -150,7 +156,7 @@ def factorize_strings_impl( values: np.ndarray,
             categories.append(key)
         codes[i] = code
 
-     # np.ndarray[np.int64_t, ndim=1] sorter
+    # np.ndarray[np.int64_t, ndim=1] sorter
     # cdef np.ndarray[unsigned_integral, ndim=1] reverse_indexer
     # cdef int ncategories
     categories_array = np.asarray(
@@ -177,11 +183,13 @@ def factorize_strings_impl( values: np.ndarray,
 
     return codes, categories_array, reverse_categories
 
+
 _int_sizes = [1, 1, 2, 4, 4, 8, 8, 8, 8]
 
+
 def factorize_strings(values: np.ndarray,
-                        missing_value,
-                        sort: int):
+                      missing_value,
+                      sort: int):
     """
     Factorize an array of (possibly duplicated) labels into an array of indices
     into a unique array of labels.

@@ -245,20 +245,20 @@ async def main():
 
         async def simulate(strategy_file: str):
             return await run_simulation(
-            start_date=datetime.datetime.combine(sessions[0], datetime.time.min,
-                                                 tzinfo=calendar.tz),
-            end_date=datetime.datetime.combine(sessions[-1], datetime.time.max,
-                                               tzinfo=calendar.tz),
-            trading_calendar=CALENDAR, emission_rate=MINUTE, total_cash=CASH,
-            market_data_source=bundle, custom_data_sources=[],
-            algorithm_file=str(Path(__file__).parent / "strategies" / strategy_file),
-            stop_on_error=True, asset_service=asset_service, benchmark_asset_symbol=None,
-            benchmark_returns=None, equity_commission=NoCommission(),
-            equity_slippage=NoSlippage(), option_commission=NoCommission(),
-            option_slippage=NoSlippage(), max_leverage=10.0, print_algo=False,
-            # Next-bar execution: a decision taken on a minute's close fills on the following
-            # minute, which is the honest reading of an intraday signal.
-            same_bar_execution=False, price_used_in_order_execution="close")
+                start_date=datetime.datetime.combine(sessions[0], datetime.time.min,
+                                                     tzinfo=calendar.tz),
+                end_date=datetime.datetime.combine(sessions[-1], datetime.time.max,
+                                                   tzinfo=calendar.tz),
+                trading_calendar=CALENDAR, emission_rate=MINUTE, total_cash=CASH,
+                market_data_source=bundle, custom_data_sources=[],
+                algorithm_file=str(Path(__file__).parent / "strategies" / strategy_file),
+                stop_on_error=True, asset_service=asset_service, benchmark_asset_symbol=None,
+                benchmark_returns=None, equity_commission=NoCommission(),
+                equity_slippage=NoSlippage(), option_commission=NoCommission(),
+                option_slippage=NoSlippage(), max_leverage=10.0, print_algo=False,
+                # Next-bar execution: a decision taken on a minute's close fills on the following
+                # minute, which is the honest reading of an intraday signal.
+                same_bar_execution=False, price_used_in_order_execution="close")
 
         result = await simulate("o03_vectorised_0dte_straddle.py")
         if COMPARE_ENGINES:

@@ -24,7 +24,6 @@ class ReturnsStatistic:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-
     def __init__(self, function, field_name=None):
         if field_name is None:
             field_name = function.__name__

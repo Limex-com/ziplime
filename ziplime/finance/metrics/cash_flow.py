@@ -10,8 +10,6 @@ from ziplime.finance.domain.ledger import Ledger
 from ziplime.sources.benchmark_source import BenchmarkSource
 
 
-
-
 class CashFlow:
     """Tracks daily and cumulative cash flow.
 
@@ -23,7 +21,6 @@ class CashFlow:
     #: from one bar to the next -- so a run that is not emitting intraday packets can skip it.
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
-
 
     def start_of_simulation(
             self, ledger: Ledger, emission_rate: datetime.timedelta, trading_calendar: ExchangeCalendar,

@@ -1,4 +1,3 @@
-import dataclasses
 import datetime
 import math
 from collections import OrderedDict, deque
@@ -21,9 +20,7 @@ from ziplime.domain.account import Account
 from ziplime.domain.position import Position
 from ziplime.domain.portfolio import Portfolio
 from ziplime.exchanges.exchange import Exchange
-from ziplime.exchanges.repositories.exchange_repository import ExchangeRepository
 from ziplime.finance.commission import CommissionModel
-from ziplime.finance.domain.commission import Commission
 
 from ziplime.finance.domain.order import Order
 from ziplime.finance.domain.position_tracker import PositionTracker
@@ -327,7 +324,7 @@ class Ledger:
                 # Drop empty lot
                 if lot.quantity == 0:
                     self._buy_lots_by_asset[asset].popleft()
-            transaction.average_entry_price = total_match_price/-transaction.amount
+            transaction.average_entry_price = total_match_price / -transaction.amount
             realized -= sell_comm
             if total_match_price > 0:
                 realized_pnl_percentage = (realized / total_match_price) * 100

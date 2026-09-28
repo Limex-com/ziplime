@@ -73,7 +73,7 @@ class SingleExecutionClock(TradingClock):
 
         self.before_trading_start_minutes = self.market_opens - datetime.timedelta(minutes=46)
         self.minutes_by_session = self.calc_minutes_by_session()
-        self.execute_on_period_end_bool=execute_on_period_end_bool
+        self.execute_on_period_end_bool = execute_on_period_end_bool
 
     def calc_minutes_by_session(self):
         minutes_by_session_n = {}

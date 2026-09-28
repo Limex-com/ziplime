@@ -33,6 +33,7 @@ from ziplime.assets.repositories.asset_repository import AssetRepository
 from ziplime.errors import AmbiguousSymbol
 from ziplime.assets.entities.asset import Asset
 
+
 class AssetService:
 
     def __init__(self, asset_repository: AssetRepository, adjustments_repository: AdjustmentRepository,
@@ -168,7 +169,6 @@ class AssetService:
     async def save_exchanges(self, exchanges: list[ExchangeInfo]) -> None:
         return await self._asset_repository.save_exchanges(exchanges=exchanges)
 
-
     async def get_asset_by_sid(self, sid: int) -> ExchangeAsset | None:
         return await self._asset_repository.get_asset_by_sid(sid=sid)
 
@@ -197,7 +197,7 @@ class AssetService:
 
     async def get_exchange_assets_by_symbols(self, symbols: list[AssetSymbol],
                                              asset_type: AssetType | Iterable[AssetType]) -> list[
-        ExchangeAsset | None]:
+            ExchangeAsset | None]:
         """Resolve ``(symbol, mic)`` pairs to listings, trying each candidate asset type in turn.
 
         Accepting several types is what lets one data bundle hold more than one asset class. A
@@ -275,7 +275,7 @@ class AssetService:
         return await self._asset_repository.get_symbols_universe(name=name, dt=dt)
 
     async def get_universe_symbols(self, name: str, dt: datetime.date,
-                                    mic: str | None = None) -> list[ExchangeAsset]:
+                                   mic: str | None = None) -> list[ExchangeAsset]:
         return await self._asset_repository.get_universe_symbols(name=name, dt=dt, mic=mic)
 
     async def lifetimes(
@@ -336,7 +336,6 @@ class AssetService:
     ) -> list[DividendPayout]:
         return await self._asset_repository.get_cash_dividends_with_ex_date(date=date, assets=assets)
 
-
     async def get_exchange_assets_by_sids(self, sids: list[int]) -> list[ExchangeAsset]:
         return await self._asset_repository.get_exchange_assets_by_sids(sids=sids)
 
@@ -365,6 +364,7 @@ class AssetService:
             date_from=date_from,
             date_to=date_to,
         )
+
 
 def _rebind_bond_events(bond_events: list[BondEvent], bonds: list[Bond]) -> list[BondEvent]:
     """Point each event at the stored bond of the same identity, so it has a real asset id."""

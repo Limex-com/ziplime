@@ -87,8 +87,10 @@ class DifferentialTests(unittest.TestCase):
     def test_case_1_flat_to_long_to_flat(self):
         index = index_of(8)
         prices = pd.Series(np.arange(10.0, 18.0), index=index, name="A")
-        entries = pd.Series(False, index=index); entries.iloc[1] = True
-        exits = pd.Series(False, index=index); exits.iloc[4] = True
+        entries = pd.Series(False, index=index)
+        entries.iloc[1] = True
+        exits = pd.Series(False, index=index)
+        exits.iloc[4] = True
         portfolio, result = self.both(prices, entries, exits)
         self.assert_same_fills(portfolio, result)
         self.assertEqual(len(result.fills), 2)
@@ -96,8 +98,10 @@ class DifferentialTests(unittest.TestCase):
     def test_case_3_holding_across_bars(self):
         index = index_of(10)
         prices = pd.Series(np.linspace(50.0, 60.0, 10), index=index, name="A")
-        entries = pd.Series(False, index=index); entries.iloc[2] = True
-        exits = pd.Series(False, index=index); exits.iloc[7] = True
+        entries = pd.Series(False, index=index)
+        entries.iloc[2] = True
+        exits = pd.Series(False, index=index)
+        exits.iloc[7] = True
         portfolio, result = self.both(prices, entries, exits)
         self.assert_same_fills(portfolio, result)
 
@@ -106,8 +110,10 @@ class DifferentialTests(unittest.TestCase):
         and they mean the same thing by it."""
         index = index_of(8)
         prices = pd.Series(np.arange(20.0, 28.0), index=index, name="A")
-        entries = pd.Series(False, index=index); entries.iloc[[1, 2, 3]] = True
-        exits = pd.Series(False, index=index); exits.iloc[5] = True
+        entries = pd.Series(False, index=index)
+        entries.iloc[[1, 2, 3]] = True
+        exits = pd.Series(False, index=index)
+        exits.iloc[5] = True
         portfolio, result = self.both(prices, entries, exits)
         self.assert_same_fills(portfolio, result)
         self.assertEqual(len(result.fills), 2)
@@ -115,8 +121,10 @@ class DifferentialTests(unittest.TestCase):
     def test_case_5_a_repeated_exit_is_ignored_by_both(self):
         index = index_of(8)
         prices = pd.Series(np.arange(20.0, 28.0), index=index, name="A")
-        entries = pd.Series(False, index=index); entries.iloc[1] = True
-        exits = pd.Series(False, index=index); exits.iloc[[4, 5, 6]] = True
+        entries = pd.Series(False, index=index)
+        entries.iloc[1] = True
+        exits = pd.Series(False, index=index)
+        exits.iloc[[4, 5, 6]] = True
         portfolio, result = self.both(prices, entries, exits)
         self.assert_same_fills(portfolio, result)
 
@@ -124,8 +132,10 @@ class DifferentialTests(unittest.TestCase):
         index = index_of(8)
         prices = pd.DataFrame({"A": np.arange(10.0, 18.0), "B": np.arange(30.0, 38.0)},
                               index=index)
-        entries = pd.DataFrame(False, index=index, columns=["A", "B"]); entries.iloc[1] = True
-        exits = pd.DataFrame(False, index=index, columns=["A", "B"]); exits.iloc[5] = True
+        entries = pd.DataFrame(False, index=index, columns=["A", "B"])
+        entries.iloc[1] = True
+        exits = pd.DataFrame(False, index=index, columns=["A", "B"])
+        exits.iloc[5] = True
         portfolio, result = self.both(prices, entries, exits, size=100)
         self.assert_same_fills(portfolio, result)
 
@@ -144,8 +154,10 @@ class DifferentialTests(unittest.TestCase):
         """vectorbt's `fees` is a fraction of order value, which is exactly `PerDollar`."""
         index = index_of(8)
         prices = pd.Series(np.arange(100.0, 108.0), index=index, name="A")
-        entries = pd.Series(False, index=index); entries.iloc[1] = True
-        exits = pd.Series(False, index=index); exits.iloc[5] = True
+        entries = pd.Series(False, index=index)
+        entries.iloc[1] = True
+        exits = pd.Series(False, index=index)
+        exits.iloc[5] = True
         portfolio = vbt.Portfolio.from_signals(
             prices, entries, exits, init_cash=self.CASH, freq="1D", size=10,
             size_type="amount", fees=0.001, group_by=True, cash_sharing=True)
@@ -161,8 +173,10 @@ class DifferentialTests(unittest.TestCase):
         """vectorbt's `slippage` moves the price by a fraction, the same shape as basis points."""
         index = index_of(8)
         prices = pd.Series(np.arange(100.0, 108.0), index=index, name="A")
-        entries = pd.Series(False, index=index); entries.iloc[1] = True
-        exits = pd.Series(False, index=index); exits.iloc[5] = True
+        entries = pd.Series(False, index=index)
+        entries.iloc[1] = True
+        exits = pd.Series(False, index=index)
+        exits.iloc[5] = True
         portfolio = vbt.Portfolio.from_signals(
             prices, entries, exits, init_cash=self.CASH, freq="1D", size=10,
             size_type="amount", slippage=0.001, group_by=True, cash_sharing=True)
@@ -175,8 +189,10 @@ class DifferentialTests(unittest.TestCase):
     def test_case_16_commission_and_slippage_together(self):
         index = index_of(10)
         prices = pd.Series(np.linspace(100.0, 120.0, 10), index=index, name="A")
-        entries = pd.Series(False, index=index); entries.iloc[[1, 6]] = True
-        exits = pd.Series(False, index=index); exits.iloc[[4, 8]] = True
+        entries = pd.Series(False, index=index)
+        entries.iloc[[1, 6]] = True
+        exits = pd.Series(False, index=index)
+        exits.iloc[[4, 8]] = True
         portfolio = vbt.Portfolio.from_signals(
             prices, entries, exits, init_cash=self.CASH, freq="1D", size=10,
             size_type="amount", fees=0.0005, slippage=0.0005, group_by=True, cash_sharing=True)
@@ -191,8 +207,10 @@ class DifferentialTests(unittest.TestCase):
         index = index_of(12)
         prices = pd.DataFrame({"A": np.linspace(10.0, 20.0, 12), "B": np.linspace(40.0, 30.0, 12)},
                               index=index)
-        entries = pd.DataFrame(False, index=index, columns=["A", "B"]); entries.iloc[[1, 7]] = True
-        exits = pd.DataFrame(False, index=index, columns=["A", "B"]); exits.iloc[[4, 10]] = True
+        entries = pd.DataFrame(False, index=index, columns=["A", "B"])
+        entries.iloc[[1, 7]] = True
+        exits = pd.DataFrame(False, index=index, columns=["A", "B"])
+        exits.iloc[[4, 10]] = True
         portfolio, result = self.both(prices, entries, exits, size=100)
         self.assertAlmostEqual(float(result.cash.iloc[-1]),
                                float(np.asarray(portfolio.cash())[-1]), places=6)
@@ -201,8 +219,10 @@ class DifferentialTests(unittest.TestCase):
         index = index_of(12)
         prices = pd.DataFrame({"A": np.linspace(10.0, 20.0, 12), "B": np.linspace(40.0, 30.0, 12)},
                               index=index)
-        entries = pd.DataFrame(False, index=index, columns=["A", "B"]); entries.iloc[[1, 7]] = True
-        exits = pd.DataFrame(False, index=index, columns=["A", "B"]); exits.iloc[[4, 10]] = True
+        entries = pd.DataFrame(False, index=index, columns=["A", "B"])
+        entries.iloc[[1, 7]] = True
+        exits = pd.DataFrame(False, index=index, columns=["A", "B"])
+        exits.iloc[[4, 10]] = True
         portfolio, result = self.both(prices, entries, exits, size=100)
         np.testing.assert_allclose(result.portfolio_value.to_numpy(dtype=float),
                                    np.asarray(portfolio.value(), dtype=float), rtol=0, atol=1e-6)
@@ -254,7 +274,7 @@ class RandomDifferentialTests(unittest.TestCase):
                 mismatches.append(case)
 
         self.assertEqual(mismatches, [], f"{len(mismatches)} of {self.CASES} scenarios differ; "
-                                         f"first few: {mismatches[:5]}")
+                         f"first few: {mismatches[:5]}")
 
     def test_generated_scenarios_agree_on_ending_equity(self):
         rng = np.random.default_rng(4711)
@@ -293,8 +313,10 @@ class DeliberateDifferenceTests(unittest.TestCase):
         should not have the contradiction resolved into a position by arithmetic."""
         index = index_of(8)
         prices = pd.Series(np.full(8, 100.0), index=index, name="A")
-        entries = pd.Series(False, index=index); entries.iloc[[1, 4]] = True
-        exits = pd.Series(False, index=index); exits.iloc[4] = True
+        entries = pd.Series(False, index=index)
+        entries.iloc[[1, 4]] = True
+        exits = pd.Series(False, index=index)
+        exits.iloc[4] = True
 
         result = simulate_signals(prices=prices, entries=entries, exits=exits, size=10,
                                   initial_cash=100_000.0,
@@ -308,7 +330,8 @@ class DeliberateDifferenceTests(unittest.TestCase):
         half-filled order is a different strategy, and one nobody asked for."""
         index = index_of(6)
         prices = pd.DataFrame({"A": np.full(6, 100.0)}, index=index)
-        entries = pd.DataFrame(False, index=index, columns=["A"]); entries.iloc[1] = True
+        entries = pd.DataFrame(False, index=index, columns=["A"])
+        entries.iloc[1] = True
         exits = pd.DataFrame(False, index=index, columns=["A"])
 
         result = simulate_signals(prices=prices, entries=entries, exits=exits, size=100,

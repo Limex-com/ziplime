@@ -41,6 +41,7 @@ fundamental_data_fields = [
     "volatility"
 ]
 
+
 def _normalize_fundamental_result(
     df: pl.DataFrame,
     date_from: datetime.datetime,
@@ -90,6 +91,7 @@ def _normalize_fundamental_result(
     ordered_columns.extend(fundamental_data_fields)
 
     return df.select(ordered_columns).sort(["symbol", "date"])
+
 
 def fetch_fundamental_data_task(date_from: datetime.datetime,
                                 date_to: datetime.datetime,
@@ -145,9 +147,10 @@ class LimexHubFundamentalDataSource(DataBundleSource):
                                                      limex_api_key=limex_api_key,
                                                      symbol=symbol)
                 return result
-            except Exception as e:
+            except Exception:
                 self._logger.exception(
-                    f"Exception fetching historical data for symbol {symbol}, date_from={date_from}, date_to={date_to}. Skipping."
+                    f"Exception fetching historical data for symbol {symbol}, "
+                    f"date_from={date_from}, date_to={date_to}. Skipping."
                 )
                 return None
 

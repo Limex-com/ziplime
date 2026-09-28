@@ -32,7 +32,7 @@ class FixedSlippage(SlippageModel):
             spread=self.spread,
         )
 
-    async def process_order(self, exchange: Exchange, dt:datetime.datetime, order):
+    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order):
         price = await exchange.get_spot_value(frozenset([order.asset]), frozenset(["close"]),
                                               )
 

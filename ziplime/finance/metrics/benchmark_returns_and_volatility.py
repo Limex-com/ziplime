@@ -6,7 +6,6 @@ import pandas as pd
 import polars as pl
 from exchange_calendars import ExchangeCalendar
 
-from ziplime.data.domain.data_bundle import DataBundle
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.domain.ledger import Ledger
 from ziplime.finance.finance_ext import minute_annual_volatility
@@ -23,7 +22,6 @@ class BenchmarkReturnsAndVolatility:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-
     def start_of_simulation(
             self, ledger: Ledger, emission_rate: datetime.timedelta, trading_calendar: ExchangeCalendar,
             sessions: pd.DatetimeIndex, benchmark_source: BenchmarkSource
@@ -37,7 +35,6 @@ class BenchmarkReturnsAndVolatility:
             self._minute_cumulative_returns = None
             self._daily_cumulative_returns = None
             return
-            raise ValueError(f"No daily returns for benchmark. Please check if you properly loaded data for symbol {benchmark_source.benchmark_asset.get_symbol_by_exchange(exchange_name=None)} in memory.")
         self._daily_returns = daily_returns_array = daily_returns_series
         self._daily_cumulative_returns = np.cumprod(1 + daily_returns_array["pct_change"]) - 1
         self._daily_annual_volatility = (daily_returns_series.with_columns(

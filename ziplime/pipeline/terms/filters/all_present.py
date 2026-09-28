@@ -26,4 +26,3 @@ class AllPresent(CustomFilter, SingleInputMixin, StandardOutputs):
                 is_missing(value, self.inputs[0].missing_value),
                 axis=0,
             )
-

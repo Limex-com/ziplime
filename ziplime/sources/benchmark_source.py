@@ -190,4 +190,3 @@ class BenchmarkSource:
         daily_returns = minutely_returns[closes].pct_change()
         daily_returns.index = closes.index
         return daily_returns.iloc[1:]
-

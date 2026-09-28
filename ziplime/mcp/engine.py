@@ -69,7 +69,6 @@ def parse_date(value: str, field: str, tz=None) -> dt.datetime:
     return parsed.astimezone(zone) if parsed.tzinfo else parsed.replace(tzinfo=zone)
 
 
-
 def _strategy_frame(exc: BaseException, algorithm_path: Path) -> tuple[int, str] | None:
     """The deepest traceback frame inside the strategy file, or None if it is not in there.
 
@@ -195,7 +194,7 @@ async def ingest_bars(
                 "Run ingest_instruments once for this provider first — bars are "
                 "resolved against the catalogue, so an empty catalogue matches "
                 "nothing."
-                ),
+            ),
             detail=f"asked for: {', '.join(symbols)}",
         )
 
@@ -203,11 +202,11 @@ async def ingest_bars(
         start_date=parse_date(start, "start"),
         end_date=parse_date(end, "end"),
         symbols=symbols,
-            trading_calendar=calendar,
+        trading_calendar=calendar,
         bundle_name=bundle,
         data_bundle_source=get_market_data_source(provider, assets=known),
         data_frequency=frequency(freq),
-            asset_service=service,
+        asset_service=service,
         asset_type=AssetType.EQUITY,
         merge=merge,
         bundle_storage_path=workspace.bundle_storage_path(),
@@ -302,7 +301,7 @@ async def run_backtest(
             bundle_name=bundle,
             bundle_version=None,
             frequency=frequency(freq),
-                start_date=start_dt,
+            start_date=start_dt,
             end_date=load_end,
             assets=assets,
             aggregations=[

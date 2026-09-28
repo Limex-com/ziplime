@@ -51,6 +51,7 @@ async def main(only: list[str] | None = None, verbose: bool = False):
     print(f"{'strategy'.ljust(width)}  {'trades':>6s} {'return':>9s} {'cagr':>7s} "
           f"{'vol':>6s} {'sharpe':>7s} {'max dd':>8s} {'ret/dd':>7s}  description")
     print("-" * (width + 66))
+
     def cell(value, spec: str, width: int) -> str:
         """A blank rather than `nan`. A run too short to annualise has no annual rate, and
         printing one that reads `+nan%` invites someone to fix the formatting instead."""

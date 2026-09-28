@@ -18,7 +18,6 @@ class ConstantCumulativeRiskMetric:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-
     def __init__(self, field, value):
         self._field = field
         self._value = value

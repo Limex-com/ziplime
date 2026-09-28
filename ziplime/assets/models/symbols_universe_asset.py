@@ -1,5 +1,4 @@
 import datetime
-from abc import abstractmethod
 
 from sqlalchemy.orm import Mapped
 

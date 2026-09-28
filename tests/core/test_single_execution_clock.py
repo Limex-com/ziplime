@@ -36,7 +36,8 @@ def test_single_execution_clock_executes_only_on_requested_session_end():
     )
     events = list(day_start_clock)
     assert events[0] == (day_start_clock.sessions[0], SimulationEvent.SESSION_START)
-    assert events[-1] == (day_start_clock.minutes_by_session[day_start_clock.sessions[0]][0], SimulationEvent.SESSION_END)
+    assert events[-1] == (
+        day_start_clock.minutes_by_session[day_start_clock.sessions[0]][0], SimulationEvent.SESSION_END)
     assert len(events) == 5
     assert [event for _, event in events if event == SimulationEvent.BAR] == [
         SimulationEvent.BAR,

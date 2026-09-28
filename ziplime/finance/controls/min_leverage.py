@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from ziplime.finance.controls.account_control import AccountControl
 
 

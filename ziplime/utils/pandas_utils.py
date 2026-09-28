@@ -72,7 +72,6 @@ def timedelta_to_integral_seconds(delta):
     return int(delta.total_seconds())
 
 
-
 @contextmanager
 def ignore_pandas_nan_categorical_warning():
     with warnings.catch_warnings():
@@ -86,7 +85,7 @@ def ignore_pandas_nan_categorical_warning():
         yield
 
 
-def categorical_df_concat(df_list: list[pd.DataFrame], inplace: bool=False):
+def categorical_df_concat(df_list: list[pd.DataFrame], inplace: bool = False):
     """Prepare list of pandas DataFrames to be used as input to pd.concat.
     Ensure any columns of type 'category' have the same categories across each
     dataframe.

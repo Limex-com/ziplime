@@ -7,6 +7,7 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.finance.shared import FinancialModelMeta
 
+
 class CommissionModel(metaclass=FinancialModelMeta):
     """Abstract base class for commission models.
 

@@ -8,6 +8,7 @@ from ziplime.utils.numpy_utils import float64_dtype
 
 _RANK_METHODS = frozenset(["average", "min", "max", "dense", "ordinal"])
 
+
 class Rank(SingleInputMixin, Factor):
     """
     A Factor representing the row-wise rank data of another Factor.

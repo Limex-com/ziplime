@@ -11,7 +11,6 @@ from ziplime.utils.numpy_utils import (
     object_dtype,
 )
 from .precomputed_loader import PrecomputedLoader
-from ...assets.repositories.sqlalchemy_adjustments_repository import SqlAlchemyAdjustmentRepository
 
 
 class SeededRandomLoader(PrecomputedLoader):
@@ -86,4 +85,3 @@ class SeededRandomLoader(PrecomputedLoader):
     def _object_values(self, shape):
         res = self._int_values(shape).astype(str).astype(object)
         return res
-

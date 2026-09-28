@@ -28,7 +28,6 @@ import structlog
 
 from ziplime.assets.domain.exercise_style import ExerciseStyle
 from ziplime.assets.domain.option_type import OptionType
-from ziplime.assets.domain.premium_style import PremiumStyle
 from ziplime.assets.domain.settlement_type import SettlementType
 
 from .source import BAR_COLUMNS, ContractSpec, OptionChainSource

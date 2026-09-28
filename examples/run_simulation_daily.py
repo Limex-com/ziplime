@@ -14,12 +14,9 @@ from ziplime.assets.entities.asset_symbol import AssetSymbol
 
 from pathlib import Path
 
-import pytz
-
 from ziplime.core.ingest_data import get_asset_service
 from ziplime.core.run_simulation import run_simulation
-from ziplime.finance.commission import PerShare, DEFAULT_PER_SHARE_COST, DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE, \
-    PerDollar
+from ziplime.finance.commission import PerDollar
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
 
 logger = structlog.get_logger(__name__)
@@ -28,7 +25,7 @@ logger = structlog.get_logger(__name__)
 async def _run_simulation():
     tz = ZoneInfo("America/New_York")
     start_date = datetime.datetime(year=2010, month=6, day=3, tzinfo=tz)
-    end_date = datetime.datetime(year=2025, month=6, day=9, hour=23, minute=59 , second=59, tzinfo=tz)
+    end_date = datetime.datetime(year=2025, month=6, day=9, hour=23, minute=59, second=59, tzinfo=tz)
     start_auction_delta = datetime.timedelta(minutes=15)
     end_auction_delta = datetime.timedelta(minutes=15)
     # Backtest completed in 3 seconds
@@ -55,17 +52,15 @@ async def _run_simulation():
     ) for symbol in symbols], asset_type=AssetType.EQUITY)
 
     market_data_bundle, missing_data = await bundle_service.load_bundle(bundle_name="limex_us_minute_data",
-                                                          bundle_version=None,
-                                                          frequency=datetime.timedelta(days=1),
-                                                          start_date=start_date,
-                                                          end_date=end_date,
-                                                          assets=exchange_assets,
-                                                          start_auction_delta=start_auction_delta,
-                                                          end_auction_delta=end_auction_delta,
-                                                          aggregations=aggregations,
-                                                          )
-
-
+                                                                        bundle_version=None,
+                                                                        frequency=datetime.timedelta(days=1),
+                                                                        start_date=start_date,
+                                                                        end_date=end_date,
+                                                                        assets=exchange_assets,
+                                                                        start_auction_delta=start_auction_delta,
+                                                                        end_auction_delta=end_auction_delta,
+                                                                        aggregations=aggregations,
+                                                                        )
 
     custom_data_sources = []
     # custom_data_sources.append(
@@ -108,8 +103,6 @@ async def _run_simulation():
     if result.errors:
         logger.error(result.errors)
     print(result.perf.head(n=10).to_markdown())
-
-    cash_flow = {"date": [], "cash_change": [], "cash_left": []}
 
     # Get cash from algo
     # start_cash = sum(exchange.get_start_cash_balance() for exchange in result.trading_algorithm.exchanges.values())

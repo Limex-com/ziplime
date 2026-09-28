@@ -72,9 +72,10 @@ async def initialize(context: TradingAlgorithm):
 
     purchases = await load_disclosures(
         revision=CONGRESS_REVISION,
-        row_filter=pl.col("bioguide_id").is_in(members)
-                   & (pl.col("transaction_type") == "purchase")
-                   & (~pl.col("is_option").fill_null(False)))
+        row_filter=(
+            pl.col("bioguide_id").is_in(members)
+            & (pl.col("transaction_type") == "purchase")
+            & (~pl.col("is_option").fill_null(False))))
     context.committee = await mount_disclosures(
         purchases, name=f"congress:committee:{COMMITTEE_ID}",
         asset_service=context.asset_service,

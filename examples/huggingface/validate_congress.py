@@ -121,8 +121,9 @@ async def main() -> int:
                   f"earliest {row['earliest']}  took office {row['took_office']}  "
                   f"({gap} years early)  flagged: {row['flag']}")
         already_flagged = implausible.filter(pl.col("date_quality") != "ok").height
-        print(f"\n    Flagged by the dataset itself: {already_flagged} of {len(implausible)}. "
-              f"{'Every one -- the publisher found these too.' if already_flagged == len(implausible) else 'Some were not.'}")
+        flag_summary = ("Every one -- the publisher found these too."
+                        if already_flagged == len(implausible) else "Some were not.")
+        print(f"\n    Flagged by the dataset itself: {already_flagged} of {len(implausible)}. {flag_summary}")
         problems += len(implausible) - already_flagged
 
     # ---------------------------------------------------------------- 3. the statutory window

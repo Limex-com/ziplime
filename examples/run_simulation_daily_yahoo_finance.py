@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import logging
-import pathlib
 from zoneinfo import ZoneInfo
 
 import polars as pl
@@ -14,14 +13,11 @@ from ziplime.assets.entities.asset_symbol import AssetSymbol
 
 from pathlib import Path
 
-import pytz
-
 from providers_config import ASSET_DB_PATH
 
 from ziplime.core.ingest_data import get_asset_service
 from ziplime.core.run_simulation import run_simulation
-from ziplime.finance.commission import PerShare, DEFAULT_PER_SHARE_COST, DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE, \
-    PerDollar
+from ziplime.finance.commission import PerDollar
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
 
 logger = structlog.get_logger(__name__)
@@ -30,7 +26,7 @@ logger = structlog.get_logger(__name__)
 async def _run_simulation():
     tz = ZoneInfo("America/New_York")
     start_date = datetime.datetime(year=2025, month=4, day=3, tzinfo=tz)
-    end_date = datetime.datetime(year=2025, month=5, day=9, hour=23, minute=59 , second=59, tzinfo=tz)
+    end_date = datetime.datetime(year=2025, month=5, day=9, hour=23, minute=59, second=59, tzinfo=tz)
     bundle_service = get_bundle_service()
 
     asset_service = get_asset_service(db_path=ASSET_DB_PATH, clear_asset_db=False)
@@ -44,22 +40,20 @@ async def _run_simulation():
         pl.col("volume").sum(),
         pl.col("symbol").last()
     ]
-    symbols =  ["META", "AAPL", "AMZN", "NFLX", "GOOGL"]
+    symbols = ["META", "AAPL", "AMZN", "NFLX", "GOOGL"]
 
     exchange_assets = await asset_service.get_exchange_assets_by_symbols(symbols=[AssetSymbol(
         symbol=symbol, mic=None
     ) for symbol in symbols], asset_type=AssetType.EQUITY)
 
     market_data_bundle, missing_data = await bundle_service.load_bundle(bundle_name="yahoo_finance_daily_data",
-                                                          bundle_version=None,
-                                                          frequency=datetime.timedelta(days=1),
-                                                          start_date=start_date,
-                                                          end_date=end_date,
-                                                          assets=exchange_assets,
-                                                          aggregations=aggregations,
-                                                          )
-
-
+                                                                        bundle_version=None,
+                                                                        frequency=datetime.timedelta(days=1),
+                                                                        start_date=start_date,
+                                                                        end_date=end_date,
+                                                                        assets=exchange_assets,
+                                                                        aggregations=aggregations,
+                                                                        )
 
     custom_data_sources = []
     # custom_data_sources.append(

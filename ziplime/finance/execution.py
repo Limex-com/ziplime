@@ -162,7 +162,7 @@ class StopLimitOrder(ExecutionStyle):
         the order will be placed if market price rises above this value.
     """
 
-    def __init__(self, limit_price: float, stop_price: float, tick_size: float=0.01):
+    def __init__(self, limit_price: float, stop_price: float, tick_size: float = 0.01):
         check_stoplimit_prices(price=limit_price, label="limit")
         check_stoplimit_prices(price=stop_price, label="stop")
 
@@ -237,13 +237,13 @@ def check_stoplimit_prices(price: float, label: str):
         if not isfinite(float(price)):
             raise BadOrderParameters(
                 msg=f"Attempted to place an order with a {label} price "
-                    f"of {price}."
+                f"of {price}."
             )
     # This catches arbitrary objects
     except TypeError as exc:
         raise BadOrderParameters(
             msg=f"Attempted to place an order with a {label} price "
-                f"of {type(price)}."
+            f"of {type(price)}."
         ) from exc
 
     if price < 0:

@@ -12,7 +12,6 @@ class Positions:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
                    exchanges: dict[str, Exchange]):
         packet["minute_perf"]["positions"] = ledger.positions(session)

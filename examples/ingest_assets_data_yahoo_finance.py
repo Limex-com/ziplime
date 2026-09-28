@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import pathlib
 
 from providers_config import ASSET_DB_PATH
 

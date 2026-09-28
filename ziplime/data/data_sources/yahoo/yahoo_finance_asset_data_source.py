@@ -42,7 +42,7 @@ class YahooFinanceAssetDataSource(AssetDataSource):
         for letter in lookup_letters:
             try:
                 res = yf.Lookup(letter.upper()).get_stock(count=1000)
-            except YFException as e:
+            except YFException:
                 time.sleep(20)
                 res = yf.Lookup(letter.upper()).get_stock(count=1000)
 

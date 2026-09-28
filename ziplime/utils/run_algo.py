@@ -9,7 +9,6 @@ from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.core.algorithm_file import AlgorithmFile
 from ziplime.data.services.data_source import DataSource
-from ziplime.domain import account
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.controls.max_leverage import MaxLeverage
 
@@ -35,7 +34,6 @@ from ziplime.pipeline.data.equity_pricing import EquityPricing
 
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
-from ziplime.assets.entities.asset import Asset
 from exchange_calendars import ExchangeCalendar
 from ziplime.exchanges.repositories.exchange_repository import ExchangeRepository
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
@@ -269,7 +267,6 @@ async def _prepare_algorithm(
         intraday_metrics=intraday_metrics,
     )
 
-    orders_by_exchange = {}
     for exchange in await exchange_repository.get_all_exchanges():
         # exchange_orders = await exchange.get_orders()
         # trades = await exchange._trades(
@@ -283,7 +280,7 @@ async def _prepare_algorithm(
         # for order in exchange_orders.values():
         #     tr.new_order_submitted(order=order)
         # positions = await exchange.get_positions()
-        portfolio = await  exchange.get_portfolio()
+        portfolio = await exchange.get_portfolio()
         tr._ledger.synchronize_exchange_portfolio(portfolio=portfolio)
 
     if max_leverage is not None:

@@ -64,6 +64,7 @@ def _from_assets_and_dates(cls,
         value=value,
     )
 
+
 class Adjustment:
     """
     Base class for Adjustments.
@@ -105,7 +106,7 @@ class Adjustment:
         """
         Rich comparison method.  Only Equality is defined.
         """
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return NotImplemented
 
         return self._key() == other._key()
@@ -333,8 +334,6 @@ def get_adjustment_locs(dates_index: pd.DatetimeIndex,
         dates_index.get_indexer([end_date], method='ffill')[0],
         assets_index.get_indexer([asset_id])[0],  # Must be exact match.
     )
-
-
 
 
 class Float64Adjustment(Adjustment):
@@ -622,8 +621,8 @@ class Object1DArrayOverwrite(ArrayAdjustment):
         # `ziplime.lib.LabelArray`.
 
         data[
-        self.first_row:self.last_row + 1,
-        self.first_col:self.last_col + 1,
+            self.first_row:self.last_row + 1,
+            self.first_col:self.last_col + 1,
         ] = self.values
 
 

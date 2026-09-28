@@ -6,7 +6,6 @@ from ziplime.pipeline.domain import GENERIC
 from ziplime.utils.string_formatting import bulleted_list
 
 
-
 class DataSet(object, metaclass=DataSetMeta):
     """
     Base class for Pipeline datasets.

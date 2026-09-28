@@ -8,7 +8,6 @@ down here and the comparison lives in `tests/vectorized/reference/vectorbt/`.
 
 The case numbering follows the specification's §28.
 """
-import datetime
 import unittest
 
 import numpy as np

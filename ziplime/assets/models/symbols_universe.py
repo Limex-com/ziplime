@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Mapped, relationship, declared_attr
+from sqlalchemy.orm import Mapped, relationship
 
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.models.symbols_universe_asset import SymbolsUniverseAssetModel

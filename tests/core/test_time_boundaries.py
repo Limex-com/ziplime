@@ -4,7 +4,6 @@ import polars as pl
 
 from ziplime.constants.data_type import DataType
 from ziplime.data.services.data_source import DataSource
-from ziplime.utils.calendar_utils import get_calendar
 from ziplime.gens.domain.simulation_clock import SimulationClock
 from ziplime.utils.calendar_utils import get_calendar
 

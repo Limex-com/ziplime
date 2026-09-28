@@ -163,15 +163,6 @@ class SlippageModel(metaclass=FinancialModelMeta):
                 )
 
                 if execution_price is not None:
-                    # print(
-                    #     f"[{current_dt}] Execution price for quantity {execution_volume} is {execution_price}. Open price is {price_s[0]} Total={execution_volume * execution_price}")
-                    # txn = create_transaction(
-                    #     order,
-                    #     data.current_dt,
-                    #     execution_price,
-                    #     execution_volume,
-                    # )
-
                     txn = Transaction(
                         id=uuid.uuid4().hex,
                         asset=order.asset,
@@ -182,7 +173,6 @@ class SlippageModel(metaclass=FinancialModelMeta):
                         exchange_name=exchange.name,
                         trading_account_id=order.trading_account_id
                     )
-
 
             except LiquidityExceeded:
                 break

@@ -42,7 +42,7 @@ async def rebalance(context: TradingAlgorithm, data: BarData):
                                 fields=FIELDS, data_source=context.source)
 
     for sid in any_of(window, lambda r: (r["n_director_buys"] or 0) > 0
-                            and (r["n_ceo_buys"] or 0) + (r["n_cfo_buys"] or 0) == 0):
+                      and (r["n_ceo_buys"] or 0) + (r["n_cfo_buys"] or 0) == 0):
         context.opened_on[sid] = today
     context.opened_on = {sid: opened for sid, opened in context.opened_on.items()
                          if today - opened < HOLD_FOR}

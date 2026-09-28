@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from hf_config import INSIDER10_UNIVERSE  # noqa: E402
-from insider import mount_features
+from insider import mount_features  # noqa: E402
 from portfolio import rebalance_to  # noqa: E402
 
 from ziplime.api import date_rules  # noqa: E402

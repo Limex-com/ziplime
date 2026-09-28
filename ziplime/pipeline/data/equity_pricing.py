@@ -5,7 +5,6 @@ from ziplime.pipeline.data import DataSet, Column
 from ziplime.utils.numpy_utils import float64_dtype, categorical_dtype
 
 
-
 class EquityPricing(DataSet):
     """
     :class:`~ziplime.pipeline.data.DataSet` containing daily trading prices and

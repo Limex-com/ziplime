@@ -12,7 +12,6 @@ class PeriodLabel:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-
     def start_of_session(self, ledger, session, exchanges: dict[str, Exchange]):
         self._label = session.strftime("%Y-%m")
 

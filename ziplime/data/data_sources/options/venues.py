@@ -41,6 +41,7 @@ from ziplime.assets.domain.premium_style import PremiumStyle
 from ziplime.assets.domain.settlement_type import SettlementType
 from ziplime.data.data_sources.options.source import ContractSpec
 
+
 @dataclasses.dataclass(frozen=True)
 class OptionVenue:
     """The conventions one venue lists options under.

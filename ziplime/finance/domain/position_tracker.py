@@ -2,7 +2,6 @@ import uuid
 
 import datetime
 from collections import OrderedDict
-from functools import partial
 from math import isnan, copysign
 
 import numpy as np
@@ -23,7 +22,6 @@ from ziplime.finance.finance_ext import (
     PositionStats,
     calculate_position_tracker_stats
 )
-import polars as pl
 
 
 class PositionTracker:
@@ -428,7 +426,7 @@ class PositionTracker:
             self._dirty_stats = True
             owed = held * event.value
             self._unpaid_bond_payments[event.date] = (
-                    self._unpaid_bond_payments.get(event.date, 0.0) + owed)
+                self._unpaid_bond_payments.get(event.date, 0.0) + owed)
 
     def pay_bond_payments(self, session: datetime.date) -> float:
         """Cash from every coupon and amortization instalment due on or before ``session``.

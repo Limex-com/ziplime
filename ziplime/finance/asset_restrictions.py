@@ -24,7 +24,6 @@ RESTRICTION_STATES = IntEnum(
 )
 
 
-
 def _is_one_asset(assets) -> bool:
     """Whether ``assets`` is a single instrument rather than an iterable of them.
 
@@ -35,6 +34,7 @@ def _is_one_asset(assets) -> bool:
     did instead of restricting anything.
     """
     return isinstance(assets, (Asset, ExchangeAsset))
+
 
 class Restrictions(metaclass=abc.ABCMeta):
     """Abstract restricted list interface, representing a set of assets that an
