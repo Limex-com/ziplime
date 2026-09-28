@@ -59,8 +59,6 @@ SQLITE_ADJUSTMENT_COLUMN_DTYPES = {
 }
 
 
-
-
 class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
     """Loads adjustments based on corporate actions from a SQLite database.
 
@@ -89,7 +87,6 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
         session_maker = async_sessionmaker(autocommit=False, autoflush=True, bind=engine, class_=AsyncSession,
                                            expire_on_commit=False)
         return session_maker
-
 
     async def _get_split_sids(self, db: AsyncSession, start_date: int, end_date: int) -> set:
         q = select(SplitModel.asset_id).where(
@@ -534,7 +531,6 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
                 "ratio": ratio[valid_ratio_mask],
             }
         )
-
 
     async def get_splits(
         self,

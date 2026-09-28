@@ -1,6 +1,7 @@
 import datetime
 from dataclasses import dataclass
 
+
 @dataclass
 class BundleMetadata:
     name: str

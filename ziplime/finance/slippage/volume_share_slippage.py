@@ -4,6 +4,7 @@ from pandas import isnull
 
 from ziplime.errors import LiquidityExceeded
 from ziplime.exchanges.exchange import Exchange
+from ziplime.finance.domain.order import Order
 from ziplime.finance.slippage.slippage_model import SlippageModel, DEFAULT_EQUITY_VOLUME_SLIPPAGE_BAR_LIMIT
 from ziplime.finance.utils import fill_price_worse_than_limit_price
 
@@ -55,8 +56,14 @@ class VolumeShareSlippage(SlippageModel):
             price_impact=self.price_impact,
         )
 
-    async def process_order(self, exchange: Exchange, dt:datetime.datetime, order):
-        volume = data.current(order.asset, "volume")
+    async def process_order(
+            self, exchange: Exchange, dt: datetime.datetime, order: Order, price: float | None = None,
+    ) -> tuple[float, float] | tuple[None, None]:
+        """Apply volume impact to the selected execution price, or the bar's close if omitted."""
+        current_val = await exchange.get_spot_value(
+            assets=frozenset({order.asset}), fields=frozenset({"volume", "close"}), dt=dt,
+        )
+        volume = current_val["volume"][0]
 
         max_volume = self.volume_limit * volume
 
@@ -80,18 +87,19 @@ class VolumeShareSlippage(SlippageModel):
 
         volume_share = min(total_volume / volume, self.volume_limit)
 
-        price = data.current(order.asset, "close")
+        if price is None:
+            price = current_val["close"][0]
 
         # BEGIN
         #
         # Remove this block after fixing data to ensure volume always has
         # corresponding price.
         if isnull(price):
-            return
+            return None, None
         # END
 
         simulated_impact = (
-                volume_share ** 2 * math.copysign(self.price_impact, order.direction) * price
+            volume_share ** 2 * math.copysign(self.price_impact, order.direction) * price
         )
         impacted_price = price + simulated_impact
 
@@ -99,4 +107,3 @@ class VolumeShareSlippage(SlippageModel):
             return None, None
 
         return (impacted_price, math.copysign(cur_volume, order.direction))
-

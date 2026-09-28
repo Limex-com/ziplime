@@ -9,7 +9,6 @@ import structlog
 import polars as pl
 
 from ziplime.assets.domain.assets_import import AssetsImport
-from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
@@ -18,7 +17,6 @@ from ziplime.assets.entities.symbol_universe import SymbolsUniverse
 from ziplime.assets.entities.symbols_universe_asset import SymbolsUniverseAsset
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.data.data_sources.asset_data_source import AssetDataSource
-from ziplime.exchanges.exchange import Exchange
 
 
 class LimexHubAssetDataSource(AssetDataSource):
@@ -136,7 +134,6 @@ class LimexHubAssetDataSource(AssetDataSource):
 
     async def get_symbol_universe(self, asset_service: AssetService, symbol_universe_name: str) -> SymbolsUniverse:
         assets = self._limex_client.constituents(universe=symbol_universe_name)
-        symbols = list(set(assets["ticker"]))
         isins = list(set(assets["isin"]))
         equities = await asset_service.get_equities_by_isins(isins=isins)
 
