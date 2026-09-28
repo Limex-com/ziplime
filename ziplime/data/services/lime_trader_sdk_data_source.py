@@ -27,9 +27,9 @@ class LimeTraderSdkDataSource(DataBundleSource):
             self._lime_sdk_client_sync = LimeClient.from_file(lime_sdk_credentials_file, logger=self._logger)
 
     async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt, data_frequency,
-                       exchange_name: str,
-                       exchange_country: str,
-                       ) -> pl.DataFrame:
+                             exchange_name: str,
+                             exchange_country: str,
+                             ) -> pl.DataFrame:
 
         symbols = [asset.get_symbol_by_exchange(exchange_name=exchange_name) for asset in assets]
         quotes = self._lime_sdk_client_sync.market.get_current_quotes(symbols=symbols)
@@ -104,44 +104,56 @@ class LimeTraderSdkDataSource(DataBundleSource):
 
         results = await asyncio.gather(*quotes_tasks)
 
-        for result in results:
-            if len(df) > 0:
-                df = df.rename(
-                    {
-                        "o": "open",
-                        "h": "high",
-                        "l": "low",
-                        "c": "close",
-                        "v": "volume",
-                        "Date": "date"
-                    }
-                )
-                df = df.with_columns(
-                    pl.lit(symbol).alias("symbol"),
-                    pl.lit("LIME").alias("exchange"),
-                    pl.lit("US").alias("exchange_country"),
-                    date=pl.col("date").dt.replace_time_zone(str(date_from.tzinfo)),
-                ).filter(pl.col("date") >= date_from, pl.col("date") <= date_to)
-                return df
+        rows = [
+            {
+                "open": quote.open,
+                "close": quote.close,
+                "price": quote.close,
+                "high": quote.high,
+                "low": quote.low,
+                "volume": quote.volume,
+                "date": quote.timestamp.astimezone(date_to.tzinfo),
+                "exchange": "LIME",
+                "symbol": symbol,
+                "exchange_country": "US",
+            }
+            for quotes, symbol in zip(results, symbols)
+            for quote in quotes
+        ]
+        df = pl.DataFrame(
+            rows,
+            schema={
+                "open": pl.Float64,
+                "close": pl.Float64,
+                "price": pl.Float64,
+                "high": pl.Float64,
+                "low": pl.Float64,
+                "volume": pl.Float64,
+                "date": pl.Datetime(time_zone=str(date_to.tzinfo)),
+                "exchange": pl.String,
+                "symbol": pl.String,
+                "exchange_country": pl.String,
+            },
+        )
+        return df.filter(pl.col("date") >= date_from, pl.col("date") <= date_to)
 
     async def get_data_by_limit(self, fields: frozenset[str],
-                          limit: int,
-                          end_date: datetime.datetime,
-                          frequency: datetime.timedelta,
-                          assets: frozenset[ExchangeAsset],
-                          include_end_date: bool,
-                          exchange_name: str,
-                          exchange_country: str,
-                          trading_calendar: ExchangeCalendar
-                          ) -> pl.DataFrame:
+                                limit: int,
+                                end_date: datetime.datetime,
+                                frequency: datetime.timedelta,
+                                assets: frozenset[ExchangeAsset],
+                                include_end_date: bool,
+                                exchange_name: str,
+                                exchange_country: str,
+                                trading_calendar: ExchangeCalendar
+                                ) -> pl.DataFrame:
 
-        symbols = [asset.get_symbol_by_exchange(exchange_name=exchange_name) for asset in assets if
-                   asset.get_symbol_by_exchange(exchange_name=exchange_name)]
+        symbols = [asset.symbol for asset in assets]
         # period = self._lime_trader_sdk_data_source._frequency_to_period(frequency=frequency)
         # lowest frequency of lime trader sdk is 1 minute
         try:
-            sdk_period = self._frequency_to_period(frequency=frequency)
-        except Exception as e:
+            lime_sdk_period = self._frequency_to_period(frequency=frequency)
+        except Exception:
             # TODO: handle case when we have for example 2d frequency, use 1 day with multiplier of 2
             # if datetime.timedelta(minutes=1) < frequency:
             #     multiplier = int(frequency / self.frequency)
@@ -160,7 +172,7 @@ class LimeTraderSdkDataSource(DataBundleSource):
             end_dt = time_window[-1].astimezone(end_date.tzinfo)
 
         sdk_results = [self._lime_sdk_client_sync.market.get_quotes_history(
-            symbol=symbol, period=self._frequency_to_period(frequency=frequency), from_date=time_window[0],
+            symbol=symbol, period=lime_sdk_period, from_date=time_window[0],
             to_date=time_window[-1]
         ) for symbol in symbols]
 

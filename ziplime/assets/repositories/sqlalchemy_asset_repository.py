@@ -1,23 +1,16 @@
 import dataclasses
 import datetime
 import asyncio
-from operator import attrgetter
 from pathlib import Path
 from typing import Any, Self
 import pathlib
 
 import aiocache
 import pandas as pd
-import sqlalchemy as sa
 from aiocache import cached, Cache
 from alembic import config, command
-from sqlalchemy import Table, select, tuple_
+from sqlalchemy import select, tuple_
 from sqlalchemy.orm import selectinload
-from toolz import (
-    concat,
-    merge,
-    partition_all,
-)
 
 from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.domain.bond_event_type import BondEventType
@@ -56,17 +49,10 @@ from ziplime.assets.models.symbols_universe_asset import SymbolsUniverseAssetMod
 from ziplime.trading.models.trading_pair import TradingPair
 from ziplime.core.db.base_model import BaseModel
 from ziplime.errors import (
-    EquitiesNotFound,
-    FutureContractsNotFound,
-    MultipleSymbolsFound,
-    SameSymbolUsedAcrossCountries,
     SidsNotFound,
-    SymbolNotFound,
     RootSymbolNotFound,
 )
-from ziplime.utils.functional import invert
-from ziplime.utils.numpy_utils import as_column
-from ziplime.utils.sqlite_utils import group_into_chunks, SQLITE_MAX_VARIABLE_NUMBER
+from ziplime.utils.sqlite_utils import group_into_chunks
 
 from ziplime.assets.models.exchange_info_model import ExchangeInfoModel
 
@@ -82,9 +68,7 @@ from ziplime.assets.entities.futures_root import FuturesRoot
 from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES, OrderedContracts, ADJUSTMENT_STYLES
 from ziplime.assets.domain.continuous_future import ROLL_STYLES
 from ziplime.assets.repositories.asset_repository import AssetRepository
-from ziplime.assets.utils import _convert_asset_timestamp_fields, _filter_future_kwargs, \
-    _filter_equity_kwargs, _encode_continuous_future_sid, Lifetimes, \
-    build_grouped_ownership_map, OwnershipPeriod, SYMBOL_COLUMNS, split_delimited_symbol
+from ziplime.assets.utils import _encode_continuous_future_sid, Lifetimes
 
 
 class SqlAlchemyAssetRepository(AssetRepository):
@@ -1268,7 +1252,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         )
 
     async def get_universe_symbols(self, name: str, dt: datetime.date,
-                                    mic: str | None = None) -> list[ExchangeAsset]:
+                                   mic: str | None = None) -> list[ExchangeAsset]:
         """The universe's members on ``dt`` as **listings**, ordered by symbol.
 
         :meth:`get_symbols_universe` answers with memberships, and what a
@@ -1681,7 +1665,6 @@ class SqlAlchemyAssetRepository(AssetRepository):
         # Run the migration
         command.upgrade(alembic_cfg, "head")
 
-
     def retrieve_asset(self, sid: int, default_none: bool = False) -> Asset | None:
         """
         Retrieve the Asset for a given sid.
@@ -1732,7 +1715,6 @@ class SqlAlchemyAssetRepository(AssetRepository):
         if missing and not default_none:
             raise SidsNotFound(sids=missing)
         return [assets_by_id.get(sid) for sid in sids]
-
 
     async def get_ordered_contracts(self, root_symbol: str, mic: str | None = None) -> OrderedContracts:
         """Return the contract chain of ``root_symbol``, ordered by expiration.
@@ -1801,14 +1783,15 @@ class SqlAlchemyAssetRepository(AssetRepository):
         """Compute and cache a recarray of asset lifetimes"""
         sids = starts = ends = []
         async with self.session_maker() as session:
-            sids_subquery = select(EquitySymbolMappingModel.sid).join(
-                ExchangeInfoModel, onclause=ExchangeInfoModel.exchange == EquitySymbolMappingModel.exchange
-            ).where(ExchangeInfoModel.country_code.in_(country_codes))
             q = select(
-                EquityModel.sid,
-                EquityModel.start_date,
-                EquityModel.end_date
-            ).where(EquityModel.sid.in_(sids_subquery))
+                ExchangeAssetModel.sid,
+                ExchangeAssetModel.start_date,
+                ExchangeAssetModel.end_date,
+            ).join(
+                EquityModel, EquityModel.id == ExchangeAssetModel.asset_id,
+            ).join(
+                ExchangeInfoModel, ExchangeInfoModel.mic == ExchangeAssetModel.mic,
+            ).where(ExchangeInfoModel.country_code.in_(country_codes))
             result = list((await session.execute(q)))
             if result:
                 sids, starts, ends = zip(*result)
@@ -1923,7 +1906,6 @@ class SqlAlchemyAssetRepository(AssetRepository):
         """
         lifetimes = await self._compute_asset_lifetimes(assets=frozenset(assets))
         return lifetimes
-
 
     def to_json(self) -> dict[str, str]:
         return {
