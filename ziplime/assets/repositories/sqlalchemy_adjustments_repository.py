@@ -33,20 +33,6 @@ log = structlog.get_logger(__name__)
 
 SQLITE_ADJUSTMENT_TABLENAMES = frozenset(["splits", "dividends", "mergers"])
 
-UNPAID_QUERY_TEMPLATE = """
-                        SELECT sid, amount, pay_date
-                        from dividend_payouts
-                        WHERE ex_date = ?
-                          AND sid IN ({0}) \
-                        """
-
-UNPAID_STOCK_DIVIDEND_QUERY_TEMPLATE = """
-                                       SELECT sid, payment_sid, ratio, pay_date
-                                       from stock_dividend_payouts
-                                       WHERE ex_date = ?
-                                         AND sid IN ({0}) \
-                                       """
-
 StockDividend = namedtuple(
     "StockDividend",
     ["asset", "payment_asset", "ratio", "pay_date"],
@@ -372,45 +358,14 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
 
     def get_adjustments_for_sid(self, table_name: str, sid: int) -> list[list[Any]]:
         return []
-        t = (sid,)
-        c = self.conn.cursor()
-        adjustments_for_sid = c.execute(
-            "SELECT effective_date, ratio FROM %s WHERE sid = ?" % table_name, t
-        ).fetchall()
-        c.close()
-
-        return [
-            [pd.Timestamp(adjustment[0], unit="s"), adjustment[1]]
-            for adjustment in adjustments_for_sid
-        ]
 
     def get_dividends_with_ex_date(
         self,
         assets: Sequence[int],
         date: datetime.date,
     ) -> list[Any]:
-        # seconds = date.value / int(1e9)
+        # Not implemented here: cash dividends come from SqlAlchemyAssetRepository.get_cash_dividends_with_ex_date.
         return []
-        c = self.conn.cursor()
-
-        divs = []
-        for chunk in group_into_chunks(assets):
-            query = UNPAID_QUERY_TEMPLATE.format(",".join(["?" for _ in chunk]))
-            t = (date,) + tuple(map(lambda x: int(x), chunk))
-
-            c.execute(query, t)
-
-            rows = c.fetchall()
-            for row in rows:
-                div = Dividend(
-                    asset_finder.retrieve_asset(row[0]),
-                    row[1],
-                    pd.Timestamp(row[2], unit="s", tz="UTC"),
-                )
-                divs.append(div)
-        c.close()
-
-        return divs
 
     async def get_stock_dividends(self, sid: int, trading_days: pl.Series) -> list[StockDividendPayoutModel]:
         return []
@@ -420,34 +375,8 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
         assets: Sequence[int],
         date: datetime.date,
     ) -> list[StockDividend]:
-        # seconds = date.value / int(1e9)
+        # Stock dividends are not supported yet, so a position never receives one.
         return []
-
-        c = self.conn.cursor()
-
-        stock_divs = []
-        for chunk in group_into_chunks(assets):
-            query = UNPAID_STOCK_DIVIDEND_QUERY_TEMPLATE.format(
-                ",".join(["?" for _ in chunk])
-            )
-            t = (date,) + tuple(map(lambda x: int(x), chunk))
-
-            c.execute(query, t)
-
-            rows = c.fetchall()
-
-            for row in rows:
-                stock_div = StockDividend(
-                    asset_finder.retrieve_asset(row[0]),  # asset
-                    asset_finder.retrieve_asset(row[1]),  # payment_asset
-                    row[2],
-                    pd.Timestamp(row[3], unit="s", tz="UTC"),
-                )
-                stock_divs.append(stock_div)
-        c.close()
-
-        return stock_divs
-
 
     def calc_dividend_ratios(self, dividends):
         """Calculate the ratios to apply to equities when looking back at pricing
