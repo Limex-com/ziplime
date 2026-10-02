@@ -1,0 +1,33 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [master, dev]
+  push:
+    branches: [master, dev]
+
+jobs:
+  pytest:
+    name: pytest (Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12.x"
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        virtualenvs-in-project: true
+    - name: Cache the virtualenv
+      uses: actions/cache@v4
+      with:
+        path: .venv
+        key: venv-${{ runner.os }}-py312-${{ hashFiles('poetry.lock') }}
+    - name: Install ziplime with every extra and the dev group
+      run: poetry install --all-extras --with dev --without docs --no-interaction
+    - name: Run the test suite
+      run: poetry run pytest tests -q
