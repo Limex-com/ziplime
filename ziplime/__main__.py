@@ -31,6 +31,7 @@ from ziplime.data.data_sources.registry import (
     MissingProviderCredentials, UnknownDataProvider, list_providers, provider_names,
 )
 from ziplime.domain.data_frequency import DataFrequency
+from ziplime.errors import IncompatibleAssetDatabase
 from ziplime.finance.commission import PerShare
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
 from ziplime.utils.bundle_utils import (
@@ -83,6 +84,14 @@ async def _resolve(asset_service, symbols: str, asset_type: AssetType) -> list:
                   "Run `ziplime ingest-assets` first, or check --asset-type.")
         listings.append(listing)
     return listings
+
+
+def _asset_service(asset_db: str, clear: bool = False):
+    """Open the asset database, failing with instructions when it is from an incompatible release."""
+    try:
+        return get_asset_service(db_path=asset_db, clear_asset_db=clear)
+    except IncompatibleAssetDatabase as error:
+        _fail(str(error), "ziplime ingest-assets --clear")
 
 
 def _fail(message: str, hint: str | None = None) -> None:
@@ -166,7 +175,7 @@ async def ingest_assets_command(provider, asset_db, clear):
     except UnknownDataProvider as error:
         _fail(str(error))
 
-    asset_service = get_asset_service(db_path=asset_db, clear_asset_db=clear)
+    asset_service = _asset_service(asset_db, clear=clear)
     try:
         await ingest_assets(asset_service=asset_service, asset_data_source=source)
         click.secho(f"Assets ingested into {asset_db}", fg="green")
@@ -210,7 +219,7 @@ async def ingest(bundle, symbols, trading_calendar, start_date, end_date, freque
     Run `ziplime ingest-assets` first: the symbols must already be in the asset database.
     """
     calendar = get_calendar(trading_calendar)
-    asset_service = get_asset_service(db_path=asset_db)
+    asset_service = _asset_service(asset_db)
     try:
         listings = await _resolve(asset_service, symbols, AssetType(asset_type))
         try:
@@ -375,7 +384,7 @@ async def run(algofile, bundle, bundle_version, symbols, start_date, end_date, t
     if start >= end:
         _fail(f"--start-date {start_date:%Y-%m-%d} is not before --end-date {end_date:%Y-%m-%d}.")
 
-    asset_service = get_asset_service(db_path=asset_db)
+    asset_service = _asset_service(asset_db)
     try:
         listings = await _resolve(asset_service, symbols, AssetType(asset_type))
         service = get_bundle_service(bundle_storage_path=bundle_storage_path)

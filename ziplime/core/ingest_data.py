@@ -40,6 +40,9 @@ def get_asset_service(db_path: str = str(Path(Path.home(), ".ziplime", "assets.s
     """
     if clear_asset_db and os.path.exists(db_path):
         os.remove(db_path)
+    # SQLite creates the file but not the folder it lives in, so a first run on a machine with no
+    # ~/.ziplime failed with "unable to open database file" before anything had been ingested.
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     db_url = f"sqlite+aiosqlite:///{db_path}"
     assets_repository = SqlAlchemyAssetRepository(db_url=db_url, future_chain_predicates=CHAIN_PREDICATES)
     adjustments_repository = SqlAlchemyAdjustmentRepository(db_url=db_url)

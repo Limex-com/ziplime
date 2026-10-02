@@ -852,3 +852,18 @@ class BarSimulationError:
     message: str
     trace: str
     simulation_dt: datetime.datetime
+
+
+class IncompatibleAssetDatabase(ZiplineError):
+    """
+    Raised when the asset database was created by a ziplime release whose schema history this
+    one does not continue, so it cannot be migrated in place.
+    """
+
+    msg = (
+        "The asset database {db_path} was created by an older ziplime release and cannot be "
+        "upgraded in place (unknown schema revision {revision!r}). Rebuild it with "
+        "`ziplime ingest-assets --clear`, then re-ingest your bundles: they are keyed by sids "
+        "from the old database."
+    )
+

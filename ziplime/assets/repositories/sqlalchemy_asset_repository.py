@@ -4,11 +4,13 @@ import asyncio
 from pathlib import Path
 from typing import Any, Self
 import pathlib
+import re
 
 import aiocache
 import pandas as pd
 from aiocache import cached, Cache
 from alembic import config, command
+from alembic.util import CommandError
 from sqlalchemy import select, tuple_
 from sqlalchemy.orm import selectinload
 
@@ -49,6 +51,7 @@ from ziplime.assets.models.symbols_universe_asset import SymbolsUniverseAssetMod
 from ziplime.trading.models.trading_pair import TradingPair
 from ziplime.core.db.base_model import BaseModel
 from ziplime.errors import (
+    IncompatibleAssetDatabase,
     SidsNotFound,
     RootSymbolNotFound,
 )
@@ -1661,9 +1664,17 @@ class SqlAlchemyAssetRepository(AssetRepository):
         alembic_cfg = config.Config(Path(alembic_dir_path, "alembic.ini"))
         alembic_cfg.set_main_option("script_location", str(Path(alembic_dir_path)))
         alembic_cfg.set_main_option("sqlalchemy.url", self.db_url.replace("+aiosqlite", ""))
-        # os.makedirs(db_path.parent, exist_ok=True)
-        # Run the migration
-        command.upgrade(alembic_cfg, "head")
+        try:
+            command.upgrade(alembic_cfg, "head")
+        except CommandError as error:
+            # 2.10 restarted the migration history, so a database stamped by 1.19 (root revision
+            # 8c43877dec20) names a revision this release has never heard of. Alembic's own
+            # message says nothing about what to do; this one does.
+            match = re.search(r"Can't locate revision identified by '([^']+)'", str(error))
+            if match is None:
+                raise
+            raise IncompatibleAssetDatabase(
+                db_path=self.db_url.split("///", 1)[-1], revision=match.group(1)) from error
 
     def retrieve_asset(self, sid: int, default_none: bool = False) -> Asset | None:
         """
