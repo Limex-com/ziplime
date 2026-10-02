@@ -1,5 +1,50 @@
 # Release Notes
 
+### Version 2.10.3
+
+**Upgrading from 1.19 means rebuilding the asset database.** 2.10 restarted the schema history, so
+a database created by 1.19 cannot be migrated in place; every command now says so and stops. Run
+`ziplime ingest-assets --clear`, then re-ingest your bundles: they are keyed by sids from the old
+database.
+
+**Backtest results change.** These are fixes, not regressions, but a stored result will not
+reproduce:
+
+- Next-bar execution showed `handle_data` the portfolio from before the bar's fills, so every
+  `order_target*` call re-sent a difference already traded. A long-only daily rebalance could go
+  short, reach 4.5x leverage and run cash negative. Next-bar is the default for the CLI and the
+  MCP server, so any rebalancing strategy run through them moves.
+- The futures, commission, cost-basis, expiry and open-order fixes listed in
+  `changes-overview.md`, section 1. Several affect equity-only runs.
+
+**Installing.** `pip install ziplime` no longer pulls pytest, coverage, vectorbt or setuptools.
+Optional features are extras:
+
+- `ziplime[mcp]` — the local MCP server (`ziplime mcp`)
+- `ziplime[huggingface]` — `hf://` point-in-time datasets
+- `ziplime[options]` — option pricing and Greeks
+- `ziplime[numba]` — the compiled vector kernel
+- `ziplime[all]`
+
+**New**
+- Futures, bonds and options as instruments, in one portfolio with equities
+- `ziplime` command line: `ingest-assets`, `ingest`, `run`, `bundles`, `clean`, `providers`, `mcp`
+- Local MCP server over stdio, 14 tools to ingest, write, check and backtest strategies
+- Point-in-time datasets mounted from the Hugging Face Hub
+- A native vectorised simulation kernel, and vectorised signals inside an event-driven run
+- Data connector registry, real futures contract chains on Yahoo Finance
+- Emission rates between one minute and one day; history by calendar time
+- Live trading on Lime: a single-tick clock, live venues, capital allocation
+- Bundles are stored as Delta Lake tables
+
+**Fixed**
+- First run on a machine with no `~/.ziplime` failed with "unable to open database file"
+- `ingest-assets` from Yahoo stored listings on unmapped venues (NGM, SHZ, ...) with no exchange,
+  and a `hf://` mount then failed on every bar while the run exited 0
+- `ziplime mcp` without the `mcp` package printed a traceback instead of the install hint
+- Benchmark returns are aligned to sessions, not to benchmark bars
+- `schedule_function` and several zipline features that accepted arguments and did nothing
+
 ### Version 1.11.11
 - Upgrade limexhub version to 1.10.18
 - Add some documentation using mkdocs
