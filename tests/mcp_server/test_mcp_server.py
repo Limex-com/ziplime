@@ -7,6 +7,8 @@ code checker, the workspace, the formatting, and the error contract.
 """
 import pytest
 
+pytest.importorskip("mcp", reason='the MCP SDK is not installed: pip install "ziplime[mcp]"')
+
 from ziplime.mcp import code_rules, formatting, workspace
 from ziplime.mcp.errors import InvalidArguments, NotFound, ZiplimeMcpError
 

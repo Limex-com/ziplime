@@ -15,6 +15,7 @@ Nothing here touches the network. The manifests and README front matter are reco
 ``tests/fixtures/huggingface/`` as the real datasets publish them.
 """
 import datetime
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -37,6 +38,9 @@ from ziplime.utils.calendar_utils import get_calendar
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "huggingface"
 FAR_PAST = datetime.date(1900, 1, 1)
 FAR_FUTURE = datetime.date(2099, 1, 1)
+#: README front matter is YAML, and PyYAML comes with the `huggingface` extra, not the core.
+needs_yaml = unittest.skipIf(importlib.util.find_spec("yaml") is None,
+                             "PyYAML is not installed: pip install \"ziplime[huggingface]\"")
 EXCHANGE = ExchangeInfo(mic="XNYS", name="NYSE", canonical_name="NYSE", country_code="US")
 
 
@@ -152,6 +156,7 @@ class DeltaConfigTests(unittest.TestCase):
 class ManifestTests(unittest.TestCase):
     """The published datasets must describe themselves well enough to mount, unchanged."""
 
+    @needs_yaml
     def test_the_congress_dataset_declares_its_configs(self):
         # It carries the older manifest, with no `configs` block -- these come from the README
         # front matter, which is the Hub's own standard.
@@ -173,10 +178,12 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(manifest.default_config, "positions")
         self.assertIsNotNone(manifest.config("positions").delta_path)
 
+    @needs_yaml
     def test_features_is_preferred_as_the_default(self):
         for dataset in ("congress-trading", "insider-trading"):
             self.assertEqual(load_fixture(dataset).default_config, "features", dataset)
 
+    @needs_yaml
     def test_an_unknown_config_names_the_ones_that_exist(self):
         manifest = load_fixture("congress-trading")
         with self.assertRaises(ManifestError) as raised:
