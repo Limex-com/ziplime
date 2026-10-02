@@ -2924,6 +2924,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             self._ledger.process_commission(commission=commission, tr=self)
         # print("LEVERAGE: BEFORE 4", self.account.leverage, self.account.net_leverage)
         if not self.same_bar_execution:
+            # The fills above changed the positions, and `portfolio` is a cache last refreshed
+            # at the top of the bar. Without this, handle_data saw yesterday's positions with
+            # today's orders already filled, and every order_target* re-sent the difference:
+            # a long-only daily rebalance went short and ran gross leverage past 4.
+            if new_transactions or new_commissions:
+                await self._ledger.update_portfolio()
+                self._ledger.update_account()
             await handle_data(context=self, data=current_data, dt=dt_to_use)
         # print("LEVERAGE: AFTER 4", self.account.leverage, self.account.net_leverage)
 
