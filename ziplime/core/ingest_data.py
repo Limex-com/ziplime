@@ -71,6 +71,16 @@ async def ingest_assets(asset_service: AssetService, asset_data_source: AssetDat
     if len(exchanges) > 0:
         await asset_service.save_exchanges(exchanges=exchanges)
     assets_import = await asset_data_source.get_assets(exchanges=exchanges)
+    # A listing can name an exchange the source did not report up front -- Yahoo returns venues
+    # outside its MIC map under its own code (NGM, SHZ, ...). Without a row in `exchanges` the
+    # listing reads back with no exchange, and every bar that touches it fails.
+    known_mics = {exchange.mic for exchange in exchanges}
+    unlisted = {
+        listing.exchange.mic: listing.exchange for listing in assets_import.exchange_assets
+        if listing.exchange is not None and listing.exchange.mic not in known_mics
+    }
+    if unlisted:
+        await asset_service.save_exchanges(exchanges=list(unlisted.values()))
     await asset_service.import_assets(assets_import=assets_import)
     # await asset_service.save_equities(equities=assets)
 

@@ -225,7 +225,10 @@ class AssetService:
             by_symbol_and_mic, by_symbol = {}, {}
             for listing in await self._asset_repository.get_exchange_assets_by_symbols_of_type(
                     symbols=symbols, asset_type=candidate):
-                by_symbol_and_mic.setdefault((listing.symbol, listing.mic), listing)
+                # A listing whose exchange row is missing reads back with `exchange = None`; it is
+                # still reachable by symbol alone rather than failing the whole lookup.
+                mic = listing.exchange.mic if listing.exchange is not None else None
+                by_symbol_and_mic.setdefault((listing.symbol, mic), listing)
                 # A request with no MIC matches any exchange, and takes the first listing in the
                 # repository's own order -- which is what the per-symbol path returned.
                 by_symbol.setdefault(listing.symbol, listing)
