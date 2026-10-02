@@ -183,5 +183,5 @@ five percent of the edge, per side, every session.
 The pricing needs `vollib`, which ziplime does not install by default:
 
 ```
-poetry install --with options
+pip install "ziplime[options]"   # or: poetry install --extras options
 ```

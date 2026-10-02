@@ -18,6 +18,7 @@ and every one of them had moved on without it, so ``run`` and ``ingest`` had bee
 import asyncio
 
 import importlib.metadata
+import importlib.util
 import logging
 import sys
 from pathlib import Path
@@ -431,11 +432,11 @@ async def mcp():
 
     Not a command to run by hand: with no client on the other end it waits on stdin forever.
     """
-    try:
-        from ziplime.mcp import serve_stdio
-    except ImportError as error:
-        _fail(f"The MCP server needs the `mcp` package, which is not installed ({error}).",
-              "pip install mcp, or poetry install --with mcp.")
+    # `ziplime.mcp` imports the SDK lazily, so importing it succeeds without one; ask directly.
+    if importlib.util.find_spec("mcp") is None:
+        _fail("The MCP server needs the `mcp` package, which is not installed.",
+              'pip install "ziplime[mcp]", or poetry install --extras mcp.')
+    from ziplime.mcp import serve_stdio
     # Awaited, not `ziplime.mcp.main()`: that one calls `anyio.run()` and this command is
     # already inside asyncclick's loop, so it would raise "Already running asyncio in this
     # thread" -- which reaches the client as a server that closed the connection.

@@ -44,7 +44,7 @@ _DAYS_PER_YEAR = 365.0
 
 _IMPORT_HINT = (
     "Option pricing needs the 'vollib' package, which ziplime does not install by default. "
-    "Install it with `poetry install --with options` or `pip install vollib`."
+    "Install it with `pip install 'ziplime[options]'` or `poetry install --extras options`."
 )
 
 
