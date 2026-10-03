@@ -1,7 +1,6 @@
 from textwrap import dedent
 
 
-
 from ziplime.pipeline.terms.filters import Filter
 
 from ziplime.utils.math_utils import (
@@ -13,7 +12,6 @@ from ziplime.utils.math_utils import (
     nansum,
 )
 from ziplime.utils.numpy_utils import is_missing
-
 
 
 CORRELATION_METHOD_NOTE = dedent(
@@ -67,9 +65,8 @@ def summary_method(name):
 
     func = getattr(summary_funcs, name)
 
-    #@float64_only
+    # @float64_only
     def f(self, mask: Filter | None = None):
-
         """Create a 1-dimensional factor computing the {} of self, each day.
 
         Parameters

@@ -1,54 +1,61 @@
+import dataclasses
 import datetime
-from collections import deque
-from functools import partial
-from operator import attrgetter
+import asyncio
 from pathlib import Path
 from typing import Any, Self
 import pathlib
+import re
 
 import aiocache
 import pandas as pd
-import sqlalchemy as sa
 from aiocache import cached, Cache
 from alembic import config, command
-from sqlalchemy import Table, select, tuple_
+from alembic.util import CommandError
+from sqlalchemy import select, tuple_
 from sqlalchemy.orm import selectinload
-from toolz import (
-    concat,
-    merge,
-    partition_all,
-)
 
 from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.domain.bond_event_type import BondEventType
+from ziplime.assets.domain.day_count import DayCount
+from ziplime.assets.domain.price_quotation import PriceQuotation
+from ziplime.assets.domain.exercise_style import ExerciseStyle
+from ziplime.assets.domain.option_type import OptionType
+from ziplime.assets.domain.premium_style import PremiumStyle
+from ziplime.assets.domain.settlement_type import SettlementType
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.assets.entities.bond import Bond
+from ziplime.assets.entities.bond_event import BondEvent
+from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
-from ziplime.assets.entities.symbol_universe import SymbolsUniverse
+from ziplime.assets.entities.split import Split
+from ziplime.assets.entities.symbol_universe import SymbolsUniverse, universe_venue
 from ziplime.assets.entities.symbols_universe_asset import SymbolsUniverseAsset
 from ziplime.assets.models.asset_router import AssetRouter
 from ziplime.assets.entities.commodity import Commodity
 from ziplime.assets.entities.currency import Currency
 from ziplime.assets.models.commodity_model import CommodityModel
 from ziplime.assets.models.currency_model import CurrencyModel
+from ziplime.assets.models.divident_payout_model import DividendPayoutModel
+from ziplime.assets.models.bond_event_model import BondEventModel
+from ziplime.assets.models.bond_model import BondModel
 from ziplime.assets.models.equity_model import EquityModel
 from ziplime.assets.models.exchange_asset_model import ExchangeAssetModel
 from ziplime.assets.models.futures_contract_model import FuturesContractModel
+from ziplime.assets.models.futures_root_symbol_model import FuturesRootSymbolModel
+from ziplime.assets.models.option_contract_model import OptionContractModel
+from ziplime.assets.models.split_model import SplitModel
 from ziplime.assets.models.symbols_universe import SymbolsUniverseModel
 from ziplime.assets.models.symbols_universe_asset import SymbolsUniverseAssetModel
 from ziplime.trading.models.trading_pair import TradingPair
 from ziplime.core.db.base_model import BaseModel
 from ziplime.errors import (
-    EquitiesNotFound,
-    FutureContractsNotFound,
-    MultipleSymbolsFound,
-    SameSymbolUsedAcrossCountries,
+    IncompatibleAssetDatabase,
     SidsNotFound,
-    SymbolNotFound,
+    RootSymbolNotFound,
 )
-from ziplime.utils.functional import invert
-from ziplime.utils.numpy_utils import as_column
-from ziplime.utils.sqlite_utils import group_into_chunks, SQLITE_MAX_VARIABLE_NUMBER
+from ziplime.utils.sqlite_utils import group_into_chunks
 
 from ziplime.assets.models.exchange_info_model import ExchangeInfoModel
 
@@ -59,11 +66,12 @@ from ziplime.assets.models.asset_model import AssetModel
 from ziplime.assets.domain.continuous_future import ContinuousFuture
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
+from ziplime.assets.entities.futures_root import FuturesRoot
 from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES, OrderedContracts, ADJUSTMENT_STYLES
+from ziplime.assets.domain.continuous_future import ROLL_STYLES
 from ziplime.assets.repositories.asset_repository import AssetRepository
-from ziplime.assets.utils import _convert_asset_timestamp_fields, _filter_future_kwargs, \
-    _filter_equity_kwargs, _encode_continuous_future_sid, Lifetimes, \
-    build_grouped_ownership_map, OwnershipPeriod, SYMBOL_COLUMNS, split_delimited_symbol
+from ziplime.assets.utils import _encode_continuous_future_sid, Lifetimes
 
 
 class SqlAlchemyAssetRepository(AssetRepository):
@@ -98,6 +106,18 @@ class SqlAlchemyAssetRepository(AssetRepository):
             future_chain_predicates if future_chain_predicates is not None else {}
         )
         self._ordered_contracts = {}
+        self._cached_dividends_by_asset_date: dict[
+            tuple[int, datetime.date], list[DividendPayout]
+        ] = {}
+        self._cached_splits_by_asset_date: dict[
+            tuple[int, datetime.date], list[Split]
+        ] = {}
+        self._cached_corporate_action_ranges: list[
+            tuple[frozenset[int], datetime.date, datetime.date]
+        ] = []
+        self._loaded_corporate_action_ranges: set[
+            tuple[frozenset[int], datetime.date, datetime.date]
+        ] = set()
 
         # Populated on first call to `lifetimes`.
         self._asset_lifetimes = {}
@@ -107,8 +127,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         self.session_maker = async_sessionmaker(autocommit=False, autoflush=True, bind=self.engine, class_=AsyncSession,
                                                 expire_on_commit=False)
 
-
-    async def add_all_and_commit(self, models: list[BaseModel]):
+    async def add_all_and_commit(self, models: list[BaseModel]) -> None:
         async with self.session_maker() as session:
             session.add_all(models)
             await session.commit()
@@ -119,10 +138,169 @@ class SqlAlchemyAssetRepository(AssetRepository):
     async def save_asset_routers(self, asset_routers: list[AssetRouter]) -> None:
         await self.add_all_and_commit(asset_routers)
 
-    async def save_currencies(self, currencies: list[Currency]) -> list[CurrencyModel]:
-        assets_db = []
+    def _currency_model_to_currency(self, currency_model: CurrencyModel) -> Currency:
+        return Currency(
+            id=currency_model.id,
+            asset_name=currency_model.asset_name,
+            start_date=currency_model.start_date,
+            first_traded=currency_model.first_traded,
+            end_date=currency_model.end_date,
+            auto_close_date=currency_model.auto_close_date,
+            isin=currency_model.isin
+        )
+
+    def _equity_model_to_equity(self, equity_model: EquityModel) -> Equity:
+        return Equity(
+            id=equity_model.id,
+            asset_name=equity_model.asset_name,
+            start_date=equity_model.start_date,
+            first_traded=equity_model.first_traded,
+            end_date=equity_model.end_date,
+            auto_close_date=equity_model.auto_close_date,
+            isin=equity_model.isin
+        )
+
+    def _bond_model_to_bond(self, bond_model: BondModel) -> Bond:
+        return Bond(
+            id=bond_model.id,
+            asset_name=bond_model.asset_name,
+            start_date=bond_model.start_date,
+            first_traded=bond_model.first_traded,
+            end_date=bond_model.end_date,
+            auto_close_date=bond_model.auto_close_date,
+            isin=bond_model.isin,
+            face_value=bond_model.face_value,
+            maturity_date=bond_model.maturity_date,
+            coupon_rate=bond_model.coupon_rate,
+            coupon_frequency=bond_model.coupon_frequency,
+            quote_currency=bond_model.quote_currency,
+            day_count=DayCount(bond_model.day_count),
+            price_quotation=PriceQuotation(bond_model.price_quotation),
+            is_amortized=bond_model.is_amortized,
+        )
+
+    def _bond_event_model_to_bond_event(self, event_model: BondEventModel, bond: Bond) -> BondEvent:
+        return BondEvent(
+            id=event_model.id,
+            asset=bond,
+            event_type=BondEventType(event_model.event_type),
+            date=event_model.date,
+            value=event_model.value,
+            currency=event_model.currency,
+            record_date=event_model.record_date,
+            period_start_date=event_model.period_start_date,
+            face_value=event_model.face_value,
+            value_percent=event_model.value_percent,
+            new_face_value=event_model.new_face_value,
+            initial_face_value=event_model.initial_face_value,
+            amortization_percent=event_model.amortization_percent,
+            offer_type=event_model.offer_type,
+            offer_price=event_model.offer_price,
+            offer_start_date=event_model.offer_start_date,
+            offer_end_date=event_model.offer_end_date,
+            offer_agent=event_model.offer_agent,
+        )
+
+    def _commodity_model_to_commodity(self, commodity_model: CommodityModel) -> Commodity:
+        return Commodity(
+            id=commodity_model.id,
+            asset_name=commodity_model.asset_name,
+            start_date=commodity_model.start_date,
+            first_traded=commodity_model.first_traded,
+            end_date=commodity_model.end_date,
+            auto_close_date=commodity_model.auto_close_date,
+            isin=commodity_model.isin
+        )
+
+    def _futures_contract_model_to_futures_contract(self, futures_contract_model: FuturesContractModel,
+                                                    root_asset: Asset) -> FuturesContract:
+        return FuturesContract(
+            id=futures_contract_model.id,
+            asset_name=futures_contract_model.asset_name,
+            start_date=futures_contract_model.start_date,
+            first_traded=futures_contract_model.first_traded,
+            end_date=futures_contract_model.end_date,
+            auto_close_date=futures_contract_model.auto_close_date,
+            isin=futures_contract_model.isin,
+            root_asset=root_asset,
+            root_symbol=futures_contract_model.root_symbol,
+            # Populated lazily by callers that need the underlying's listing; the chain itself is
+            # addressed by root_symbol, so nothing in the simulation path requires it.
+            root_exchange_asset=None,
+            notice_date=futures_contract_model.notice_date,
+            expiration_date=futures_contract_model.expiration_date,
+            multiplier=futures_contract_model.multiplier,
+            tick_size=futures_contract_model.tick_size,
+            settlement_type=SettlementType(futures_contract_model.settlement_type),
+            margin_currency=futures_contract_model.margin_currency,
+        )
+
+    def _option_contract_model_to_option_contract(
+            self, option_contract_model: OptionContractModel,
+            underlying_asset: Asset | None,
+            underlying_exchange_asset: ExchangeAsset | None = None) -> OptionContract:
+        return OptionContract(
+            id=option_contract_model.id,
+            asset_name=option_contract_model.asset_name,
+            start_date=option_contract_model.start_date,
+            first_traded=option_contract_model.first_traded,
+            end_date=option_contract_model.end_date,
+            auto_close_date=option_contract_model.auto_close_date,
+            isin=option_contract_model.isin,
+            underlying_asset=underlying_asset,
+            underlying_symbol=option_contract_model.underlying_symbol,
+            underlying_exchange_asset=underlying_exchange_asset,
+            option_type=OptionType(option_contract_model.option_type),
+            strike=option_contract_model.strike,
+            expiration_date=option_contract_model.expiration_date,
+            multiplier=option_contract_model.multiplier,
+            tick_size=option_contract_model.tick_size,
+            exercise_style=ExerciseStyle(option_contract_model.exercise_style),
+            settlement_type=SettlementType(option_contract_model.settlement_type),
+            premium_style=PremiumStyle(option_contract_model.premium_style),
+        )
+
+    async def _asset_ids_by_identity(self) -> dict[tuple[type, str | None, str], int]:
+        """Map ``(entity type, isin, asset_name)`` to the stored asset id.
+
+        Callers hand in entities they built themselves, whose ``id`` is still ``None`` because the
+        asset had not been written yet. This resolves those references the same way
+        :meth:`save_exchange_assets` does.
+        """
+        return {
+            (type(asset), asset.isin, asset.asset_name): asset.id
+            for asset in (await self.get_all_assets()).values()
+        }
+
+    def _invalidate_asset_cache(self) -> None:
+        """Drop the memoised asset map.
+
+        ``get_all_assets`` is memoised twice (an ``aiocache`` decorator and ``self._cached_assets``),
+        and ``save_exchange_assets`` resolves asset ids through it. Without this, saving assets and
+        then their listings in one ingest would look up the newly written assets in a stale map.
+        """
+        self._cached_assets = {}
+        cache = getattr(type(self).get_all_assets, "cache", None)
+        if cache is not None:
+            cache._cache.clear()
+
+    async def save_currencies(self, currencies: list[Currency]) -> list[Currency]:
+        """Persist currencies, skipping ones already stored under the same name.
+
+        Ingesting a second market re-declares its quote currency, so this has to be idempotent or
+        repeated ingests accumulate duplicate USD/RUB rows that then make quote lookups ambiguous.
+        """
+        currencies = currencies or []
+        async with self.session_maker() as session:
+            stored = list((await session.execute(
+                select(CurrencyModel).where(
+                    CurrencyModel.asset_name.in_([c.asset_name for c in currencies]))
+            )).scalars())
+        stored_by_name = {model.asset_name: model for model in stored}
+        currencies = [c for c in currencies if c.asset_name not in stored_by_name]
+
+        assets_db = list(stored)
         asset_routers = []
-        # symbol_mappings = []
         async with self.session_maker() as session:
             for currency in currencies:
                 asset_router = AssetRouter(
@@ -142,40 +320,13 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 )
                 session.add(asset_db)
                 await session.commit()
-                #
                 assets_db.append(asset_db)
-                # for symbol_mapping in currency.symbol_mapping.values():
-                #     exchange = await self.get_exchange_by_mic(exchange_name=symbol_mapping.exchange_name)
-                #     if exchange is None:
-                #         raise ValueError(f"Exchange {symbol_mapping.exchange_name} not found. Please register it.")
-                #     symbol_mapping_model = CurrencySymbolMappingModel(
-                #         sid=asset_db.sid,
-                #         symbol=symbol_mapping.symbol,
-                #         start_date=symbol_mapping.start_date,
-                #         end_date=symbol_mapping.end_date,
-                #         exchange=exchange.mic,
-                #     )
-                #     symbol_mappings.append(symbol_mapping_model)
-                #     session.add(symbol_mapping_model)
-                #     await session.commit()
+        if currencies:
+            self._invalidate_asset_cache()
 
-            # trading_pair = TradingPair(
-            #     id=uuid.uuid4(),
-            #     base_asset_sid=asset_router.sid,
-            #     quote_asset_sid=asset_db.sid,
-            #     exchange=asset["exchange"],
-            # )
-            # trading_pairs.append(trading_pair)
+        return [self._currency_model_to_currency(currency_model=c) for c in assets_db]
 
-        # do this in one transaction
-        #     session.add_all(asset_routers)
-        #     await session.commit()
-        #     session.add_all(assets_db)
-        #     session.add_all(symbol_mappings)
-        #     await session.commit()
-        return assets_db
-
-    async def save_symbol_universe(self, symbol_universe: SymbolsUniverse):
+    async def save_symbol_universe(self, symbol_universe: SymbolsUniverse) -> None:
         async with self.session_maker() as session:
             symbol_universe_model = SymbolsUniverseModel(symbol=symbol_universe.symbol,
                                                          universe_type=symbol_universe.universe_type,
@@ -222,7 +373,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
             name=exchange.name
         ) for exchange in exchanges]
 
-    async def save_equities(self, equities: list[Equity]) -> list[EquityModel]:
+    async def save_equities(self, equities: list[Equity]) -> list[Equity]:
         assets_db = []
         asset_routers = []
         # symbol_mappings = []
@@ -247,115 +398,699 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 isin=equity.isin
             )
             assets_db.append(asset_db)
-            # for symbol_mapping in equity.symbol_mapping.values():
-            #     exchange = await self.get_exchange_by_mic(exchange_name=symbol_mapping.exchange_name)
-            #     if exchange is None:
-            #         raise ValueError(f"Exchange {symbol_mapping.exchange_name} not found. Please register it.")
-            # equity_symbol_mapping = EquitySymbolMappingModel(
-            #     sid=asset_routers[i].sid,
-            #     company_symbol=symbol_mapping.company_symbol,
-            #     symbol=symbol_mapping.symbol,
-            #     share_class_symbol=symbol_mapping.share_class_symbol,
-            #     start_date=symbol_mapping.start_date,
-            #     end_date=symbol_mapping.end_date,
-            # )
-            # symbol_mappings.append(equity_symbol_mapping)
-
-            # trading_pair = TradingPair(
-            #     id=uuid.uuid4(),
-            #     base_asset_sid=asset_router.sid,
-            #     quote_asset_sid=asset_db.sid,
-            #     exchange=asset["exchange"],
-            # )
-            # trading_pairs.append(trading_pair)
-
-        # do this in one transaction
         async with self.session_maker() as session:
             session.add_all(assets_db)
-            # session.add_all(symbol_mappings)
             await session.commit()
-        return assets_db
+        if assets_db:
+            self._invalidate_asset_cache()
+
+        return [self._equity_model_to_equity(equity_model=eq) for eq in assets_db]
+
+    async def save_bonds(self, bonds: list[Bond]) -> list[Bond]:
+        """Persist bonds, skipping ones already stored under the same ISIN and name.
+
+        Identified by ``(isin, asset_name)`` like every other asset here, so re-running an ingest
+        adds new issues without minting a second asset id for one already stored -- which would
+        strand the coupon schedule on the old id.
+        """
+        bonds = bonds or []
+        if not bonds:
+            return []
+        async with self.session_maker() as session:
+            stored = list((await session.execute(
+                select(BondModel).where(
+                    BondModel.asset_name.in_([b.asset_name for b in bonds]))
+            )).scalars())
+        stored_by_key = {(model.isin, model.asset_name): model for model in stored}
+        new_bonds = [b for b in bonds if (b.isin, b.asset_name) not in stored_by_key]
+
+        models = []
+        if new_bonds:
+            asset_routers = [AssetRouter(id=b.id, asset_type=AssetType.BOND.value)
+                             for b in new_bonds]
+            async with self.session_maker() as session:
+                session.add_all(asset_routers)
+                await session.commit()
+
+            models = [
+                BondModel(
+                    id=asset_routers[i].id,
+                    start_date=b.start_date,
+                    first_traded=b.first_traded,
+                    end_date=b.end_date,
+                    asset_name=b.asset_name,
+                    auto_close_date=b.auto_close_date,
+                    isin=b.isin,
+                    face_value=b.face_value,
+                    maturity_date=b.maturity_date,
+                    coupon_rate=b.coupon_rate,
+                    coupon_frequency=b.coupon_frequency,
+                    quote_currency=b.quote_currency,
+                    day_count=b.day_count.value,
+                    price_quotation=b.price_quotation.value,
+                    is_amortized=b.is_amortized,
+                )
+                for i, b in enumerate(new_bonds)
+            ]
+            async with self.session_maker() as session:
+                session.add_all(models)
+                await session.commit()
+            self._invalidate_asset_cache()
+
+        saved_by_key = {(m.isin, m.asset_name): self._bond_model_to_bond(bond_model=m)
+                        for m in models}
+        saved_by_key.update({key: self._bond_model_to_bond(bond_model=model)
+                             for key, model in stored_by_key.items()})
+        return [saved_by_key.get((b.isin, b.asset_name), b) for b in bonds]
+
+    async def save_bond_events(self, bond_events: list[BondEvent]) -> list[BondEvent]:
+        """Persist coupon, amortization, maturity and offer events, skipping duplicates.
+
+        A schedule is re-fetched every time an ingest runs, so this is keyed on
+        ``(asset, type, date)``: without that, each refresh would add a second copy of every
+        coupon and the simulation would pay each of them twice.
+        """
+        bond_events = bond_events or []
+        if not bond_events:
+            return []
+
+        asset_ids = await self._asset_ids_by_identity()
+
+        def resolve(event: BondEvent) -> int | None:
+            if event.asset.id is not None:
+                return event.asset.id
+            return asset_ids.get((type(event.asset), event.asset.isin, event.asset.asset_name))
+
+        resolved = [(event, resolve(event)) for event in bond_events]
+        unknown = [event for event, asset_id in resolved if asset_id is None]
+        if unknown:
+            raise ValueError(
+                f"Cannot store bond events for {len(unknown)} unknown bonds "
+                f"(first: {unknown[0].asset.asset_name}). Save the bonds before their schedules."
+            )
+
+        candidate_ids = {asset_id for _, asset_id in resolved}
+        async with self.session_maker() as session:
+            existing = {
+                (asset_id, event_type, date)
+                for asset_id, event_type, date in (await session.execute(
+                    select(BondEventModel.asset_id, BondEventModel.event_type,
+                           BondEventModel.date).where(
+                        BondEventModel.asset_id.in_(candidate_ids))
+                )).all()
+            }
+
+        models = []
+        stored_events = []
+        for event, asset_id in resolved:
+            key = (asset_id, event.event_type.value, event.date)
+            if key in existing:
+                continue
+            existing.add(key)
+            stored_events.append(event)
+            models.append(BondEventModel(
+                asset_id=asset_id,
+                event_type=event.event_type.value,
+                date=event.date,
+                value=event.value,
+                currency=event.currency,
+                record_date=event.record_date,
+                period_start_date=event.period_start_date,
+                face_value=event.face_value,
+                value_percent=event.value_percent,
+                new_face_value=event.new_face_value,
+                initial_face_value=event.initial_face_value,
+                amortization_percent=event.amortization_percent,
+                offer_type=event.offer_type,
+                offer_price=event.offer_price,
+                offer_start_date=event.offer_start_date,
+                offer_end_date=event.offer_end_date,
+                offer_agent=event.offer_agent,
+            ))
+        if models:
+            await self.add_all_and_commit(models)
+        return [dataclasses.replace(event, id=model.id)
+                for event, model in zip(stored_events, models)]
+
+    async def get_bond_events(self, bonds: list[Bond]) -> dict[int, list[BondEvent]]:
+        """Return every stored event of each bond, keyed by bond asset id and ordered by date."""
+        bonds = [bond for bond in (bonds or []) if bond is not None and bond.id is not None]
+        if not bonds:
+            return {}
+        bonds_by_id = {bond.id: bond for bond in bonds}
+        async with self.session_maker() as session:
+            models = list((await session.execute(
+                select(BondEventModel)
+                .where(BondEventModel.asset_id.in_(list(bonds_by_id)))
+                .order_by(BondEventModel.date)
+            )).scalars())
+        result: dict[int, list[BondEvent]] = {bond_id: [] for bond_id in bonds_by_id}
+        for model in models:
+            result[model.asset_id].append(self._bond_event_model_to_bond_event(
+                event_model=model, bond=bonds_by_id[model.asset_id]))
+        return result
+
+    async def get_exchange_bonds_by_symbols(self, symbols: list[AssetSymbol]) -> list[ExchangeAsset]:
+        """Look up bond listings by ``(symbol, mic)``; a ``None`` mic matches any exchange."""
+        return await self._get_exchange_assets_by_symbols(symbols=symbols, asset_type=Bond)
+
+    async def get_exchange_bond_by_symbol(self, symbol: AssetSymbol) -> ExchangeAsset | None:
+        bonds = await self.get_exchange_bonds_by_symbols(symbols=[symbol])
+        return bonds[0] if bonds else None
+
+    async def get_all_bond_listings(self, mic: str | None = None) -> list[ExchangeAsset]:
+        """Every stored bond listing, ordered by maturity. Used to ingest bars for the lot."""
+        all_assets = await self.get_all_assets()
+        bond_ids = [asset_id for asset_id, asset in all_assets.items() if isinstance(asset, Bond)]
+        if not bond_ids:
+            return []
+        async with self.session_maker() as session:
+            q = select(ExchangeAssetModel).where(ExchangeAssetModel.asset_id.in_(bond_ids))
+            if mic is not None:
+                q = q.where(ExchangeAssetModel.mic == mic)
+            listings = list((await session.execute(q)).scalars())
+        result = [
+            ExchangeAsset(
+                sid=listing.sid, start_date=listing.start_date, first_traded=listing.first_traded,
+                end_date=listing.end_date, auto_close_date=listing.auto_close_date,
+                symbol=listing.symbol, exchange=await self.get_exchange_by_mic(mic=listing.mic),
+                asset=all_assets[listing.asset_id], quote=all_assets[listing.quote_id],
+                external_id=listing.external_id)
+            for listing in listings
+        ]
+        return sorted(result, key=lambda ea: (ea.asset.maturity_date, ea.symbol))
+
+    async def get_bonds_by_isins(self, isins: list[str]) -> list[Bond]:
+        async with self.session_maker() as session:
+            models = list((await session.execute(
+                select(BondModel).where(BondModel.isin.in_(isins))
+            )).scalars())
+        return [self._bond_model_to_bond(bond_model=model) for model in models]
 
     async def save_exchanges(self, exchanges: list[ExchangeInfo]) -> None:
-        exchange_models = [
-            ExchangeInfoModel(
-                mic=exchange.mic,
-                name=exchange.name,
-                canonical_name=exchange.canonical_name,
-                country_code=exchange.country_code
-            ) for exchange in exchanges
+        """Insert new exchanges and refresh the details of ones already stored.
+
+        Exchanges are shared between markets -- a derivatives ingest hits the same exchange row an
+        equity ingest may already have written -- so this upserts rather than inserting, and
+        corrects stale names or country codes on the way.
+        """
+        if not exchanges:
+            return
+        async with self.session_maker() as session:
+            stored = {
+                model.mic: model for model in (await session.execute(
+                    select(ExchangeInfoModel).where(
+                        ExchangeInfoModel.mic.in_([e.mic for e in exchanges]))
+                )).scalars()
+            }
+            for exchange in exchanges:
+                model = stored.get(exchange.mic)
+                if model is None:
+                    session.add(ExchangeInfoModel(
+                        mic=exchange.mic,
+                        name=exchange.name,
+                        canonical_name=exchange.canonical_name,
+                        country_code=exchange.country_code,
+                    ))
+                else:
+                    model.name = exchange.name
+                    model.canonical_name = exchange.canonical_name
+                    model.country_code = exchange.country_code
+            await session.commit()
+
+        cache = getattr(type(self).get_exchange_by_mic, "cache", None)
+        if cache is not None:
+            cache._cache.clear()
+
+    async def save_exchange_assets(self, exchange_assets: list[ExchangeAsset]) -> list[ExchangeAsset]:
+        """Persist tradeable listings, skipping ones that are already stored.
+
+        The autoincrement ``sid`` assigned here is the identifier data bundles key their bars by,
+        so re-ingesting must not mint a second sid for a listing that is already stored.
+
+        A listing is identified by ``(mic, symbol, asset)`` rather than ``(mic, symbol)``: the same
+        ticker on the same exchange can legitimately belong to two different assets -- an equity
+        vendor may list a futures ticker as an equity, and keying on the ticker alone would
+        silently drop the futures listing of the same name.
+        """
+        exchange_assets = exchange_assets or []
+        if not exchange_assets:
+            return []
+
+        all_assets = await self.get_all_assets()
+
+        asset_keys = {
+            (type(asset), asset.isin, asset.asset_name): asset
+            for asset in all_assets.values()
+        }
+
+        async with self.session_maker() as session:
+            existing = {
+                (mic, symbol, asset_id) for mic, symbol, asset_id in (await session.execute(
+                    select(ExchangeAssetModel.mic, ExchangeAssetModel.symbol,
+                           ExchangeAssetModel.asset_id).where(
+                        ExchangeAssetModel.symbol.in_([ea.symbol for ea in exchange_assets]))
+                )).all()
+            }
+        exchange_assets = [
+            ea for ea in exchange_assets
+            if (ea.mic, ea.symbol,
+                asset_keys[(type(ea.asset), ea.asset.isin, ea.asset.asset_name)].id) not in existing
         ]
+        if not exchange_assets:
+            return []
 
-        await self.add_all_and_commit(exchange_models)
-
-    async def save_exchange_assets(self, exchange_assets: list[ExchangeAsset]) -> None:
-        new_equities = []
-        new_currencies = []
-
-        exchange_asset_currencies = []
-        exchange_asset_equities = []
-
-        equities_by_new_ids = {}
-        currencies_by_new_ids = {}
-
-        exchange_asset_equities_mapping = []
-        exchange_asset_currencies_mapping = []
-
-        for exchange_asset in exchange_assets:
-            asset_id = (exchange_asset.asset.isin, exchange_asset.asset.asset_name, exchange_asset.asset.id)
-            if type(exchange_asset.asset) is Equity:
-                if exchange_asset.asset.id is None and asset_id not in equities_by_new_ids:
-                    new_equities.append(exchange_asset.asset)
-                    equities_by_new_ids[asset_id] = exchange_asset.asset
-                exchange_asset_equities_mapping.append(exchange_asset.asset)
-                exchange_asset_equities.append(exchange_asset)
-            elif type(exchange_asset.asset) is Currency:
-                if exchange_asset.asset.id is None and asset_id not in currencies_by_new_ids:
-                    new_currencies.append(exchange_asset.asset)
-                    currencies_by_new_ids[asset_id] = exchange_asset.asset
-                exchange_asset_currencies_mapping.append(exchange_asset.asset)
-                exchange_asset_currencies.append(exchange_asset)
-        equities = await self.save_equities(equities=new_equities)
-        currencies = await self.save_currencies(currencies=new_currencies)
-        equities_by_asset_ids = {(equity.isin, equity.asset_name): equity for equity in equities}
-        currencies_by_asset_ids = {(currency.isin, currency.asset_name): currency for currency in currencies}
-
-        exchange_assets_equities_db = [
+        exchange_assets_db = [
             ExchangeAssetModel(
                 # exchange="",
                 external_id=exchange_asset.external_id,
                 start_date=exchange_asset.start_date,
                 end_date=exchange_asset.end_date,
                 symbol=exchange_asset.symbol,
-                asset_id=equities_by_asset_ids[(exchange_asset.asset.isin, exchange_asset.asset.asset_name)].id,
+                asset_id=asset_keys[
+                    (type(exchange_asset.asset), exchange_asset.asset.isin, exchange_asset.asset.asset_name)].id,
+                quote_id=asset_keys[
+                    (type(exchange_asset.quote), exchange_asset.quote.isin, exchange_asset.quote.asset_name)].id,
                 mic=exchange_asset.mic,
                 first_traded=exchange_asset.first_traded,
                 sid=None,
                 auto_close_date=exchange_asset.auto_close_date,
             )
-            for exchange_asset in exchange_asset_equities
+            for exchange_asset in exchange_assets
         ]
-        exchange_assets_currencies_db = [
-            ExchangeAssetModel(
-                external_id=exchange_asset.external_id,
-                start_date=exchange_asset.start_date,
-                end_date=exchange_asset.end_date,
-                symbol=exchange_asset.symbol,
-                asset_id=currencies_by_asset_ids[(exchange_asset.asset.isin, exchange_asset.asset.asset_name)].id,
-                mic=exchange_asset.mic,
-                first_traded=exchange_asset.first_traded,
-                sid=None,
-                auto_close_date=exchange_asset.auto_close_date,
+        await self.add_all_and_commit(exchange_assets_db)
+
+        return [
+            dataclasses.replace(exchange_asset, sid=model.sid)
+            for exchange_asset, model in zip(exchange_assets, exchange_assets_db)
+        ]
+
+    async def save_commodities(self, commodities: list[Commodity]) -> list[Commodity]:
+        """Persist commodities, skipping ones already stored under the same name."""
+        async with self.session_maker() as session:
+            existing = {
+                name for name in (await session.execute(
+                    select(CommodityModel.asset_name).where(
+                        CommodityModel.asset_name.in_([c.asset_name for c in commodities]))
+                )).scalars()
+            }
+        new_commodities = [c for c in commodities if c.asset_name not in existing]
+
+        saved = []
+        if new_commodities:
+            asset_routers = [AssetRouter(id=c.id, asset_type=AssetType.COMMODITY.value)
+                             for c in new_commodities]
+            async with self.session_maker() as session:
+                session.add_all(asset_routers)
+                await session.commit()
+
+            models = [
+                CommodityModel(
+                    id=asset_routers[i].id,
+                    start_date=c.start_date,
+                    first_traded=c.first_traded,
+                    end_date=c.end_date,
+                    asset_name=c.asset_name,
+                    auto_close_date=c.auto_close_date,
+                    isin=c.isin,
+                )
+                for i, c in enumerate(new_commodities)
+            ]
+            async with self.session_maker() as session:
+                session.add_all(models)
+                await session.commit()
+            saved = models
+            self._invalidate_asset_cache()
+
+        if not existing:
+            return [self._commodity_model_to_commodity(commodity_model=m) for m in saved]
+        # Return the full requested set, mixing freshly written rows with pre-existing ones.
+        async with self.session_maker() as session:
+            stored = list((await session.execute(
+                select(CommodityModel).where(
+                    CommodityModel.asset_name.in_([c.asset_name for c in commodities]))
+            )).scalars())
+        return [self._commodity_model_to_commodity(commodity_model=m) for m in stored]
+
+    async def save_futures_roots(self, futures_roots: list[FuturesRoot]) -> list[FuturesRoot]:
+        """Persist futures chain metadata, skipping roots that are already stored."""
+        if not futures_roots:
+            return []
+        async with self.session_maker() as session:
+            existing = {
+                root for root in (await session.execute(
+                    select(FuturesRootSymbolModel.root_symbol).where(
+                        FuturesRootSymbolModel.root_symbol.in_([r.root_symbol for r in futures_roots]))
+                )).scalars()
+            }
+        new_roots = [r for r in futures_roots if r.root_symbol not in existing]
+        if new_roots:
+            asset_ids = await self._asset_ids_by_identity()
+            async with self.session_maker() as session:
+                session.add_all([
+                    FuturesRootSymbolModel(
+                        root_symbol=r.root_symbol,
+                        description=r.description,
+                        mic=r.mic,
+                        root_asset_id=asset_ids[
+                            (type(r.root_asset), r.root_asset.isin, r.root_asset.asset_name)],
+                        multiplier=r.multiplier,
+                        tick_size=r.tick_size,
+                        quote_currency=r.quote_currency,
+                        settlement_type=r.settlement_type.value,
+                        margin_currency=r.margin_currency,
+                    ) for r in new_roots
+                ])
+                await session.commit()
+        return futures_roots
+
+    async def save_futures_contracts(self, futures_contracts: list[FuturesContract]) -> list[FuturesContract]:
+        """Persist futures contracts, skipping ones already stored under the same name and root.
+
+        Every contract gets a row in ``asset_router`` (``asset_type='FUTURES_CONTRACT'``) whose
+        autoincrement id becomes the contract's asset id, and a row in ``futures_contracts``.
+        The tradeable listing (``exchange_assets``, which owns the ``sid`` that bundles key bars by)
+        is written separately by :meth:`save_exchange_assets`.
+        """
+        if not futures_contracts:
+            return []
+        async with self.session_maker() as session:
+            existing = {
+                (root_symbol, asset_name)
+                for root_symbol, asset_name in (await session.execute(
+                    select(FuturesContractModel.root_symbol, FuturesContractModel.asset_name).where(
+                        FuturesContractModel.asset_name.in_([c.asset_name for c in futures_contracts]))
+                )).all()
+            }
+        new_contracts = [c for c in futures_contracts
+                         if (c.root_symbol, c.asset_name) not in existing]
+        if not new_contracts:
+            return futures_contracts
+
+        asset_ids = await self._asset_ids_by_identity()
+        asset_routers = [AssetRouter(id=c.id, asset_type=AssetType.FUTURES_CONTRACT.value)
+                         for c in new_contracts]
+        async with self.session_maker() as session:
+            session.add_all(asset_routers)
+            await session.commit()
+
+        models = [
+            FuturesContractModel(
+                id=asset_routers[i].id,
+                root_asset_id=asset_ids[
+                    (type(c.root_asset), c.root_asset.isin, c.root_asset.asset_name)],
+                root_symbol=c.root_symbol,
+                root_exchange_asset_sid=(c.root_exchange_asset.sid
+                                         if c.root_exchange_asset is not None else None),
+                notice_date=c.notice_date,
+                expiration_date=c.expiration_date,
+                multiplier=c.multiplier,
+                tick_size=c.tick_size,
+                settlement_type=c.settlement_type.value,
+                margin_currency=c.margin_currency,
+                start_date=c.start_date,
+                first_traded=c.first_traded,
+                end_date=c.end_date,
+                asset_name=c.asset_name,
+                auto_close_date=c.auto_close_date,
+                isin=c.isin,
             )
-            for exchange_asset in exchange_asset_currencies
+            for i, c in enumerate(new_contracts)
         ]
-        await self.add_all_and_commit(exchange_assets_equities_db)
-        await self.add_all_and_commit(exchange_assets_currencies_db)
+        async with self.session_maker() as session:
+            session.add_all(models)
+            await session.commit()
+        self._invalidate_asset_cache()
+
+        saved_by_name = {
+            m.asset_name: self._futures_contract_model_to_futures_contract(
+                futures_contract_model=m, root_asset=new_contracts[i].root_asset)
+            for i, m in enumerate(models)
+        }
+        return [saved_by_name.get(c.asset_name, c) for c in futures_contracts]
+
+    async def save_option_contracts(self, option_contracts: list[OptionContract]) -> list[OptionContract]:
+        """Persist option contracts, skipping ones already stored under the same name.
+
+        Contracts are identified by ``asset_name``, which for an option is its OCC symbol -- root,
+        expiry, side and strike, so it already names the contract uniquely. That matters more here
+        than for any other asset class: 0DTE lists a fresh chain every session, a run over a month
+        writes several hundred contracts, and re-running it must not write them twice.
+        """
+        if not option_contracts:
+            return []
+        names = [c.asset_name for c in option_contracts]
+        async with self.session_maker() as session:
+            existing_models = list((await session.execute(
+                select(OptionContractModel).where(OptionContractModel.asset_name.in_(names))
+            )).scalars())
+        stored_by_name = {m.asset_name: m for m in existing_models}
+        # A stored contract of the same name must be the *same contract*. Deduplicating on the
+        # name alone is safe only while names encode what they identify -- an OCC symbol carries
+        # the expiry and the strike, so two different contracts cannot share one. A MOEX monthly
+        # code does too; a MOEX *weekly* code does not, and generating one would file three series
+        # under one name and silently trade whichever was stored first, on the wrong expiry.
+        for contract in option_contracts:
+            stored = stored_by_name.get(contract.asset_name)
+            if stored is None:
+                continue
+            if (stored.expiration_date != contract.expiration_date
+                    or float(stored.strike) != float(contract.strike)
+                    or stored.option_type != contract.option_type.value):
+                raise ValueError(
+                    f"{contract.asset_name} is already stored as a "
+                    f"{stored.option_type.lower()} at {stored.strike} expiring "
+                    f"{stored.expiration_date}, but is being written as a "
+                    f"{contract.option_type.value.lower()} at {contract.strike} expiring "
+                    f"{contract.expiration_date}. Two different contracts cannot share a name: "
+                    f"the second would be dropped and the strategy would trade the first without "
+                    f"noticing. Check the venue's symbol scheme -- MOEX weekly codes need a week "
+                    f"suffix to be unique.")
+        new_contracts = [c for c in option_contracts if c.asset_name not in stored_by_name]
+
+        models = []
+        if new_contracts:
+            asset_ids = await self._asset_ids_by_identity()
+            asset_routers = [AssetRouter(id=c.id, asset_type=AssetType.OPTIONS_CONTRACT.value)
+                             for c in new_contracts]
+            async with self.session_maker() as session:
+                session.add_all(asset_routers)
+                await session.commit()
+
+            models = [
+                OptionContractModel(
+                    id=asset_routers[i].id,
+                    underlying_asset_id=(
+                        asset_ids.get((type(c.underlying_asset), c.underlying_asset.isin,
+                                       c.underlying_asset.asset_name))
+                        if c.underlying_asset is not None else None),
+                    underlying_exchange_asset_sid=(c.underlying_exchange_asset.sid
+                                                   if c.underlying_exchange_asset is not None
+                                                   else None),
+                    underlying_symbol=c.underlying_symbol,
+                    option_type=c.option_type.value,
+                    strike=c.strike,
+                    expiration_date=c.expiration_date,
+                    multiplier=c.multiplier,
+                    tick_size=c.tick_size,
+                    exercise_style=c.exercise_style.value,
+                    settlement_type=c.settlement_type.value,
+                    premium_style=c.premium_style.value,
+                    start_date=c.start_date,
+                    first_traded=c.first_traded,
+                    end_date=c.end_date,
+                    asset_name=c.asset_name,
+                    auto_close_date=c.auto_close_date,
+                    isin=c.isin,
+                )
+                for i, c in enumerate(new_contracts)
+            ]
+            async with self.session_maker() as session:
+                session.add_all(models)
+                await session.commit()
+            self._invalidate_asset_cache()
+
+        underlyings = {c.asset_name: c.underlying_asset for c in option_contracts}
+        saved_by_name = {
+            m.asset_name: self._option_contract_model_to_option_contract(
+                option_contract_model=m, underlying_asset=underlyings.get(m.asset_name))
+            for m in list(models) + existing_models
+        }
+        return [saved_by_name.get(c.asset_name, c) for c in option_contracts]
+
+    async def get_exchange_option_contracts(self, underlying_symbol: str,
+                                            expiration_date: datetime.date | None = None,
+                                            mic: str | None = None) -> list[ExchangeAsset]:
+        """Return the listed option contracts on an underlying, ordered by expiry, strike and side.
+
+        With ``expiration_date`` this is the chain lookup a 0DTE strategy makes once a session:
+        *every contract expiring today on this underlying*. Without it, every expiry on the books.
+        """
+        async with self.session_maker() as session:
+            q = select(OptionContractModel.id).where(
+                OptionContractModel.underlying_symbol == underlying_symbol)
+            if expiration_date is not None:
+                q = q.where(OptionContractModel.expiration_date == expiration_date)
+            contract_ids = list((await session.execute(q)).scalars())
+            if not contract_ids:
+                return []
+            q = select(ExchangeAssetModel).where(ExchangeAssetModel.asset_id.in_(contract_ids))
+            if mic is not None:
+                q = q.where(ExchangeAssetModel.mic == mic)
+            listings = list((await session.execute(q)).scalars())
+
+        all_assets = await self.get_all_assets()
+        exchange_assets = [
+            ExchangeAsset(
+                sid=listing.sid,
+                start_date=listing.start_date,
+                first_traded=listing.first_traded,
+                end_date=listing.end_date,
+                auto_close_date=listing.auto_close_date,
+                symbol=listing.symbol,
+                exchange=await self.get_exchange_by_mic(mic=listing.mic),
+                asset=all_assets[listing.asset_id],
+                quote=all_assets[listing.quote_id],
+                external_id=listing.external_id,
+            )
+            for listing in listings
+        ]
+        return sorted(exchange_assets,
+                      key=lambda ea: (ea.asset.expiration_date, ea.asset.strike,
+                                      ea.asset.option_type.value))
+
+    async def get_exchange_option_contracts_by_symbols(self,
+                                                       symbols: list[AssetSymbol]) -> list[ExchangeAsset]:
+        """Look up option listings by ``(symbol, mic)``; a ``None`` mic matches any exchange."""
+        return await self._get_exchange_assets_by_symbols(symbols=symbols, asset_type=OptionContract)
+
+    async def get_exchange_option_contract_by_symbol(self, symbol: AssetSymbol) -> ExchangeAsset | None:
+        contracts = await self.get_exchange_option_contracts_by_symbols(symbols=[symbol])
+        return contracts[0] if contracts else None
+
+    async def get_futures_roots(self) -> dict[str, FuturesRoot]:
+        """Return every stored futures chain, keyed by root symbol."""
+        all_assets = await self.get_all_assets()
+        async with self.session_maker() as session:
+            models = list((await session.execute(select(FuturesRootSymbolModel))).scalars())
+        return {
+            model.root_symbol: FuturesRoot(
+                root_symbol=model.root_symbol,
+                description=model.description,
+                exchange=await self.get_exchange_by_mic(mic=model.mic),
+                root_asset=all_assets.get(model.root_asset_id),
+                multiplier=model.multiplier,
+                tick_size=model.tick_size,
+                quote_currency=model.quote_currency,
+                settlement_type=SettlementType(model.settlement_type),
+                margin_currency=model.margin_currency,
+            )
+            for model in models
+        }
+
+    async def get_exchange_futures_contracts_by_symbols(self, symbols: list[AssetSymbol]) -> list[ExchangeAsset]:
+        """Look up futures listings by ``(symbol, mic)``; a ``None`` mic matches any exchange."""
+        return await self._get_exchange_assets_by_symbols(symbols=symbols,
+                                                          asset_type=FuturesContract)
+
+    async def get_exchange_futures_contract_by_symbol(self, symbol: AssetSymbol) -> ExchangeAsset | None:
+        contracts = await self.get_exchange_futures_contracts_by_symbols(symbols=[symbol])
+        return contracts[0] if contracts else None
+
+    async def get_exchange_futures_contracts_by_root(self, root_symbol: str,
+                                                     mic: str | None = None) -> list[ExchangeAsset]:
+        """Return every listed contract of a chain, ordered by expiration.
+
+        This is the input to :class:`~ziplime.assets.domain.ordered_contracts.OrderedContracts`
+        and therefore to every continuous-future roll.
+        """
+        async with self.session_maker() as session:
+            q = select(FuturesContractModel.id).where(FuturesContractModel.root_symbol == root_symbol)
+            contract_ids = list((await session.execute(q)).scalars())
+            if not contract_ids:
+                return []
+            q = select(ExchangeAssetModel).where(ExchangeAssetModel.asset_id.in_(contract_ids))
+            if mic is not None:
+                q = q.where(ExchangeAssetModel.mic == mic)
+            listings = list((await session.execute(q)).scalars())
+
+        all_assets = await self.get_all_assets()
+        exchange_assets = [
+            ExchangeAsset(
+                sid=listing.sid,
+                start_date=listing.start_date,
+                first_traded=listing.first_traded,
+                end_date=listing.end_date,
+                auto_close_date=listing.auto_close_date,
+                symbol=listing.symbol,
+                exchange=await self.get_exchange_by_mic(mic=listing.mic),
+                asset=all_assets[listing.asset_id],
+                quote=all_assets[listing.quote_id],
+                external_id=listing.external_id,
+            )
+            for listing in listings
+        ]
+        return sorted(exchange_assets, key=lambda ea: (ea.asset.expiration_date, ea.sid))
+
+    async def _get_exchange_assets_by_symbols(self, symbols: list[AssetSymbol],
+                                              asset_type: type) -> list[ExchangeAsset]:
+        """Resolve ``(symbol, mic)`` pairs to listings whose underlying is of ``asset_type``."""
+        filter_mic = tuple_(ExchangeAssetModel.symbol, ExchangeAssetModel.mic).in_(
+            [(s.symbol, s.mic) for s in symbols if s.mic is not None]
+        )
+        filter_non_mic = ExchangeAssetModel.symbol.in_([s.symbol for s in symbols if s.mic is None])
+        async with self.session_maker() as session:
+            q = (
+                select(ExchangeAssetModel)
+                .where(filter_mic | filter_non_mic)
+                .options(selectinload(ExchangeAssetModel.asset_router))
+            ).distinct(ExchangeAssetModel.mic, ExchangeAssetModel.symbol).order_by(
+                ExchangeAssetModel.mic, ExchangeAssetModel.symbol, "sid")
+            listings: list[ExchangeAssetModel] = list((await session.execute(q)).scalars())
+
+        all_assets = await self.get_all_assets()
+        return [
+            ExchangeAsset(
+                sid=listing.sid,
+                start_date=listing.start_date,
+                first_traded=listing.first_traded,
+                end_date=listing.end_date,
+                auto_close_date=listing.auto_close_date,
+                symbol=listing.symbol,
+                exchange=await self.get_exchange_by_mic(mic=listing.mic),
+                asset=all_assets[listing.asset_id],
+                quote=all_assets[listing.quote_id],
+                external_id=listing.external_id,
+            )
+            for listing in listings
+            if isinstance(all_assets.get(listing.asset_id), asset_type)
+        ]
+
+    async def save_dividends(self, dividends: list[DividendPayout]) -> list[DividendPayout]:
+        dividends_db = [DividendPayoutModel(
+            asset_id=d.asset.id,
+            ex_date=d.ex_date,
+            declared_date=d.declared_date,
+            record_date=d.record_date,
+            pay_date=d.pay_date,
+            amount=d.amount
+        ) for d in dividends]
+
+        await self.add_all_and_commit(dividends_db)
+
+    async def save_splits(self, splits: list[Split]) -> list[Split]:
+        splits_db = [SplitModel(
+            asset_id=s.asset.id,
+            effective_date=s.effective_date,
+            ratio=s.ratio
+        ) for s in splits]
+
+        await self.add_all_and_commit(splits_db)
 
     # async def save_equity_symbol_mappings(self, equity_symbol_mappings: list[EquitySymbolMappingModel]) -> None:
     #     await self.add_all_and_commit(equity_symbol_mappings)
 
-    # @cached(cache=Cache.MEMORY)
+    @cached(cache=Cache.MEMORY)
     async def get_all_assets(self) -> dict[int, Asset]:
         if self._cached_assets:
             return self._cached_assets
@@ -372,34 +1107,58 @@ class SqlAlchemyAssetRepository(AssetRepository):
 
             q_commodities = select(CommodityModel).options(selectinload(CommodityModel.asset_router))
             commodities = list((await session.execute(q_commodities)).scalars().all())
+
+            q_bonds = select(BondModel).options(selectinload(BondModel.asset_router))
+            bonds = list((await session.execute(q_bonds)).scalars().all())
+
+            q_options = select(OptionContractModel).options(
+                selectinload(OptionContractModel.asset_router))
+            option_contracts = list((await session.execute(q_options)).scalars().all())
+
+            # The listings the options are written on. One row per underlying, not per contract --
+            # a whole year of 0DTE chains on SPY points at the same single listing. Fetched here
+            # because settling an option at expiry and computing any of its Greeks both need the
+            # underlying's *price*, and only its listing says where to read that.
+            underlying_sids = {c.underlying_exchange_asset_sid for c in option_contracts
+                               if c.underlying_exchange_asset_sid is not None}
+            underlying_listings = list((await session.execute(
+                select(ExchangeAssetModel).where(ExchangeAssetModel.sid.in_(underlying_sids))
+            )).scalars()) if underlying_sids else []
         res = {}
         for asset in equities:
-            res[asset.id] = Equity(
-                id=asset.id,
-                asset_name=asset.asset_name,
-                start_date=asset.start_date,
-                first_traded=asset.first_traded,
-                end_date=asset.end_date,
-                auto_close_date=asset.auto_close_date,
-                isin=asset.isin
-            )
-        for asset in futures_contracts:
-            # Map to your pure FuturesContract domain entity...
-            pass
+            res[asset.id] = self._equity_model_to_equity(equity_model=asset)
         for asset in currencies:
-            # Map to your pure Currency domain entity...
-            res[asset.id] = Currency(
-                id=asset.id,
-                asset_name=asset.asset_name,
-                start_date=asset.start_date,
-                first_traded=asset.first_traded,
-                end_date=asset.end_date,
-                auto_close_date=asset.auto_close_date,
-                isin=asset.isin
-            )
+            res[asset.id] = self._currency_model_to_currency(currency_model=asset)
         for asset in commodities:
-            # Map to your pure Commodity domain entity...
-            pass
+            res[asset.id] = self._commodity_model_to_commodity(commodity_model=asset)
+        for asset in bonds:
+            res[asset.id] = self._bond_model_to_bond(bond_model=asset)
+        # Mapped last: a contract points at its underlying, which is one of the assets above.
+        for asset in futures_contracts:
+            res[asset.id] = self._futures_contract_model_to_futures_contract(
+                futures_contract_model=asset, root_asset=res.get(asset.root_asset_id)
+            )
+        listings_by_sid = {
+            listing.sid: ExchangeAsset(
+                sid=listing.sid,
+                start_date=listing.start_date,
+                first_traded=listing.first_traded,
+                end_date=listing.end_date,
+                auto_close_date=listing.auto_close_date,
+                symbol=listing.symbol,
+                exchange=await self.get_exchange_by_mic(mic=listing.mic),
+                asset=res.get(listing.asset_id),
+                quote=res.get(listing.quote_id),
+                external_id=listing.external_id,
+            )
+            for listing in underlying_listings
+        }
+        for asset in option_contracts:
+            res[asset.id] = self._option_contract_model_to_option_contract(
+                option_contract_model=asset,
+                underlying_asset=res.get(asset.underlying_asset_id),
+                underlying_exchange_asset=listings_by_sid.get(asset.underlying_exchange_asset_sid),
+            )
         self._cached_assets = res
         return res
 
@@ -439,10 +1198,36 @@ class SqlAlchemyAssetRepository(AssetRepository):
         match asset_type:
             case AssetType.EQUITY:
                 return await self.get_exchange_equity_by_symbol(symbol=symbol)
+            case AssetType.BOND:
+                return await self.get_exchange_bond_by_symbol(symbol=symbol)
             case AssetType.FUTURES_CONTRACT:
                 return await self.get_exchange_futures_contract_by_symbol(symbol=symbol)
+            case AssetType.OPTIONS_CONTRACT:
+                return await self.get_exchange_option_contract_by_symbol(symbol=symbol)
             case AssetType.CURRENCY:
                 return await self.get_exchange_currency_by_symbol(symbol=symbol)
+            case _:
+                raise ValueError(f"Invalid asset type: {asset_type}")
+
+    async def get_exchange_assets_by_symbols_of_type(self, symbols: list[AssetSymbol],
+                                                     asset_type: AssetType) -> list[ExchangeAsset]:
+        """Batch form of :meth:`get_exchange_asset_by_symbol`: one query for all the symbols.
+
+        Each of the per-type methods below already resolves a whole list in a single statement.
+        This exposes that to callers who know the type only at runtime, so resolving ten thousand
+        tickers is one round trip rather than ten thousand.
+        """
+        match asset_type:
+            case AssetType.EQUITY:
+                return await self.get_exchange_equities_by_symbols(symbols=symbols)
+            case AssetType.BOND:
+                return await self.get_exchange_bonds_by_symbols(symbols=symbols)
+            case AssetType.FUTURES_CONTRACT:
+                return await self.get_exchange_futures_contracts_by_symbols(symbols=symbols)
+            case AssetType.OPTIONS_CONTRACT:
+                return await self.get_exchange_option_contracts_by_symbols(symbols=symbols)
+            case AssetType.CURRENCY:
+                return await self.get_exchange_currencies_by_symbols(symbols=symbols)
             case _:
                 raise ValueError(f"Invalid asset type: {asset_type}")
 
@@ -469,163 +1254,125 @@ class SqlAlchemyAssetRepository(AssetRepository):
             universe_type=universe.universe_type
         )
 
+    async def get_universe_symbols(self, name: str, dt: datetime.date,
+                                   mic: str | None = None) -> list[ExchangeAsset]:
+        """The universe's members on ``dt`` as **listings**, ordered by symbol.
+
+        :meth:`get_symbols_universe` answers with memberships, and what a
+        membership holds is the *issuer*: the asset DB stores it under the
+        company's name -- "Applied Materials, Inc." where a strategy would
+        write AMAT -- with no symbol, no venue and no sid. So a strategy could
+        read the composition and had nothing it could price or order.
+
+        This resolves the same members to the listings they trade as, which is
+        what ``data.current``, ``data.history`` and ``order`` all take. A
+        company listed on two venues contributes both, so pass ``mic`` to pin
+        the market -- the US universes carry the Moscow listings of American
+        companies as well as the American ones.
+        """
+        universe = await self.get_symbols_universe(name=name, dt=dt)
+        if universe is None:
+            return []
+        # A universe may declare the market it is an index of, as `index:MISX`. An index belongs
+        # to an exchange, and its members are issuers: without the venue, Moscow's IMOEX hands
+        # back the American listings of the companies whose tickers collide with its own.
+        mic = mic or universe_venue(universe)
+        asset_ids = [member.asset.id for member in universe.assets
+                     if getattr(member.asset, "id", None) is not None]
+        if not asset_ids:
+            return []
+
+        all_assets = await self.get_all_assets()
+        async with self.session_maker() as session:
+            q = select(ExchangeAssetModel).where(ExchangeAssetModel.asset_id.in_(asset_ids))
+            if mic is not None:
+                q = q.where(ExchangeAssetModel.mic == mic)
+            listings = list((await session.execute(q)).scalars())
+
+        result = [
+            ExchangeAsset(
+                sid=listing.sid, start_date=listing.start_date, first_traded=listing.first_traded,
+                end_date=listing.end_date, auto_close_date=listing.auto_close_date,
+                symbol=listing.symbol, exchange=await self.get_exchange_by_mic(mic=listing.mic),
+                asset=all_assets[listing.asset_id], quote=all_assets[listing.quote_id],
+                external_id=listing.external_id)
+            for listing in listings
+            if listing.asset_id in all_assets and listing.quote_id in all_assets
+        ]
+        return sorted(result, key=lambda listing: (listing.symbol or "", listing.mic))
+
     @aiocache.cached(cache=Cache.MEMORY)
-    async def get_currency_by_symbol(self, symbol: str, exchange_name: str) -> Currency | None:
-        currencies = await self.get_currencies_by_symbols(symbols=[symbol], exchange_name=exchange_name)
+    async def get_currencies_by_symbols(self, symbols: list[str]) -> list[Currency]:
+        async with self.session_maker() as session:
+            q_currencies = select(CurrencyModel).where(
+                CurrencyModel.asset_name.in_(symbols)).options(
+                selectinload(CurrencyModel.asset_router))
+            assets: list[CurrencyModel] = list((await session.execute(q_currencies)).scalars())
+
+            return [Currency(
+                id=asset.id,
+                asset_name=asset.asset_name,
+                start_date=asset.start_date,
+                first_traded=asset.first_traded,
+                end_date=asset.end_date,
+                auto_close_date=asset.auto_close_date,
+                isin=asset.isin
+            ) for asset in assets]
+
+    @aiocache.cached(cache=Cache.MEMORY)
+    async def get_currency_by_symbol(self, symbol: str) -> Currency | None:
+        currencies = await self.get_currencies_by_symbols(symbols=[symbol])
         if currencies:
             return currencies[0]
         return None
 
-    @aiocache.cached(cache=Cache.MEMORY)
-    async def get_currencies_by_symbols(self, symbols: list[str], exchange_name: str) -> list[Currency]:
-        async with self.session_maker() as session:
-            q_currency_symbol_mapping = select(CurrencySymbolMappingModel).where(
-                CurrencySymbolMappingModel.exchange == exchange_name,
-                CurrencySymbolMappingModel.symbol.in_(symbols))
-
-            currency_mappings = (await session.execute(q_currency_symbol_mapping)).scalars()
-
-            q_currencies = select(CurrencyModel).where(
-                CurrencyModel.sid.in_([currency_mapping.sid for currency_mapping in currency_mappings])).options(
-                selectinload(CurrencyModel.asset_router)).options(selectinload(CurrencyModel.currency_symbol_mappings))
-            assets: list[CurrencyModel] = list((await session.execute(q_currencies)).scalars())
-
-            return [Currency(
-                sid=asset.sid,
-                asset_name=asset.asset_name,
-                start_date=asset.start_date,
-                first_traded=asset.first_traded,
-                end_date=asset.end_date,
-                auto_close_date=asset.auto_close_date,
-                symbol_mapping={
-                    currency_mapping.exchange: CurrencySymbolMapping(
-                        symbol=currency_mapping.symbol,
-                        exchange_name=currency_mapping.exchange,
-                        end_date=currency_mapping.end_date,
-                        start_date=currency_mapping.start_date
-                    )
-                    for currency_mapping in asset.currency_symbol_mappings
-                },
-                mic=asset.mic,
-                isin=asset.isin
-            ) for asset in assets]
-
     async def get_commodity_by_symbol(self, symbol: str) -> Commodity | None:
         raise NotImplementedError("Not implemented")
 
-    async def get_futures_contract_by_symbol(self, symbol: str, exchange_name: str) -> FuturesContract | None:
-        raise NotImplementedError("Not implemented")
+    async def get_futures_contract_by_symbol(self, symbol: str, mic: str | None = None) -> FuturesContract | None:
+        exchange_asset = await self.get_exchange_futures_contract_by_symbol(
+            symbol=AssetSymbol(symbol=symbol, mic=mic))
+        return exchange_asset.asset if exchange_asset is not None else None
 
     async def get_equities_by_symbols_and_exchange(self, symbols: list[str], exchange_name: str) -> list[Equity]:
         async with self.session_maker() as session:
-            q_equity_symbol_mapping = select(EquitySymbolMappingModel).where(
-                EquitySymbolMappingModel.exchange == exchange_name,
-                EquitySymbolMappingModel.symbol.in_(symbols))
-
-            equity_mappings = (await session.execute(q_equity_symbol_mapping)).scalars()
-
-            q_equities = select(EquityModel).where(
-                EquityModel.sid.in_([equity_mapping.sid for equity_mapping in equity_mappings])).options(
-                selectinload(EquityModel.asset_router)).options(selectinload(EquityModel.equity_symbol_mappings))
-            assets: list[EquityModel] = list((await session.execute(q_equities)).scalars())
-
-            return [Equity(
-                sid=asset.sid,
-                asset_name=asset.asset_name,
-                start_date=asset.start_date,
-                first_traded=asset.first_traded,
-                end_date=asset.end_date,
-                auto_close_date=asset.auto_close_date,
-                symbol_mapping={
-                    equity_mapping.exchange: EquitySymbolMapping(
-                        company_symbol=equity_mapping.company_symbol,
-                        symbol=equity_mapping.symbol,
-                        exchange_name=equity_mapping.exchange,
-                        share_class_symbol=equity_mapping.share_class_symbol,
-                        end_date=equity_mapping.end_date,
-                        start_date=equity_mapping.start_date
-                    )
-                    for equity_mapping in asset.equity_symbol_mappings
-                },
-                mic=asset.mic,
-                isin=asset.isin
-            ) for asset in assets]
+            q = select(ExchangeAssetModel).where(
+                ExchangeAssetModel.mic == exchange_name,
+                ExchangeAssetModel.symbol.in_(symbols),
+            )
+            listings = list((await session.execute(q)).scalars())
+        all_assets = await self.get_all_assets()
+        return [
+            asset for listing in listings
+            if isinstance((asset := all_assets.get(listing.asset_id)), Equity)
+        ]
 
     async def get_equities_by_symbols(self, symbols: list[AssetSymbol]) -> list[Equity]:
+        names = [symbol.symbol if isinstance(symbol, AssetSymbol) else symbol for symbol in symbols]
         async with self.session_maker() as session:
-            q_equity_symbol_mapping = select(EquitySymbolMappingModel).where(
-                EquitySymbolMappingModel.symbol.in_(symbols))
-
-            equity_mappings = (await session.execute(q_equity_symbol_mapping)).scalars()
-
             q_equities = select(EquityModel).where(
-                EquityModel.sid.in_([equity_mapping.sid for equity_mapping in equity_mappings])).options(
-                selectinload(EquityModel.asset_router)).options(selectinload(EquityModel.equity_symbol_mappings))
+                EquityModel.asset_name.in_(names)).options(selectinload(EquityModel.asset_router))
             assets: list[EquityModel] = list((await session.execute(q_equities)).scalars())
 
-            return [Equity(
-                sid=asset.sid,
-                asset_name=asset.asset_name,
-                start_date=asset.start_date,
-                first_traded=asset.first_traded,
-                end_date=asset.end_date,
-                auto_close_date=asset.auto_close_date,
-                symbol_mapping={
-                    equity_mapping.exchange: EquitySymbolMapping(
-                        company_symbol=equity_mapping.company_symbol,
-                        symbol=equity_mapping.symbol,
-                        exchange_name=equity_mapping.exchange,
-                        share_class_symbol=equity_mapping.share_class_symbol,
-                        end_date=equity_mapping.end_date,
-                        start_date=equity_mapping.start_date
-                    )
-                    for equity_mapping in asset.equity_symbol_mappings
-                },
-                mic=asset.mic,
-                isin=asset.isin
-            ) for asset in assets]
+        return [self._equity_model_to_equity(equity_model=asset) for asset in assets]
+
+    async def get_exchange_currencies_by_symbols(self, symbols: list[AssetSymbol]) -> list[ExchangeAsset]:
+        """Look up currency listings by ``(symbol, mic)``; a ``None`` mic matches any exchange.
+
+        Filtering by asset type matters: the same ticker on the same exchange can belong to more
+        than one asset (an equity vendor may list a futures ticker as an equity), and this used to
+        raise ``KeyError`` when it met the listing of another type.
+        """
+        return await self._get_exchange_assets_by_symbols(symbols=symbols, asset_type=Currency)
 
     async def get_exchange_equities_by_symbols(self, symbols: list[AssetSymbol]) -> list[ExchangeAsset]:
+        """Look up equity listings by ``(symbol, mic)``; a ``None`` mic matches any exchange.
 
-        filter_mic = tuple_(ExchangeAssetModel.symbol, ExchangeAssetModel.mic).in_(
-            [(s.symbol, s.mic) for s in symbols if s.mic is not None]
-        )
-        filter_non_mic = ExchangeAssetModel.symbol.in_([s.symbol for s in symbols if s.mic is None])
-        async with self.session_maker() as session:
-            q = (
-                select(ExchangeAssetModel)
-                .where(
-                    filter_mic | filter_non_mic
-                )
-                .options(selectinload(ExchangeAssetModel.asset_router))
-            ).distinct(ExchangeAssetModel.mic, ExchangeAssetModel.symbol).order_by(
-                ExchangeAssetModel.mic, ExchangeAssetModel.symbol, "sid")
-            results: list[ExchangeAssetModel] = list((await session.execute(q)).scalars())
-
-            q_equities = select(EquityModel).where(
-                EquityModel.id.in_([equity_exchange.asset_id for equity_exchange in results])).options(
-                selectinload(EquityModel.asset_router))
-            assets: list[EquityModel] = list((await session.execute(q_equities)).scalars())
-            assets_by_id = {asset.id: asset for asset in assets}
-        return [ExchangeAsset(
-            sid=asset.sid,
-            start_date=asset.start_date,
-            first_traded=asset.first_traded,
-            end_date=asset.end_date,
-            auto_close_date=asset.auto_close_date,
-            symbol=asset.symbol,
-            exchange=await self.get_exchange_by_mic(mic=asset.mic),
-            asset=Equity(
-                first_traded=assets_by_id[asset.asset_id].first_traded,
-                auto_close_date=assets_by_id[asset.asset_id].auto_close_date,
-                end_date=assets_by_id[asset.asset_id].end_date,
-                start_date=assets_by_id[asset.asset_id].start_date,
-                isin=assets_by_id[asset.asset_id].isin,
-                asset_name=assets_by_id[asset.asset_id].asset_name,
-                id=assets_by_id[asset.asset_id].id,
-            ),
-            external_id=asset.external_id,
-        ) for asset in results]
+        Filtering by asset type matters: the same ticker on the same exchange can belong to more
+        than one asset (an equity vendor may list a futures ticker as an equity), and this used to
+        raise ``KeyError`` when it met the listing of another type.
+        """
+        return await self._get_exchange_assets_by_symbols(symbols=symbols, asset_type=Equity)
 
     async def get_equities_by_isins(self, isins: list[str]) -> list[Equity]:
         async with self.session_maker() as session:
@@ -663,106 +1410,273 @@ class SqlAlchemyAssetRepository(AssetRepository):
             return equities[0]
         return None
 
+    async def get_exchange_currency_by_symbol(self, symbol: AssetSymbol) -> ExchangeAsset | None:
+        currencies = await self.get_exchange_currencies_by_symbols(symbols=[symbol])
+        if currencies:
+            return currencies[0]
+        return None
+
+    async def get_cash_dividends_with_ex_date(self, assets: list[Asset], date: datetime.date) -> list[DividendPayout]:
+        asset_ids = {asset.id for asset in assets}
+        if self._has_cached_corporate_actions(asset_ids=asset_ids, date=date):
+            return [
+                dividend
+                for asset_id in asset_ids
+                for dividend in self._cached_dividends_by_asset_date.get((asset_id, date), [])
+            ]
+
+        async with self.session_maker() as session:
+            all_assets = await self.get_all_assets()
+            q_dividends = select(
+                DividendPayoutModel
+            ).where(
+                DividendPayoutModel.asset_id.in_([asset.id for asset in assets]),
+                DividendPayoutModel.ex_date == date
+            )
+            dividends_r: list[DividendPayoutModel] = list((await session.execute(q_dividends)).scalars())
+
+        return [
+            DividendPayout(
+                asset=all_assets[d.asset_id],
+                amount=d.amount,
+                pay_date=d.pay_date,
+                declared_date=d.declared_date,
+                record_date=d.record_date,
+                ex_date=d.ex_date,
+                currency=None
+                # currency
+            )
+            for d in dividends_r]
+
+    async def get_splits(self, assets: list[Asset], date: datetime.date) -> list[Split]:
+        asset_ids = {asset.id for asset in assets}
+        if self._has_cached_corporate_actions(asset_ids=asset_ids, date=date):
+            return [
+                split
+                for asset_id in asset_ids
+                for split in self._cached_splits_by_asset_date.get((asset_id, date), [])
+            ]
+
+        async with self.session_maker() as session:
+            all_assets = await self.get_all_assets()
+            q_splits = select(
+                SplitModel
+            ).where(
+                SplitModel.asset_id.in_([asset.id for asset in assets]),
+                SplitModel.effective_date == date
+            )
+            splits_r: list[SplitModel] = list((await session.execute(q_splits)).scalars())
+
+        return [
+            Split(
+                asset=all_assets[s.asset_id],
+                effective_date=s.effective_date,
+                ratio=s.ratio,
+                id=s.id
+            )
+            for s in splits_r]
+
+    @cached(cache=Cache.MEMORY)
+    async def _load_corporate_actions_for_range(
+            self,
+            asset_ids: frozenset[int],
+            date_from: datetime.date,
+            date_to: datetime.date,
+    ) -> tuple[list[DividendPayout], list[Split]]:
+        assets = await self.get_assets_by_ids(ids=list(asset_ids))
+        return await asyncio.gather(
+            self.get_dividends_by_assets_and_ex_date_between(
+                assets=assets,
+                ex_date_from=date_from,
+                ex_date_to=date_to,
+            ),
+            self.get_splits_by_assets_and_effective_date_between(
+                assets=assets,
+                effective_date_from=date_from,
+                effective_date_to=date_to,
+            ),
+        )
+
+    async def preload_corporate_actions(self, assets: list[Asset],
+                                        date_from: datetime.date,
+                                        date_to: datetime.date) -> None:
+        if date_from > date_to or not assets:
+            return
+
+        asset_ids = frozenset(asset.id for asset in assets)
+        cache_key = (asset_ids, date_from, date_to)
+        if cache_key in self._loaded_corporate_action_ranges:
+            return
+
+        dividends, splits = await self._load_corporate_actions_for_range(
+            asset_ids=asset_ids,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+        dividends_by_key: dict[tuple[int, datetime.date], list[DividendPayout]] = {}
+        for dividend in dividends:
+            dividends_by_key.setdefault((dividend.asset.id, dividend.ex_date), []).append(dividend)
+        self._cached_dividends_by_asset_date.update(dividends_by_key)
+
+        splits_by_key: dict[tuple[int, datetime.date], list[Split]] = {}
+        for split in splits:
+            splits_by_key.setdefault((split.asset.id, split.effective_date), []).append(split)
+        self._cached_splits_by_asset_date.update(splits_by_key)
+
+        self._cached_corporate_action_ranges.append((asset_ids, date_from, date_to))
+        self._loaded_corporate_action_ranges.add(cache_key)
+
+    def _has_cached_corporate_actions(self, asset_ids: set[int], date: datetime.date) -> bool:
+        return any(
+            asset_ids.issubset(cached_asset_ids)
+            and date_from <= date <= date_to
+            for cached_asset_ids, date_from, date_to in self._cached_corporate_action_ranges
+        )
+
+    async def get_exchange_assets_by_sids(self, sids: list[int]) -> list[ExchangeAsset]:
+        results: list[ExchangeAssetModel] = []
+        for chunk in group_into_chunks(sids):
+            async with self.session_maker() as session:
+                q = select(
+                    ExchangeAssetModel
+                ).where(
+                    ExchangeAssetModel.sid.in_(chunk)
+                )
+                results.extend((await session.execute(q)).scalars())
+
+        all_assets = await self.get_all_assets()
+        return [
+            ExchangeAsset(
+                sid=result.sid,
+                symbol=result.symbol,
+                exchange=await self.get_exchange_by_mic(mic=result.mic),
+                start_date=result.start_date,
+                end_date=result.end_date,
+                first_traded=result.first_traded,
+                auto_close_date=result.auto_close_date,
+                external_id=result.external_id,
+                asset=all_assets[result.asset_id],
+                quote=all_assets[result.quote_id]
+            )
+            for result in results
+        ]
+
+    async def get_all_dividends(self, assets: list[Asset]) -> list[DividendPayout]:
+        dividends_r: list[DividendPayoutModel] = []
+        for chunk in group_into_chunks([asset.id for asset in assets]):
+            async with self.session_maker() as session:
+                q_dividends = select(
+                    DividendPayoutModel
+                ).where(
+                    DividendPayoutModel.asset_id.in_(chunk)
+                )
+                dividends_r.extend((await session.execute(q_dividends)).scalars())
+
+        all_assets = await self.get_all_assets()
+        return [
+            DividendPayout(
+                asset=all_assets[d.asset_id],
+                amount=d.amount,
+                pay_date=d.pay_date,
+                declared_date=d.declared_date,
+                record_date=d.record_date,
+                ex_date=d.ex_date,
+                currency=None
+            )
+            for d in dividends_r]
+
+    async def get_all_splits(self, assets: list[Asset]) -> list[Split]:
+        splits_r: list[SplitModel] = []
+        for chunk in group_into_chunks([asset.id for asset in assets]):
+            async with self.session_maker() as session:
+                q_splits = select(
+                    SplitModel
+                ).where(
+                    SplitModel.asset_id.in_(chunk)
+                )
+                splits_r.extend((await session.execute(q_splits)).scalars())
+
+        all_assets = await self.get_all_assets()
+        return [
+            Split(
+                asset=all_assets[s.asset_id],
+                effective_date=s.effective_date,
+                ratio=s.ratio,
+                id=s.id
+            )
+            for s in splits_r]
+
+    async def get_dividends_by_assets_and_ex_date_between(self, assets: list[Asset], ex_date_from: datetime.date,
+                                                          ex_date_to: datetime.date) -> list[DividendPayout]:
+        dividends_r: list[DividendPayoutModel] = []
+        for chunk in group_into_chunks([asset.id for asset in assets]):
+            async with self.session_maker() as session:
+                q_dividends = select(
+                    DividendPayoutModel
+                ).where(
+                    DividendPayoutModel.asset_id.in_(chunk),
+                    DividendPayoutModel.ex_date >= ex_date_from,
+                    DividendPayoutModel.ex_date <= ex_date_to
+                )
+                dividends_r.extend((await session.execute(q_dividends)).scalars())
+
+        all_assets = await self.get_all_assets()
+        return [
+            DividendPayout(
+                asset=all_assets[d.asset_id],
+                amount=d.amount,
+                pay_date=d.pay_date,
+                declared_date=d.declared_date,
+                record_date=d.record_date,
+                ex_date=d.ex_date,
+                currency=None
+            )
+            for d in dividends_r]
+
+    async def get_splits_by_assets_and_effective_date_between(self, assets: list[Asset],
+                                                              effective_date_from: datetime.date,
+                                                              effective_date_to: datetime.date) -> list[Split]:
+        splits_r: list[SplitModel] = []
+        for chunk in group_into_chunks([asset.id for asset in assets]):
+            async with self.session_maker() as session:
+                q_splits = select(
+                    SplitModel
+                ).where(
+                    SplitModel.asset_id.in_(chunk),
+                    SplitModel.effective_date >= effective_date_from,
+                    SplitModel.effective_date <= effective_date_to
+                )
+                splits_r.extend((await session.execute(q_splits)).scalars())
+
+        all_assets = await self.get_all_assets()
+        return [
+            Split(
+                asset=all_assets[s.asset_id],
+                effective_date=s.effective_date,
+                ratio=s.ratio,
+                id=s.id
+            )
+            for s in splits_r]
+
     def migrate(self) -> None:
         alembic_dir_path = Path(pathlib.Path(__file__).parent.parent.parent, "alembic")
         alembic_cfg = config.Config(Path(alembic_dir_path, "alembic.ini"))
         alembic_cfg.set_main_option("script_location", str(Path(alembic_dir_path)))
         alembic_cfg.set_main_option("sqlalchemy.url", self.db_url.replace("+aiosqlite", ""))
-        # os.makedirs(db_path.parent, exist_ok=True)
-        # Run the migration
-        command.upgrade(alembic_cfg, "head")
+        try:
+            command.upgrade(alembic_cfg, "head")
+        except CommandError as error:
+            # 2.10 restarted the migration history, so a database stamped by 1.19 (root revision
+            # 8c43877dec20) names a revision this release has never heard of. Alembic's own
+            # message says nothing about what to do; this one does.
+            match = re.search(r"Can't locate revision identified by '([^']+)'", str(error))
+            if match is None:
+                raise
+            raise IncompatibleAssetDatabase(
+                db_path=self.db_url.split("///", 1)[-1], revision=match.group(1)) from error
 
-    @property
-    def exchange_info(self):
-        with self.engine.connect() as conn:
-            es = conn.execute(sa.select(self.exchanges.c)).fetchall()
-        return {
-            name: ExchangeInfoModel(name, canonical_name, country_code)
-            for name, canonical_name, country_code in es
-        }
-
-    @property
-    def symbol_ownership_map(self):
-        out = {}
-        for mappings in self.symbol_ownership_maps_by_country_code.values():
-            for key, ownership_periods in mappings.items():
-                out.setdefault(key, []).extend(ownership_periods)
-
-        return out
-
-    @property
-    def symbol_ownership_maps_by_country_code(self):
-        with self.engine.connect() as conn:
-            query = sa.select(
-                self.equities.c.sid,
-                self.exchanges.c.country_code,
-            ).where(self.equities.c.exchange == self.exchanges.c.exchange)
-            sid_to_country_code = dict(conn.execute(query).fetchall())
-
-            return build_grouped_ownership_map(
-                conn,
-                table=self.equity_symbol_mappings,
-                key_from_row=(lambda row: (row.company_symbol, row.share_class_symbol)),
-                value_from_row=lambda row: row.symbol,
-                group_key=lambda row: sid_to_country_code[row.sid],
-            )
-
-    def lookup_asset_types(self, sids: list[int]):
-        """Retrieve asset types for a list of sids.
-
-        Parameters
-        ----------
-        sids : list[int]
-
-        Returns
-        -------
-        types : dict[sid -> str or None]
-            Asset types for the provided sids.
-        """
-        found = {}
-        missing = set()
-
-        for sid in sids:
-            try:
-                found[sid] = self._asset_type_cache[sid]
-            except KeyError:
-                missing.add(sid)
-
-        if not missing:
-            return found
-
-        router_cols = self.asset_router.c
-
-        with self.engine.connect() as conn:
-            for assets in group_into_chunks(missing):
-                query = sa.select(router_cols.sid, router_cols.asset_type).where(
-                    self.asset_router.c.sid.in_(map(int, assets))
-                )
-                for sid, type_ in conn.execute(query).fetchall():
-                    missing.remove(sid)
-                    found[sid] = self._asset_type_cache[sid] = type_
-
-                for sid in missing:
-                    found[sid] = self._asset_type_cache[sid] = None
-
-        return found
-
-    def group_by_type(self, sids: list[int]):
-        """Group a list of sids by asset type.
-
-        Parameters
-        ----------
-        sids : list[int]
-
-        Returns
-        -------
-        types : dict[str or None -> list[int]]
-            A dict mapping unique asset types to lists of sids drawn from sids.
-            If we fail to look up an asset, we assign it a key of None.
-        """
-        return invert(self.lookup_asset_types(sids))
-
-    def retrieve_asset(self, sid: int, default_none: bool = False):
+    def retrieve_asset(self, sid: int, default_none: bool = False) -> Asset | None:
         """
         Retrieve the Asset for a given sid.
         """
@@ -772,9 +1686,19 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 raise SidsNotFound(sids=[sid])
             return asset
         except KeyError:
-            return self.retrieve_all(sids=[sid, ], default_none=default_none)[0]
+            # `retrieve_all` is a coroutine and this method is not, so subscripting its result
+            # raised `TypeError: 'coroutine' object is not subscriptable` -- an error about Python
+            # rather than about the asset that is missing. A caller that can miss the cache has to
+            # `await retrieve_all` itself.
+            if default_none:
+                return None
+            raise SidsNotFound(sids=[sid]) from None
 
-    async def retrieve_all(self, sids: list[int], default_none: bool = False):
+    async def retrieve_all(
+        self,
+        sids: list[int],
+        default_none: bool = False,
+    ) -> list[Asset | None]:
         """Retrieve all assets in `sids`.
 
         Parameters
@@ -797,554 +1721,88 @@ class SqlAlchemyAssetRepository(AssetRepository):
             When a requested sid is not found and default_none=False.
         """
 
-        async with self.session_maker() as session:
-            q = select(AssetRouter).where(AssetModel.sid.in_(sids))
-            assets = (await session.execute(q)).scalars()
-            return list(assets)
+        assets_by_id = await self.get_all_assets()
+        missing = [sid for sid in sids if sid not in assets_by_id]
+        if missing and not default_none:
+            raise SidsNotFound(sids=missing)
+        return [assets_by_id.get(sid) for sid in sids]
 
-        hits, missing, failures = {}, set(), []
-        for sid in sids:
-            try:
-                asset = self._asset_cache[sid]
-                if not default_none and asset is None:
-                    # Bail early if we've already cached that we don't know
-                    # about an asset.
-                    raise SidsNotFound(sids=[sid])
-                hits[sid] = asset
-            except KeyError:
-                missing.add(sid)
+    async def get_ordered_contracts(self, root_symbol: str, mic: str | None = None) -> OrderedContracts:
+        """Return the contract chain of ``root_symbol``, ordered by expiration.
 
-        # All requests were cache hits.  Return requested sids in order.
-        if not missing:
-            return [hits[sid] for sid in sids]
-
-        update_hits = hits.update
-
-        # Look up cache misses by type.
-        type_to_assets = self.group_by_type(sids=missing)
-
-        # Handle failures
-        failures = {failure: None for failure in type_to_assets.pop(None, ())}
-        update_hits(failures)
-        self._asset_cache.update(failures)
-
-        if failures and not default_none:
-            raise SidsNotFound(sids=list(failures))
-
-        # We don't update the asset cache here because it should already be
-        # updated by `self.retrieve_equities`.
-        update_hits(self.retrieve_equities(sids=type_to_assets.pop("equity", [])))
-        update_hits(self.retrieve_futures_contracts(sids=type_to_assets.pop("future", [])))
-
-        # We shouldn't know about any other asset types.
-        if type_to_assets:
-            raise AssertionError("Found asset types: %s" % list(type_to_assets.keys()))
-
-        return [hits[sid] for sid in sids]
-
-    def retrieve_equities(self, sids: list[int]):
-        """Retrieve Equity objects for a list of sids.
-
-        Users generally shouldn't need to this method (instead, they should
-        prefer the more general/friendly `retrieve_assets`), but it has a
-        documented interface and tests because it's used upstream.
-
-        Parameters
-        ----------
-        sids : iterable[int]
-
-        Returns
-        -------
-        equities : dict[int -> Equity]
-
-        Raises
-        ------
-        EquitiesNotFound
-            When any requested asset isn't found.
+        Replaces the previous implementation, which queried ``self.futures_contracts`` and
+        ``self.futures_root_symbols`` -- synchronous SQLAlchemy ``Table`` objects that were never
+        assigned, so every call raised ``AttributeError``.
         """
-        return self._retrieve_assets(sids=sids, asset_tbl=self.equities, asset_type=Equity)
+        cache_key = (root_symbol, mic)
+        if cache_key in self._ordered_contracts:
+            return self._ordered_contracts[cache_key]
 
-    # def _retrieve_equity(self, sid):
-    #     return self.retrieve_equities(sids=[sid, ])[sid]
+        contracts = await self.get_exchange_futures_contracts_by_root(root_symbol=root_symbol,
+                                                                      mic=mic)
+        chain_predicate = self._future_chain_predicates.get(root_symbol, None)
+        ordered_contracts = OrderedContracts(root_symbol=root_symbol, contracts=contracts,
+                                             chain_predicate=chain_predicate)
+        self._ordered_contracts[cache_key] = ordered_contracts
+        return ordered_contracts
 
-    def retrieve_futures_contracts(self, sids: list[int]):
-        """Retrieve Future objects for an iterable of sids.
+    async def create_continuous_future(self, root_symbol: str, offset: int, roll_style: str,
+                                       adjustment: str | None) -> ContinuousFuture:
+        """Build a :class:`ContinuousFuture` specifier for a stored chain.
 
-        Users generally shouldn't need to this method (instead, they should
-        prefer the more general/friendly `retrieve_assets`), but it has a
-        documented interface and tests because it's used upstream.
-
-        Parameters
-        ----------
-        sids : iterable[int]
-
-        Returns
-        -------
-        equities : dict[int -> Equity]
-
-        Raises
-        ------
-        EquitiesNotFound
-            When any requested asset isn't found.
+        Raises:
+            ValueError: if ``adjustment`` or ``roll_style`` is not supported.
+            RootSymbolNotFound: if no contracts are stored for ``root_symbol``.
         """
-        return self._retrieve_assets(sids=sids, asset_tbl=self.futures_contracts, asset_type=FuturesContract)
-
-    @staticmethod
-    def _select_assets_by_sid(asset_tbl: Table, sids: list[int]):
-        return sa.select(asset_tbl).where(asset_tbl.c.sid.in_(map(int, sids)))
-
-    @staticmethod
-    def _select_asset_by_symbol(asset_tbl: Table, symbol: str):
-        return sa.select(asset_tbl).where(asset_tbl.c.symbol == symbol)
-
-    def _select_most_recent_symbols_chunk(self, sid_group: list[int]):
-        """Retrieve the most recent symbol for a set of sids.
-
-        Parameters
-        ----------
-        sid_group : iterable[int]
-            The sids to lookup. The length of this sequence must be less than
-            or equal to SQLITE_MAX_VARIABLE_NUMBER because the sids will be
-            passed in as sql bind params.
-
-        Returns
-        -------
-        sel : Selectable
-            The sqlalchemy selectable that will query for the most recent
-            symbol for each sid.
-
-        Notes
-        -----
-        This is implemented as an inner select of the columns of interest
-        ordered by the end date of the (sid, symbol) mapping. We then group
-        that inner select on the sid with no aggregations to select the last
-        row per group which gives us the most recently active symbol for all
-        of the sids.
-        """
-        cols = self.equity_symbol_mappings.c
-
-        # These are the columns we actually want.
-        data_cols = (cols.sid,) + tuple(cols[name] for name in SYMBOL_COLUMNS)
-
-        # Also select the max of end_date so that all non-grouped fields take
-        # on the value associated with the max end_date.
-        # to_select = data_cols + (sa.func.max(cols.end_date),)
-        func_rank = (
-            sa.func.rank()
-            .over(order_by=cols.end_date.desc(), partition_by=cols.sid)
-            .label("rnk")
-        )
-        to_select = data_cols + (func_rank,)
-
-        subquery = (
-            sa.select(*to_select)
-            .where(cols.sid.in_(map(int, sid_group)))
-            .subquery("sq")
-        )
-        query = (
-            sa.select(subquery.columns)
-            .filter(subquery.c.rnk == 1)
-            .select_from(subquery)
-        )
-        return query
-
-    def _lookup_most_recent_symbols(self, sids: list[int]):
-        with self.engine.connect() as conn:
-            return {
-                row.sid: {c: row[c] for c in SYMBOL_COLUMNS}
-                for row in concat(
-                    conn.execute(self._select_most_recent_symbols_chunk(sid_group=sid_group))
-                    .mappings()
-                    .fetchall()
-                    for sid_group in partition_all(n=SQLITE_MAX_VARIABLE_NUMBER, seq=sids)
-                )
-            }
-
-    def _retrieve_asset_dicts(self, sids: list[int], asset_tbl: Table, querying_equities):
-        if not sids:
-            return
-
-        if querying_equities:
-
-            def mkdict(
-                    row,
-                    exchanges=self.exchange_info,
-                    symbols=self._lookup_most_recent_symbols(sids=sids),
-            ):
-                d = dict(row)
-                d["exchange_info"] = exchanges[d.pop("exchange")]
-                # we are not required to have a symbol for every asset, if
-                # we don't have any symbols we will just use the empty string
-                return merge(d, symbols.get(row["sid"], {}))
-
-        else:
-
-            def mkdict(row, exchanges=self.exchange_info):
-                d = dict(row)
-                d["exchange_info"] = exchanges[d.pop("exchange")]
-                return d
-
-        for assets in group_into_chunks(sids):
-            # Load misses from the db.
-            query = self._select_assets_by_sid(asset_tbl, assets)
-
-            with self.engine.connect() as conn:
-                for row in conn.execute(query).mappings().fetchall():
-                    yield _convert_asset_timestamp_fields(mkdict(row))
-
-    def _retrieve_assets(self, sids: list[int], asset_tbl: Table, asset_type: type):
-        """Internal function for loading assets from a table.
-
-        This should be the only method of `AssetFinder` that writes Assets into
-        self._asset_cache.
-
-        Parameters
-        ---------
-        sids : iterable of int
-            Asset ids to look up.
-        asset_tbl : sqlalchemy.Table
-            Table from which to query assets.
-        asset_type : type
-            Type of asset to be constructed.
-
-        Returns
-        -------
-        assets : dict[int -> Asset]
-            Dict mapping requested sids to the retrieved assets.
-        """
-        # Fastpath for empty request.
-        if not sids:
-            return {}
-
-        cache = self._asset_cache
-        hits = {}
-
-        querying_equities = issubclass(asset_type, Equity)
-        filter_kwargs = (
-            _filter_equity_kwargs if querying_equities else _filter_future_kwargs
-        )
-
-        rows = self._retrieve_asset_dicts(sids, asset_tbl, querying_equities)
-        for row in rows:
-            sid = row["sid"]
-            asset = asset_type(**filter_kwargs(row))
-            hits[sid] = cache[sid] = asset
-
-        # If we get here, it means something in our code thought that a
-        # particular sid was an equity/future and called this function with a
-        # concrete type, but we couldn't actually resolve the asset.  This is
-        # an error in our code, not a user-input error.
-        misses = tuple(set(sids) - hits.keys())
-        if misses:
-            if querying_equities:
-                raise EquitiesNotFound(sids=misses)
-            else:
-                raise FutureContractsNotFound(sids=misses)
-        return hits
-
-    def _lookup_symbol_strict(self, ownership_map: dict[(str, str), list[OwnershipPeriod]], multi_country: bool,
-                              symbol: str, as_of_date: datetime.datetime):
-        """Resolve a symbol to an asset object without fuzzy matching.
-
-        Parameters
-        ----------
-        ownership_map : dict[(str, str), list[OwnershipPeriod]]
-            The mapping from split symbols to ownership periods.
-        multi_country : bool
-            Does this mapping span multiple countries?
-        symbol : str
-            The symbol to look up.
-        as_of_date : datetime or None
-            If multiple assets have held this sid, which day should the
-            resolution be checked against? If this value is None and multiple
-            sids have held the ticker, then a MultipleSymbolsFound error will
-            be raised.
-
-        Returns
-        -------
-        asset : AssetModel
-            The asset that held the given symbol.
-
-        Raises
-        ------
-        SymbolNotFound
-            Raised when the symbol or symbol as_of_date pair do not map to
-            any assets.
-        MultipleSymbolsFound
-            Raised when multiple assets held the symbol. This happens if
-            multiple assets held the symbol at disjoint times and
-            ``as_of_date`` is None, or if multiple assets held the symbol at
-            the same time and``multi_country`` is True.
-
-        Notes
-        -----
-        The resolution algorithm is as follows:
-
-        - Split the symbol into the company and share class component.
-        - Do a dictionary lookup of the
-          ``(company_symbol, share_class_symbol)`` in the provided ownership
-          map.
-        - If there is no entry in the dictionary, we don't know about this
-          symbol so raise a ``SymbolNotFound`` error.
-        - If ``as_of_date`` is None:
-          - If more there is more than one owner, raise
-            ``MultipleSymbolsFound``
-          - Otherwise, because the list mapped to a symbol cannot be empty,
-            return the single asset.
-        - Iterate through all of the owners:
-          - If the ``as_of_date`` is between the start and end of the ownership
-            period:
-            - If multi_country is False, return the found asset.
-            - Otherwise, put the asset in a list.
-        - At the end of the loop, if there are no candidate assets, raise a
-          ``SymbolNotFound``.
-        - If there is exactly one candidate, return it.
-        - Othewise, raise ``MultipleSymbolsFound`` because the ticker is not
-          unique across countries.
-        """
-        # split the symbol into the components, if there are no
-        # company/share class parts then share_class_symbol will be empty
-        company_symbol, share_class_symbol = split_delimited_symbol(symbol=symbol)
-        try:
-            owners = ownership_map[company_symbol, share_class_symbol]
-            assert owners, "empty owners list for %r" % symbol
-        except KeyError as exc:
-            # no equity has ever held this symbol
-            raise SymbolNotFound(symbol=symbol) from exc
-
-        if not as_of_date:
-            # exactly one equity has ever held this symbol, we may resolve
-            # without the date
-            if len(owners) == 1:
-                return self.retrieve_asset(sid=owners[0].sid)
-
-            options = {self.retrieve_asset(sid=owner.sid) for owner in owners}
-
-            if multi_country:
-                country_codes = map(attrgetter("country_code"), options)
-
-                if len(set(country_codes)) > 1:
-                    raise SameSymbolUsedAcrossCountries(
-                        symbol=symbol, options=dict(zip(country_codes, options))
-                    )
-
-            # more than one equity has held this ticker, this
-            # is ambiguous without the date
-            raise MultipleSymbolsFound(symbol=symbol, options=options)
-
-        options = []
-        country_codes = []
-        for start, end, sid, _ in owners:
-            if start.date() <= as_of_date < end.date():
-                # find the equity that owned it on the given asof date
-                asset = self.retrieve_asset(sid=sid)
-
-                # if this asset owned the symbol on this asof date and we are
-                # only searching one country, return that asset
-                if not multi_country:
-                    return asset
-                else:
-                    options.append(asset)
-                    country_codes.append(asset.country_code)
-
-        if not options:
-            # no equity held the ticker on the given asof date
-            raise SymbolNotFound(symbol=symbol)
-
-        # if there is one valid option given the asof date, return that option
-        if len(options) == 1:
-            return options[0]
-
-        # if there's more than one option given the asof date, a country code
-        # must be passed to resolve the symbol to an asset
-        raise SameSymbolUsedAcrossCountries(
-            symbol=symbol, options=dict(zip(country_codes, options))
-        )
-
-    def _choose_symbol_ownership_map(self, country_code: str):
-        if country_code is None:
-            return self.symbol_ownership_map
-
-        return self.symbol_ownership_maps_by_country_code.get(country_code)
-
-    def lookup_symbol(self, symbol: str, as_of_date: datetime.datetime,
-                      country_code: str | None = None):
-        """Lookup an equity by symbol.
-
-        Parameters
-        ----------
-        symbol : str
-            The ticker symbol to resolve.
-        as_of_date : datetime.datetime or None
-            Look up the last owner of this symbol as of this datetime.
-            If ``as_of_date`` is None, then this can only resolve the equity
-            if exactly one equity has ever owned the ticker.
-        country_code : str or None, optional
-            The country to limit searches to. If not provided, the search will
-            span all countries which increases the likelihood of an ambiguous
-            lookup.
-
-        Returns
-        -------
-        equity : Equity
-            The equity that held ``symbol`` on the given ``as_of_date``, or the
-            only equity to hold ``symbol`` if ``as_of_date`` is None.
-
-        Raises
-        ------
-        SymbolNotFound
-            Raised when no equity has ever held the given symbol.
-        MultipleSymbolsFound
-            Raised when no ``as_of_date`` is given and more than one equity
-            has held ``symbol``. This is also raised when ``fuzzy=True`` and
-            there are multiple candidates for the given ``symbol`` on the
-            ``as_of_date``. Also raised when no ``country_code`` is given and
-            the symbol is ambiguous across multiple countries.
-        """
-        if symbol is None:
-            raise TypeError(
-                "Cannot lookup asset for symbol of None for "
-                "as of date %s." % as_of_date
-            )
-
-        f = self._lookup_symbol_strict
-        mapping = self._choose_symbol_ownership_map(country_code)
-
-        if mapping is None:
-            raise SymbolNotFound(symbol=symbol)
-        return f(
-            mapping,
-            country_code is None,
-            symbol,
-            as_of_date,
-        )
-
-    def lookup_future_symbol(self, symbol: str):
-        """Lookup a future contract by symbol.
-
-        Parameters
-        ----------
-        symbol : str
-            The symbol of the desired contract.
-
-        Returns
-        -------
-        future : Future
-            The future contract referenced by ``symbol``.
-
-        Raises
-        ------
-        SymbolNotFound
-            Raised when no contract named 'symbol' is found.
-
-        """
-        with self.engine.connect() as conn:
-            data = (
-                conn.execute(
-                    self._select_asset_by_symbol(asset_tbl=self.futures_contracts, symbol=symbol)
-                )
-                .mappings()
-                .fetchone()
-            )
-
-        # If no data found, raise an exception
-        if not data:
-            raise SymbolNotFound(symbol=symbol)
-        return self.retrieve_asset(sid=data["sid"])
-
-    def _get_contract_sids(self, root_symbol: str):
-        fc_cols = self.futures_contracts.c
-        with self.engine.connect() as conn:
-            return (
-                conn.execute(
-                    sa.select(
-                        fc_cols.sid,
-                    )
-                    .where(
-                        (fc_cols.root_symbol == root_symbol)
-                        & (fc_cols.start_date != pd.NaT.value)
-                    )
-                    .order_by(fc_cols.sid)
-                )
-                .scalars()
-                .fetchall()
-            )
-
-    def _get_root_symbol_exchange(self, root_symbol: str):
-        fc_cols = self.futures_root_symbols.c
-        fields = (fc_cols.exchange,)
-
-        with self.engine.connect() as conn:
-            exchange = conn.execute(
-                sa.select(*fields).where(fc_cols.root_symbol == root_symbol)
-            ).scalar()
-
-        if exchange is not None:
-            return exchange
-        else:
-            raise SymbolNotFound(symbol=root_symbol)
-
-    def get_ordered_contracts(self, root_symbol: str):
-        try:
-            return self._ordered_contracts[root_symbol]
-        except KeyError:
-            contract_sids = self._get_contract_sids(root_symbol)
-            contracts = deque(self.retrieve_all(contract_sids))
-            chain_predicate = self._future_chain_predicates.get(root_symbol, None)
-            oc = OrderedContracts(root_symbol, contracts, chain_predicate)
-            self._ordered_contracts[root_symbol] = oc
-            return oc
-
-    def create_continuous_future(self, root_symbol: str, offset: int, roll_style: str, adjustment: str):
         if adjustment not in ADJUSTMENT_STYLES:
             raise ValueError(
                 f"Invalid adjustment style {adjustment!r}. Allowed adjustment styles are "
-                f"{list(ADJUSTMENT_STYLES)}."
+                f"{sorted(str(style) for style in ADJUSTMENT_STYLES)}."
+            )
+        if roll_style not in ROLL_STYLES:
+            raise ValueError(
+                f"Invalid roll style {roll_style!r}. Allowed roll styles are "
+                f"{sorted(ROLL_STYLES)}."
             )
 
-        oc = self.get_ordered_contracts(root_symbol=root_symbol)
-        exchange = self._get_root_symbol_exchange(root_symbol=root_symbol)
+        ordered_contracts = await self.get_ordered_contracts(root_symbol=root_symbol)
+        if not len(ordered_contracts):
+            raise RootSymbolNotFound(root_symbol=root_symbol)
 
-        sid = _encode_continuous_future_sid(root_symbol=root_symbol, offset=offset, roll_style=roll_style,
-                                            adjustment_style=None)
-        mul_sid = _encode_continuous_future_sid(root_symbol=root_symbol, offset=offset, roll_style=roll_style,
-                                                adjustment_style="div")
-        add_sid = _encode_continuous_future_sid(root_symbol=root_symbol, offset=offset, roll_style=roll_style,
-                                                adjustment_style="add")
+        roots = await self.get_futures_roots()
+        root = roots.get(root_symbol)
+        exchange_info = (root.exchange if root is not None
+                         else ordered_contracts.contracts[0].exchange)
 
-        cf_template = partial(
-            ContinuousFuture,
+        # 'mul' is stored under the legacy 'div' id so that sids stay stable across versions.
+        adjustment_style_id = {"mul": "div"}.get(adjustment, adjustment)
+        return ContinuousFuture(
+            sid=_encode_continuous_future_sid(root_symbol=root_symbol, offset=offset,
+                                              roll_style=roll_style,
+                                              adjustment_style=adjustment_style_id),
             root_symbol=root_symbol,
             offset=offset,
             roll_style=roll_style,
-            start_date=oc.start_date,
-            end_date=oc.end_date,
-            exchange_info=self.exchange_info[exchange],
+            adjustment=adjustment,
+            start_date=ordered_contracts.start_date,
+            end_date=ordered_contracts.end_date,
+            exchange_info=exchange_info,
         )
-
-        cf = cf_template(sid=sid)
-        mul_cf = cf_template(sid=mul_sid, adjustment="mul")
-        add_cf = cf_template(sid=add_sid, adjustment="add")
-
-        self._asset_cache[cf.sid] = cf
-        self._asset_cache[mul_cf.sid] = mul_cf
-        self._asset_cache[add_cf.sid] = add_cf
-
-        return {None: cf, "mul": mul_cf, "add": add_cf}[adjustment]
 
     @aiocache.cached(cache=Cache.MEMORY)
     async def _compute_lifetimes(self, country_codes: frozenset[str]) -> Lifetimes:
         """Compute and cache a recarray of asset lifetimes"""
         sids = starts = ends = []
         async with self.session_maker() as session:
-            sids_subquery = select(EquitySymbolMappingModel.sid).join(
-                ExchangeInfoModel, onclause=ExchangeInfoModel.exchange == EquitySymbolMappingModel.exchange
-            ).where(ExchangeInfoModel.country_code.in_(country_codes))
             q = select(
-                EquityModel.sid,
-                EquityModel.start_date,
-                EquityModel.end_date
-            ).where(EquityModel.sid.in_(sids_subquery))
+                ExchangeAssetModel.sid,
+                ExchangeAssetModel.start_date,
+                ExchangeAssetModel.end_date,
+            ).join(
+                EquityModel, EquityModel.id == ExchangeAssetModel.asset_id,
+            ).join(
+                ExchangeInfoModel, ExchangeInfoModel.mic == ExchangeAssetModel.mic,
+            ).where(ExchangeInfoModel.country_code.in_(country_codes))
             result = list((await session.execute(q)))
             if result:
                 sids, starts, ends = zip(*result)
@@ -1360,7 +1818,12 @@ class SqlAlchemyAssetRepository(AssetRepository):
         end[np.isnan(end)] = np.iinfo(int).max  # convert missing end to INTMAX
         return Lifetimes(sid, start.astype("i8"), end.astype("i8"))
 
-    async def lifetimes(self, dates: pd.DatetimeIndex, include_start_date: bool, country_codes: list[str]):
+    async def lifetimes(
+        self,
+        dates: pd.DatetimeIndex,
+        include_start_date: bool,
+        country_codes: list[str],
+    ) -> Lifetimes:
         """Compute a DataFrame representing asset lifetimes for the specified date
         range.
 
@@ -1397,21 +1860,8 @@ class SqlAlchemyAssetRepository(AssetRepository):
         return lifetimes
 
     @aiocache.cached(cache=Cache.MEMORY)
-    async def _compute_asset_lifetimes(self, assets: frozenset[Asset]) -> Lifetimes:
+    async def _compute_asset_lifetimes(self, assets: frozenset[ExchangeAsset]) -> Lifetimes:
         """Compute and cache a recarray of asset lifetimes"""
-        # sids = starts = ends = []
-        # async with self.session_maker() as session:
-        #     sids_subquery = select(EquitySymbolMappingModel.sid).join(
-        #         ExchangeInfo, onclause=ExchangeInfo.exchange == EquitySymbolMappingModel.exchange
-        #     ).where(ExchangeInfo.country_code.in_(country_codes))
-        #     q = select(
-        #         EquityModel.sid,
-        #         EquityModel.start_date,
-        #         EquityModel.end_date
-        #     ).where(EquityModel.sid.in_(sids_subquery))
-        #     result = list((await session.execute(q)))
-        #     if result:
-        #         sids, starts, ends = zip(*result)
         sids = [asset.sid for asset in assets]
         starts = [asset.start_date for asset in assets]
         ends = [asset.end_date for asset in assets]
@@ -1427,7 +1877,12 @@ class SqlAlchemyAssetRepository(AssetRepository):
         end[np.isnan(end)] = np.iinfo(int).max  # convert missing end to INTMAX
         return Lifetimes(sid, start.astype("i8"), end.astype("i8"))
 
-    async def asset_lifetimes(self, assets: list[Asset], dates: pd.DatetimeIndex, include_start_date: bool):
+    async def asset_lifetimes(
+        self,
+        assets: list[ExchangeAsset],
+        dates: pd.DatetimeIndex,
+        include_start_date: bool,
+    ) -> Lifetimes:
         """Compute a DataFrame representing asset lifetimes for the specified date
         range.
 
@@ -1463,38 +1918,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         lifetimes = await self._compute_asset_lifetimes(assets=frozenset(assets))
         return lifetimes
 
-    # def equities_sids_for_country_code(self, country_code: str):
-    #     """Return all of the sids for a given country.
-    #
-    #     Parameters
-    #     ----------
-    #     country_code : str
-    #         An ISO 3166 alpha-2 country code.
-    #
-    #     Returns
-    #     -------
-    #     tuple[int]
-    #         The sids whose exchanges are in this country.
-    #     """
-    #     sids = self._compute_asset_lifetimes(country_codes=[country_code]).sid
-    #     return tuple(sids.tolist())
-
-    # def equities_sids_for_exchange_name(self, exchange_name: str):
-    #     """Return all of the sids for a given exchange_name.
-    #
-    #     Parameters
-    #     ----------
-    #     exchange_name : str
-    #
-    #     Returns
-    #     -------
-    #     tuple[int]
-    #         The sids whose exchanges are in this country.
-    #     """
-    #     sids = self._compute_asset_lifetimes(exchange_names=[exchange_name]).sid
-    #     return tuple(sids.tolist())
-
-    def to_json(self):
+    def to_json(self) -> dict[str, str]:
         return {
             "db_url": self.db_url
         }

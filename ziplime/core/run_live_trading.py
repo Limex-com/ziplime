@@ -31,13 +31,6 @@ async def _run_live_trading(
         config_file: str | None = None,
 
 ):
-    # benchmark_spec = BenchmarkSpec(
-    #     benchmark_returns=None,
-    #     benchmark_sid=benchmark_sid,
-    #     benchmark_symbol=benchmark_symbol,
-    #     benchmark_file=benchmark_file,
-    #     no_benchmark=no_benchmark,
-    # )
     calendar = get_calendar(trading_calendar)
 
     bundle_storage_path = str(Path(Path.home(), ".ziplime", "data"))
@@ -45,8 +38,8 @@ async def _run_live_trading(
     bundle_service = BundleService(bundle_registry=bundle_registry)
     data_bundle = None
     if bundle_name is not None:
-        data_bundle = await bundle_service.load_bundle(bundle_name=bundle_name, bundle_version=None,
-                                                       data_type=DataType.CUSTOM)
+        data_bundle, missing_data = await bundle_service.load_bundle(bundle_name=bundle_name, bundle_version=None,
+                                                                     data_type=DataType.CUSTOM)
 
     algo = AlgorithmFile(algorithm_file=algorithm_file, algorithm_config_file=config_file)
     timedelta_diff_from_current_time = -datetime.timedelta(seconds=0)
@@ -59,20 +52,23 @@ async def _run_live_trading(
         timedelta_diff_from_current_time=timedelta_diff_from_current_time
     )
 
-    if exchange is None:
-        exchange = LimeTraderSdkExchange(
-            name="LIME",
-            country_code="US",
-            trading_calendar=calendar,
-            data_bundle=data_bundle,
-            cash_balance=cash_balance,
-            clock=clock
-        )
-
     db_url = f"sqlite+aiosqlite:///{str(Path(Path.home(), ".ziplime", "assets.sqlite").absolute())}"
     assets_repository = SqlAlchemyAssetRepository(db_url=db_url, future_chain_predicates=CHAIN_PREDICATES)
     adjustments_repository = SqlAlchemyAdjustmentRepository(db_url=db_url)
     asset_service = AssetService(asset_repository=assets_repository, adjustments_repository=adjustments_repository)
+
+    if exchange is None:
+        exchange = LimeTraderSdkExchange(
+            name="LIME",
+            canonical_name="LIME",
+            country_code="US",
+            clock=clock,
+            trading_calendar=calendar,
+            start_cash_balance=cash_balance,
+            asset_service=asset_service,
+            is_default=True,
+            data_source=data_bundle,
+        )
 
     return await run_algorithm(
         algorithm=algo,

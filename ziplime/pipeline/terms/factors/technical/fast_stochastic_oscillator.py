@@ -45,4 +45,3 @@ class FastStochasticOscillator(CustomFactor):
             global_dict={},
             out=out,
         )
-

@@ -5,18 +5,15 @@ import structlog
 
 from .blotter import Blotter
 
-from ziplime.domain.bar_data import BarData
 from ziplime.finance.domain.order import Order
 from ziplime.exchanges.exchange import Exchange
-from ...assets.entities.asset import Asset
 from ...assets.entities.exchange_asset import ExchangeAsset
-from ...exchanges.repositories.exchange_repository import ExchangeRepository
 
 
 class InMemoryBlotter(Blotter):
     def __init__(
             self,
-            exchanges : list[Exchange],
+            exchanges: list[Exchange],
             cancel_policy,
             new_orders: dict = None
     ):
@@ -71,12 +68,26 @@ class InMemoryBlotter(Blotter):
         return order.id
 
     def order_cancelled(self, order: Order) -> None:
-        asset_orders = self.open_orders[order.exchange_name][order.asset.sid]
-        asset_orders.pop(order.id, None)
+        # Keyed by the listing, matching `save_order`. Reading by `order.asset.sid` looked up a key
+        # that is never written, and because `open_orders` is a defaultdict the miss created an
+        # empty entry instead of raising -- so a cancelled order was never removed and stayed
+        # visible as open for the rest of the simulation.
+        self._forget_order(order)
 
     def order_rejected(self, order: Order) -> None:
-        asset_orders = self.open_orders[order.exchange_name][order.asset.sid]
+        self._forget_order(order)
+
+    def _forget_order(self, order: Order) -> None:
+        """Drop ``order`` from the open orders, and the listing too once it has none left."""
+        exchange_orders = self.open_orders.get(order.exchange_name)
+        if exchange_orders is None:
+            return
+        asset_orders = exchange_orders.get(order.asset)
+        if asset_orders is None:
+            return
         asset_orders.pop(order.id, None)
+        if not asset_orders:
+            exchange_orders.pop(order.asset, None)
 
     def get_order_by_id(self, order_id: str, exchange_name: str) -> Order | None:
         return self.orders.get(exchange_name, {}).get(order_id, None)
@@ -133,13 +144,21 @@ class InMemoryBlotter(Blotter):
 
     def execute_cancel_policy(self, event):
         if self.cancel_policy.should_cancel(event):
-            warn = self.cancel_policy.warn_on_cancel
+            # warn = self.cancel_policy.warn_on_cancel # TODO: check if needed
             for exchange in self.open_orders:
                 for asset in self.open_orders[exchange]:
                     self.cancel_all_orders_for_asset(asset=asset, exchange_name=exchange, relay_status=False)
 
     def order_held(self, order: Order) -> None:
-        pass
+        reason = order.reason or "Order held by exchange."
+        order.hold(reason=reason)
+
+        self.orders.setdefault(order.exchange_name, {})[order.id] = order
+
+        exchange_orders = self.open_orders.setdefault(order.exchange_name, defaultdict(dict))
+        exchange_orders.setdefault(order.asset, {})[order.id] = order
+
+        self.new_orders[order.id] = order
 
     def process_splits(self, splits):
         """
@@ -154,13 +173,20 @@ class InMemoryBlotter(Blotter):
         -------
         None
         """
-        for asset, ratio in splits:
-            if asset not in self.open_orders:
-                continue
 
-            orders_to_modify = self.open_orders[asset]
-            for order in orders_to_modify:
-                order.handle_split(ratio)
+        for split in splits:
+            for exchange, asset_positions in self.open_orders.items():
+                for asset, orders in asset_positions.items():
+                    for order_id, order in orders.items():
+                        if order.asset.asset.id == split.asset.id:
+                            order.handle_split(split.ratio)
+
+            # if split.asset not in self.open_orders:
+            #     continue
+            #
+            # orders_to_modify = self.open_orders[split.asset]
+            # for order in orders_to_modify:
+            #     order.handle_split(split.ratio)
 
     # def get_transactions(self, bar_data: BarData):
     #     """
@@ -242,7 +268,7 @@ class InMemoryBlotter(Blotter):
         for order in closed_orders:
             asset = order.asset
             asset_orders = self.open_orders[order.exchange_name][asset]
-            asset_orders.pop(order, None)
+            asset_orders.pop(order.id, None)
 
         # now clear out the assets from our open_orders dict that have
         # zero open orders

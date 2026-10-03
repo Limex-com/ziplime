@@ -1,25 +1,41 @@
 import datetime
 import math
 from collections import OrderedDict, deque
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
 import structlog
 
 from ziplime.assets.entities.asset import Asset
+from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
+from ziplime.finance.bonds import BondBook
+from ziplime.finance.margin import (
+    FuturesMarginModel, NoFuturesMarginModel, margin_currency_of,
+)
 from ziplime.domain.account import Account
+from ziplime.domain.position import Position
 from ziplime.domain.portfolio import Portfolio
 from ziplime.exchanges.exchange import Exchange
-from ziplime.exchanges.repositories.exchange_repository import ExchangeRepository
 from ziplime.finance.commission import CommissionModel
-from ziplime.finance.domain.commission import Commission
 
 from ziplime.finance.domain.order import Order
 from ziplime.finance.domain.position_tracker import PositionTracker
 from ziplime.finance.domain.transaction import Transaction
 from ziplime.trading.domain.lot import Lot
+
+
+def _is_margined_option(instrument) -> bool:
+    """Whether ``instrument`` is an option that settles variation margin rather than a premium.
+
+    A free function rather than a method because three separate places have to agree on it -- the
+    cash flow at a trade, the value of the position, and the margin it ties up -- and a
+    disagreement between any two of them double-counts or loses the position entirely.
+    """
+    return isinstance(instrument, OptionContract) and instrument.premium_style.is_margined
 
 
 class Ledger:
@@ -48,6 +64,8 @@ class Ledger:
 
     def __init__(self, trading_sessions: pd.DatetimeIndex,
                  data_frequency: datetime.timedelta,
+                 futures_margin_model: FuturesMarginModel | None = None,
+                 bond_book: BondBook | None = None,
                  ):
         if len(trading_sessions):
             start = trading_sessions[0]
@@ -110,7 +128,12 @@ class Ledger:
         self._account_overrides = {}
         self._data_frequency = data_frequency
 
-        self.position_tracker = PositionTracker(data_frequency=data_frequency)
+        # Coupon and amortization schedules, shared with the position tracker so that a
+        # transaction, a mark and a coupon all read the same face value.
+        self.bond_book = bond_book if bond_book is not None else BondBook()
+
+        self.position_tracker = PositionTracker(data_frequency=data_frequency,
+                                                bond_book=self.bond_book)
 
         self._processed_transactions = {}
 
@@ -126,6 +149,16 @@ class Ledger:
         self._payout_last_sale_prices = {}
 
         self._buy_lots_by_asset: dict[Asset, deque[Lot]] = {}
+
+        #: Bonds already redeemed, so a matured position is never repaid twice.
+        self._redeemed_bonds: set[int] = set()
+
+        #: Last session bond events were processed for; the schedule is read for the interval
+        #: since it, so a record date on a non-trading day is not skipped over.
+        self._last_bond_event_session: datetime.date | None = None
+
+        # Always present, so "margin is not modelled" is a stated choice rather than an omission.
+        self.futures_margin_model = futures_margin_model or NoFuturesMarginModel()
 
     @property
     def todays_returns(self) -> float:
@@ -198,19 +231,28 @@ class Ledger:
             The transaction to execute.
         """
         asset = transaction.asset
-        if isinstance(asset, FuturesContract):
+        # `asset` is the exchange listing; the instrument itself hangs off `.asset`.
+        #
+        # A margined option settles the way a future does -- no premium changes hands, variation
+        # margin accrues daily -- so it joins the futures branch rather than getting one of its
+        # own. That is the whole of what makes a MOEX book different from an OPRA one; see
+        # `PremiumStyle`.
+        if isinstance(asset.asset, FuturesContract) or _is_margined_option(asset.asset):
+            if not self.futures_margin_model.models_margin:
+                self.futures_margin_model.warn_once()
             try:
                 old_price = self._payout_last_sale_prices[asset]
             except KeyError:
                 self._payout_last_sale_prices[asset] = transaction.price
             else:
-                position = self.position_tracker.positions[asset]
-                amount = position.amount
+                positions = self.position_tracker.positions_by_asset.get((asset,))
+                position = next(iter(positions), None) if positions else None
+                amount = position.amount if position is not None else 0
                 price = transaction.price
 
                 self._cash_flow(
                     self._calculate_payout(
-                        asset.price_multiplier,
+                        asset.asset.multiplier,
                         amount,
                         old_price,
                         price,
@@ -221,6 +263,19 @@ class Ledger:
                     del self._payout_last_sale_prices[asset]
                 else:
                     self._payout_last_sale_prices[asset] = price
+        elif isinstance(asset.asset, Bond):
+            # A bond settles at its dirty price: the quote is a percentage of face value, and the
+            # buyer additionally hands the seller the coupon accrued since the last payment. Both
+            # corrections are needed -- the first is a factor of ten on a 1000 nominal, the second
+            # averages half a coupon on every round trip.
+            self._cash_flow(-(self.bond_price_in_money(asset=asset, quoted_price=transaction.price,
+                                                       dt=transaction.dt) * transaction.amount))
+        elif isinstance(asset.asset, OptionContract):
+            # A premium-paid option. The premium is quoted per unit of the underlying and one
+            # contract covers `multiplier` of them, so buying one 1.20 call costs 120, not 1.20 --
+            # a hundredfold error in cash, and one that compounds: it also sets the cost basis
+            # every later P&L is measured from.
+            self._cash_flow(-(transaction.price * asset.asset.multiplier * transaction.amount))
         else:
             self._cash_flow(-(transaction.price * transaction.amount))
         # print("LEVERAGE: BEFORE EXCEUTION", self.account.leverage, self.account.net_leverage)
@@ -244,20 +299,23 @@ class Ledger:
         if asset not in self._buy_lots_by_asset:
             self._buy_lots_by_asset[asset] = deque()
         realized = 0.0
+        realized_pnl_percentage = 0.00
 
         if transaction.amount > 0:
             self._buy_lots_by_asset[asset].append(
                 Lot(quantity=transaction.amount, price=transaction.price, commission=transaction.commission or 0.00)
             )
+            transaction.average_entry_price = transaction.price
         else:
             sell_qty = -transaction.amount
             sell_comm = transaction.commission or 0.00
-
+            total_match_price = 0
             while sell_qty > 0 and self._buy_lots_by_asset[asset]:
                 lot = self._buy_lots_by_asset[asset][0]
                 match_qty = min(sell_qty, lot.quantity)
 
                 pnl = (transaction.price - lot.price) * match_qty
+                total_match_price += lot.price * match_qty
                 realized += pnl
 
                 lot.quantity -= match_qty
@@ -266,9 +324,12 @@ class Ledger:
                 # Drop empty lot
                 if lot.quantity == 0:
                     self._buy_lots_by_asset[asset].popleft()
-
+            transaction.average_entry_price = total_match_price / -transaction.amount
             realized -= sell_comm
+            if total_match_price > 0:
+                realized_pnl_percentage = (realized / total_match_price) * 100
         transaction.realized_pnl = realized
+        transaction.realized_pnl_percentage = realized_pnl_percentage
 
     def process_splits(self, splits):
         """Processes a list of splits by modifying any positions as needed.
@@ -320,15 +381,130 @@ class Ledger:
         self._cash_flow(-commission.amount)
         # print(f"Commission 3 for {asset.asset_name} is {cost}", tr.account.leverage, tr.account.net_leverage)
 
-    def close_position(self, asset: ExchangeAsset, dt: datetime.datetime):
-        txn = self.position_tracker.maybe_create_close_position_transaction(
-            asset=asset,
-            dt=dt,
-        )
-        if txn is not None:
+    def close_position(self, asset: ExchangeAsset, dt: datetime.datetime,
+                       price: float | None = None):
+        """Force-close a position whose contract has reached its auto close date.
+
+        For a physically delivered contract this is the step that keeps the backtest honest: the
+        position is being closed precisely so that it does not become a delivery obligation, and
+        that is worth saying rather than letting it look like ordinary housekeeping.
+
+        Args:
+            price: What to close at, defaulting to the position's last mark. An expiring option is
+                closed at its **settlement** value instead -- ``max(S - K, 0)`` for a call --
+                because the last mark is a quote and the settlement is an arithmetic fact about
+                where the underlying finished. The two part company exactly where it matters most:
+                a 0DTE wing that stops being quoted an hour before the close carries a mark of a
+                few cents into a settlement of zero, and the strike that finishes a dime in the
+                money carries a mark of nothing into a payout of ten dollars a contract.
+        """
+        instrument = asset.asset
+        if getattr(instrument, "is_deliverable", False):
+            self.logger.warning(
+                "Closing a deliverable futures position to avoid delivery",
+                symbol=asset.symbol, notice_date=str(getattr(instrument, "notice_date", None)),
+                expiration_date=str(getattr(instrument, "expiration_date", None)), dt=str(dt))
+
+        for txn in self.position_tracker.close_positions(asset=asset, dt=dt, price=price):
             self.process_transaction(transaction=txn)
 
-    async def process_dividends(self, next_session, adjustment_reader):
+    def bond_price_in_money(self, asset: ExchangeAsset, quoted_price: float, dt) -> float:
+        """What one bond of ``asset`` changes hands for at ``quoted_price``: clean value plus
+        accrued coupon interest."""
+        return self.bond_book.dirty_value(asset.asset, quoted_price, dt)
+
+    def held_bonds(self) -> list[Bond]:
+        """Every distinct bond currently held, across exchanges and accounts."""
+        seen: dict[int, Bond] = {}
+        for position in self.position_tracker.get_position_list():
+            instrument = position.asset.asset
+            if isinstance(instrument, Bond):
+                seen.setdefault(instrument.id, instrument)
+        return list(seen.values())
+
+    async def process_bond_events(self, next_session, asset_service) -> None:
+        """Earn and pay the bond schedule for ``next_session``.
+
+        Mirrors :meth:`process_dividends`: a payment is *earned* when its record date arrives --
+        fixing the entitlement against the position held that day -- and *paid* on the payment
+        date. A coupon is therefore not lost by selling in between, which is what a record date
+        means, and a short position is charged for one.
+
+        Amortization instalments ride the same path: they are a payment per bond like a coupon,
+        and the face value they leave behind comes from the stored schedule, so the quote of an
+        amortizing issue is read against the right nominal from the next session on.
+        """
+        session_date = (next_session.date() if isinstance(next_session, datetime.datetime)
+                        else next_session)
+        # Everything since the previous session, so a record date that fell on a weekend or an
+        # exchange holiday is still picked up on the next session the simulation runs.
+        previous = self._last_bond_event_session
+        if previous is None or previous >= session_date:
+            previous = session_date - datetime.timedelta(days=1)
+        self._last_bond_event_session = session_date
+
+        held = self.held_bonds()
+        if held:
+            await self.bond_book.load(asset_service, held)
+            earned = [event for bond in held
+                      for event in self.bond_book.payments_entitled_between(
+                          bond, after=previous, through=session_date)]
+            if earned:
+                self.position_tracker.earn_bond_payments(earned)
+
+        payment = self.position_tracker.pay_bond_payments(session_date)
+        if payment != 0:
+            self._cash_flow(payment)
+
+    async def redeem_matured_bonds(self, session, asset_service=None) -> None:
+        """Repay the principal of every bond position that has reached maturity.
+
+        Redemption is booked as a closing trade at par rather than left to the auto-close path,
+        which would liquidate the position at whatever the last bar happened to print. A matured
+        bond does not trade -- the issuer repays the outstanding face value -- and a backtest that
+        marks it at a stale quote reports a loss or gain that never happened.
+        """
+        session_date = session.date() if isinstance(session, datetime.datetime) else session
+        positions = [position for position in self.position_tracker.get_position_list()
+                     if isinstance(position.asset.asset, Bond)]
+        if not positions:
+            return
+        if asset_service is not None:
+            await self.bond_book.load(asset_service,
+                                      [position.asset.asset for position in positions])
+
+        for position in positions:
+            bond = position.asset.asset
+            if bond.maturity_date is None or bond.maturity_date > session_date:
+                continue
+            if position.amount == 0 or bond.id in self._redeemed_bonds:
+                continue
+            # The principal outstanding on the maturity date itself: every amortization instalment
+            # already paid has reduced it.
+            face = self.bond_book.face_value(bond, bond.maturity_date)
+            # Redemption is par *against what is left*, so the quote is measured against the same
+            # outstanding nominal the settlement will convert it back with. Quoting it against the
+            # nominal at issue would apply the amortization twice and repay a fraction of a
+            # fraction.
+            quoted = bond.price_quotation.quoted_price(face, face)
+            self._redeemed_bonds.add(bond.id)
+            self.logger.info("Redeeming a matured bond at par", symbol=position.asset.symbol,
+                             maturity_date=str(bond.maturity_date), face_value=face,
+                             amount=position.amount)
+            self.process_transaction(Transaction(
+                id=f"redeem-{position.asset.sid}-{bond.maturity_date}",
+                asset=position.asset,
+                amount=-position.amount,
+                dt=session if isinstance(session, datetime.datetime) else
+                datetime.datetime.combine(session_date, datetime.time.min,
+                                          tzinfo=datetime.timezone.utc),
+                price=quoted,
+                order_id=None,
+                exchange_name=position.exchange_name,
+                trading_account_id=position.trading_account_id,
+            ))
+
+    async def process_dividends(self, next_session, asset_service):
         """Process dividends for the next session.
 
         This will earn us any dividends whose ex-date is the next session as
@@ -339,14 +515,15 @@ class Ledger:
         # Earn dividends whose ex_date is the next trading day. We need to
         # check if we own any of these stocks so we know to pay them out when
         # the pay date comes.
-        held_sids = set(position_tracker.positions)
-        if held_sids:
-            cash_dividends = adjustment_reader.get_dividends_with_ex_date(
-                assets=held_sids, date=next_session  # self.data_bundle.asset_repository
+        held_assets = [pos.asset.asset for pos in position_tracker.get_position_list()]
+        if held_assets:
+            cash_dividends = await asset_service.get_cash_dividends_with_ex_date(
+                assets=held_assets, date=next_session  # self.data_bundle.asset_repository
             )
-            stock_dividends = await adjustment_reader.get_stock_dividends_with_ex_date(
-                assets=held_sids, date=next_session  # self.data_bundle.asset_repository
-            )
+            # stock_dividends = await asset_service.get_stock_dividends_with_ex_date(
+            #     assets=held_assets, date=next_session  # self.data_bundle.asset_repository
+            # )
+            stock_dividends = []
 
             # Earning a dividend just marks that we need to get paid out on
             # the dividend's pay-date. This does not affect our cash yet.
@@ -361,8 +538,11 @@ class Ledger:
         if dividends > 0:
             self._cash_flow(dividends)
 
-    def capital_change(self, change_amount: float):
-        self.update_portfolio()
+    async def capital_change(self, change_amount: float):
+        # `update_portfolio` is a coroutine. Called without awaiting, the portfolio value a target
+        # capital change is measured against was whatever the last bar left behind, so the deposit
+        # or withdrawal computed from it was wrong by a bar of profit and loss.
+        await self.update_portfolio()
         # we update the cash and total value so this is not dirty
         self._portfolio.portfolio_value += change_amount
         self._portfolio.cash += change_amount
@@ -416,17 +596,75 @@ class Ledger:
 
     @property
     def positions(self):
-        return self.position_tracker.get_position_list()
+        return [
+            replace(position)
+            for position in self.position_tracker.get_position_list()
+        ]
+
+    def futures_margin_by_currency(self, maintenance: bool = False) -> dict[str, float]:
+        """Margin the open margined positions tie up, keyed by the currency it is posted in.
+
+        Futures, and **margined options** -- a MOEX option ties up initial margin on both sides,
+        because neither side has paid anything and either can end up owing. A premium-paid option
+        is not counted: the buyer's risk is the premium they already handed over, and the writer's
+        margin is a broker's rule rather than the exchange's, so the ledger does not invent one.
+
+        Margin currency is a property of the exchange, not of the quote: an exchange may collect
+        its local currency even for the contracts it quotes in dollars. Amounts in different currencies are reported
+        separately because adding them would need an FX rate the ledger does not carry.
+        """
+        model = self.futures_margin_model
+        totals: dict[str, float] = {}
+        for position in self.position_tracker.get_position_list():
+            instrument = position.asset.asset
+            if not (isinstance(instrument, FuturesContract) or _is_margined_option(instrument)):
+                continue
+            margin = (model.maintenance_margin if maintenance else model.initial_margin)
+            amount = margin(position.asset, position.amount, position.last_sale_price)
+            currency = margin_currency_of(position.asset)
+            totals[currency] = totals.get(currency, 0.0) + amount
+        return totals
+
+    def futures_margin_requirement(self, maintenance: bool = False,
+                                   currency: str | None = None) -> float:
+        """Margin posted in a single currency.
+
+        Args:
+            maintenance: Report maintenance margin rather than initial.
+            currency: Which currency to report. Required when the book posts margin in more than
+                one; use :meth:`futures_margin_by_currency` to see them all.
+
+        Returns 0.0 under :class:`~ziplime.finance.margin.NoFuturesMarginModel`; check
+        ``futures_margin_model.models_margin`` to tell that from a genuinely unmargined book.
+
+        Raises:
+            ValueError: if the book spans several margin currencies and none was named.
+        """
+        totals = self.futures_margin_by_currency(maintenance=maintenance)
+        if currency is not None:
+            return totals.get(currency, 0.0)
+        if len(totals) > 1:
+            raise ValueError(
+                f"Futures margin is posted in more than one currency ({', '.join(sorted(totals))})"
+                f" and they cannot be added without an FX rate. Pass currency=..., or call "
+                f"futures_margin_by_currency()."
+            )
+        return next(iter(totals.values()), 0.0)
 
     def _get_payout_total(self, positions):
 
         total = 0
         for asset, old_price in self._payout_last_sale_prices.items():
-            position = positions[asset]
+            position = next(
+                (position for position in positions.values() if position.asset == asset),
+                None,
+            )
+            if position is None:
+                continue
             self._payout_last_sale_prices[asset] = price = position.last_sale_price
             amount = position.amount
             total += self._calculate_payout(
-                asset.price_multiplier,
+                asset.asset.multiplier,
                 amount,
                 old_price,
                 price,
@@ -434,30 +672,63 @@ class Ledger:
 
         return total
 
+    @staticmethod
+    def _positions_by_exchange_and_account(position_tracker: PositionTracker) -> dict:
+        """Build the ``(exchange, trading account, asset) -> Position`` map the portfolio exposes.
+
+        Flat, and keyed exactly as :class:`~ziplime.finance.domain.position_tracker.PositionTracker`
+        keys its own positions, because that is what :class:`~ziplime.domain.portfolio.Portfolio`
+        declares and what its accessors iterate. It used to build a nested
+        ``exchange -> account -> asset -> Position`` dict instead, which left every one of those
+        accessors reading a dict where it expected a position -- ``get_asset_positions_amount``
+        raised ``AttributeError: 'dict' object has no attribute 'asset'`` the moment a strategy
+        asked how much of something it held.
+
+        The projected positions carry ``exchange_name`` and ``trading_account_id``: the accessors
+        filter on both, and a projection without them silently matches nothing.
+        """
+        positions = {}
+        for key, position in position_tracker.positions.items():
+            positions[key] = Position(
+                asset=position.asset,
+                amount=position.amount,
+                cost_basis=position.cost_basis,
+                last_sale_price=position.last_sale_price,
+                last_sale_date=position.last_sale_date,
+                exchange_name=position.exchange_name,
+                trading_account_id=position.trading_account_id,
+            )
+        return positions
+
     def synchronize_exchange_portfolio(self, portfolio: Portfolio):
         # start_cash = sum(exchange.get_start_cash_balance() for exchange in exchange_repository.get_all_exchanges())
 
         pt = self.position_tracker
-        for asset, position in portfolio.positions.items():
+        for (exchange_name, trading_account_id, asset), position in portfolio.positions.items():
+            if position.amount == 0:
+                continue
             pt.update_position(
-                asset=asset, exchange_name=position.exchange_name,
+                asset=asset, exchange_name=exchange_name,
                 last_sale_price=position.last_sale_price,
                 last_sale_date=position.last_sale_date,
                 cost_basis=position.cost_basis,
                 amount=position.amount,
-                trading_account_id=position.trading_account_id,
+                trading_account_id=trading_account_id,
             )
         self._portfolio.cash = portfolio.cash
         self._portfolio.starting_cash = portfolio.starting_cash
         self._portfolio.portfolio_value = portfolio.portfolio_value
 
-        self._portfolio.positions = pt.get_positions()
+        self._portfolio.positions = self._positions_by_exchange_and_account(pt)
         position_stats = pt.stats
 
         self._portfolio.positions_value = position_value = position_stats.net_value
         self._portfolio.positions_exposure = position_stats.net_exposure
         payout_total = self._get_payout_total(pt.positions)
-        if payout_total > 0:
+        if payout_total != 0:
+            # Variation margin settles in both directions. Applying only gains -- while
+            # _get_payout_total has already advanced each position's mark to the new price --
+            # dropped every losing day on the floor, so a long futures position could not lose.
             self._cash_flow(payout_total)
 
         start_value = self._portfolio.portfolio_value
@@ -484,13 +755,16 @@ class Ledger:
 
         pt = self.position_tracker
 
-        self._portfolio.positions = pt.get_positions()
+        self._portfolio.positions = self._positions_by_exchange_and_account(pt)
         position_stats = pt.stats
 
         self._portfolio.positions_value = position_value = position_stats.net_value
         self._portfolio.positions_exposure = position_stats.net_exposure
         payout_total = self._get_payout_total(pt.positions)
-        if payout_total > 0:
+        if payout_total != 0:
+            # Variation margin settles in both directions. Applying only gains -- while
+            # _get_payout_total has already advanced each position's mark to the new price --
+            # dropped every losing day on the floor, so a long futures position could not lose.
             self._cash_flow(payout_total)
 
         start_value = self._portfolio.portfolio_value
@@ -531,8 +805,8 @@ class Ledger:
         else:
             gross_leverage = position_stats.gross_exposure / portfolio_value
             net_leverage = position_stats.net_exposure / portfolio_value
-        if gross_leverage > 5:
-            print("a")
+        # if gross_leverage > 5:
+        #     print("a")
         return portfolio_value, gross_leverage, net_leverage
 
     def update_account(self):

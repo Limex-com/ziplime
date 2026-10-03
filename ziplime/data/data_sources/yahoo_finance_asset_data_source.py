@@ -1,38 +1,12 @@
-import datetime
-import multiprocessing
-import os
-import sys
-from typing import Self
+"""Deprecated location. The Yahoo Finance connector lives in `ziplime.data.data_sources.yahoo`."""
+import warnings
 
-import limexhub
-import structlog
-from asyncclick import progressbar
-from joblib import Parallel, delayed
+from ziplime.data.data_sources.yahoo.yahoo_finance_asset_data_source import *  # noqa: F401,F403
+from ziplime.data.data_sources.yahoo.yahoo_finance_asset_data_source import __dict__ as _moved  # noqa: F401
 
-import polars as pl
-import yfinance as yf
-from ziplime.data.data_sources.asset_data_source import AssetDataSource
-from ziplime.data.services.data_bundle_source import DataBundleSource
-
-
-class YahooFinanceAssetDataSource(AssetDataSource):
-    def __init__(self, maximum_threads: int | None = None):
-        super().__init__()
-        self._logger = structlog.get_logger(__name__)
-        if maximum_threads is not None:
-            self._maximum_threads = min(multiprocessing.cpu_count() * 2, maximum_threads)
-        else:
-            self._maximum_threads = multiprocessing.cpu_count() * 2
-
-    async def get_assets(self, symbols: list[str], **kwargs) -> pl.DataFrame:
-        assets = yf.Tickers(' '.join(symbols))
-        return assets
-
-    async def search_assets(self, query: str, **kwargs) -> pl.DataFrame:
-        assets = yf.Lookup(query=query).all
-        return assets
-
-    async def get_constituents(self, index: str) -> pl.DataFrame:
-        assets = self._limex_client.constituents(index)
-        return assets
-
+warnings.warn(
+    "ziplime.data.data_sources.yahoo_finance_asset_data_source has moved to "
+    "ziplime.data.data_sources.yahoo.yahoo_finance_asset_data_source",
+    DeprecationWarning,
+    stacklevel=2,
+)

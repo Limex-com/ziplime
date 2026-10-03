@@ -10,10 +10,6 @@ from ziplime.utils.numpy_utils import (
 from ziplime.assets.entities.asset import Asset
 
 
-
-
-
-
 class SimpleBeta(CustomFactor, StandardOutputs):
     """Factor producing the slope of a regression line between each asset's daily
     returns to the daily returns of a single "target" asset.

@@ -163,7 +163,7 @@ class AdjustedArray:
         """
         return self._data.view(**self._view_kwargs)
 
-    #@lazyval
+    # @lazyval
     @property
     def dtype(self):
         """
@@ -171,7 +171,7 @@ class AdjustedArray:
         """
         return self._view_kwargs.get("dtype") or self._data.dtype
 
-    #@lazyval
+    # @lazyval
     @property
     def _iterator_type(self):
         """

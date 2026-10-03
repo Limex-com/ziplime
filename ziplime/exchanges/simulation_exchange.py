@@ -1,5 +1,4 @@
 import datetime
-from functools import lru_cache
 from typing import Literal
 
 import aiocache
@@ -10,18 +9,25 @@ from aiocache import Cache
 from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.entities.asset import Asset
+from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.constants.period import Period
 from ziplime.data.services.data_source import DataSource
 
-from ziplime.domain.position import Position
 from ziplime.domain.portfolio import Portfolio
 from ziplime.domain.account import Account
-from ziplime.finance.commission import EquityCommissionModel, FutureCommissionModel, CommissionModel
+from ziplime.finance.commission import (
+    BondCommissionModel, CommissionModel, EquityCommissionModel, FutureCommissionModel,
+    OptionCommissionModel, PerOptionContract,
+)
+from ziplime.finance.commission.no_commission import NoCommission
 from ziplime.finance.domain.commission import Commission
 from ziplime.finance.domain.order import Order
+from ziplime.finance.domain.order_status import OrderStatus
+from ziplime.finance.execution import ExecutionStyle
 from ziplime.finance.slippage.slippage_model import SlippageModel
 from ziplime.exchanges.exchange import Exchange
 from ziplime.gens.domain.trading_clock import TradingClock
@@ -39,8 +45,12 @@ class SimulationExchange(Exchange):
                  future_slippage: SlippageModel,
                  equity_commission: EquityCommissionModel,
                  future_commission: FutureCommissionModel,
-                 account_id:str,
+                 account_id: str,
                  is_default: bool,
+                 bond_slippage: SlippageModel = None,
+                 bond_commission: BondCommissionModel = None,
+                 option_slippage: SlippageModel = None,
+                 option_commission: OptionCommissionModel = None,
                  data_source: DataSource = None,
                  price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
                  ):
@@ -53,65 +63,112 @@ class SimulationExchange(Exchange):
                          account_id=account_id, is_default=is_default)
         self.slippage_models = {
             Equity: equity_slippage,
+            Bond: bond_slippage if bond_slippage is not None else equity_slippage,
             FuturesContract: future_slippage,
+            # An option's fill is a percentage of a premium, which is what the equity models
+            # express, so the equity model is the sensible default rather than the futures one --
+            # `VolatilityVolumeShare` is calibrated on futures volume and would reject most of a
+            # 0DTE chain outright.
+            OptionContract: option_slippage if option_slippage is not None else equity_slippage,
         }
         self.commission_models = {
             Equity: equity_commission,
+            Bond: bond_commission if bond_commission is not None else NoCommission(),
             FuturesContract: future_commission,
+            # Options are billed per contract, never per share; see PerOptionContract for why
+            # substituting an equity model understates the cost by the multiplier.
+            OptionContract: (option_commission if option_commission is not None
+                             else PerOptionContract()),
         }
         self.cash_balance = cash_balance
+        self._start_cash_balance = cash_balance
         self.price_used_in_order_execution = price_used_in_order_execution
 
     def get_start_cash_balance(self) -> float:
-        return self.cash_balance
+        return self._start_cash_balance
 
     def get_current_cash_balance(self) -> float:
         return self.cash_balance
 
     def get_commission_model(self, asset: ExchangeAsset) -> CommissionModel:
-        return self.commission_models[type(asset.asset)]
+        return self._model_for(self.commission_models, asset, "commission")
 
     def get_slippage_model(self, asset: ExchangeAsset) -> SlippageModel:
-        return self.slippage_models[type(asset.asset)]
+        return self._model_for(self.slippage_models, asset, "slippage")
+
+    @staticmethod
+    def _model_for(models: dict, asset: ExchangeAsset, kind: str):
+        """Look up the model for an asset's instrument type, with a legible failure.
+
+        A bare ``KeyError`` on the type object told nobody which asset class was missing a model,
+        which is exactly the question being asked when a new one is added.
+        """
+        try:
+            return models[type(asset.asset)]
+        except KeyError:
+            raise KeyError(
+                f"No {kind} model configured for {type(asset.asset).__name__} "
+                f"({asset.symbol}@{asset.mic}). Configured: "
+                f"{', '.join(sorted(t.__name__ for t in models))}."
+            ) from None
 
     async def submit_order(self, order: Order):
         order.id = uuid.uuid4().hex
         return order
 
-    async def get_positions(self) -> dict[Asset, Position]:
-        pass
-
     async def get_portfolio(self) -> Portfolio:
-        positions = {}
         portfolio = Portfolio(start_date=datetime.datetime.now(tz=datetime.timezone.utc),
-                              starting_cash=self.cash_balance,
+                              starting_cash=self._start_cash_balance,
                               portfolio_value=self.cash_balance,
                               cash=self.cash_balance,
                               cash_flow=0.00,
                               pnl=0.00,
                               returns=0.00,
-                              positions_value=0.00,
-                              positions_exposure=0.00,
-                              positions=positions
+                              positions_value=0.0,
+                              positions_exposure=0.0,
+                              positions={}
                               )
         return portfolio
 
     async def get_account(self) -> Account:
-        pass
+        return Account(
+            settled_cash=self.cash_balance,
+            accrued_interest=0.0,
+            buying_power=self.cash_balance,
+            equity_with_loan=self.cash_balance,
+            total_positions_value=0.0,
+            total_positions_exposure=0.0,
+            regt_equity=self.cash_balance,
+            regt_margin=0.0,
+            initial_margin_requirement=0.0,
+            maintenance_margin_requirement=0.0,
+            available_funds=self.cash_balance,
+            excess_liquidity=self.cash_balance,
+            cushion=1.0 if self.cash_balance else 0.0,
+            day_trades_remaining=float("inf"),
+            leverage=0.0,
+            net_leverage=0.0,
+            net_liquidation=self.cash_balance,
+        )
 
-    def get_time_skew(self):
-        pass
+    async def order(self, asset: ExchangeAsset, amount: int,
+                    style: ExecutionStyle) -> Order:
+        """Create and submit an open simulated order."""
+        order = Order(
+            id=uuid.uuid4().hex,
+            dt=datetime.datetime.now(tz=datetime.timezone.utc),
+            asset=asset,
+            amount=int(amount),
+            filled=0,
+            commission=0.0,
+            execution_style=style,
+            status=OrderStatus.OPEN,
+            exchange_name=self.name,
+            trading_account_id=self.account_id,
+        )
+        return await self.submit_order(order)
 
-    async def order(self, asset, amount, style):
-        pass
-
-    def is_alive(self):
-        pass
-
-    async def get_orders(self) -> dict[str, Order]:
-        return {}
-
-    async def get_transactions(self, orders: dict[Asset, dict[str, Order]],
+    async def get_transactions(self, orders: dict[ExchangeAsset, dict[str, Order]],
                                current_dt: datetime.datetime, same_bar_execution: bool):
         """
         Creates a list of transactions based on the current open orders,
@@ -171,26 +228,19 @@ class SimulationExchange(Exchange):
                 order.filled += txn.amount
                 order.commission += additional_commission
                 order.dt = txn.dt
+                # self.cash_balance -= txn.amount * txn.price + additional_commission
                 transactions.append(txn)
                 if not order.open:
                     closed_orders.append(order)
 
         return transactions, commissions, closed_orders
 
-    async def get_orders_by_ids(self, order_ids: list[str]):
-        pass
+    async def cancel_order(self, order_id: str) -> None:
+        """Leave cancellation to the shared blotter, which owns simulated orders."""
+        return None
 
-    async def get_transactions_by_order_ids(self, order_ids: list[str]):
-        pass
-
-    async def cancel_order(self, order_param):
-        pass
-
-    def get_last_traded_dt(self, asset):
-        pass
-
-    async def get_spot_value(self, assets: frozenset[Asset], fields: frozenset[str], dt: datetime.datetime,
-                             data_frequency: datetime.timedelta = None) -> pl.DataFrame:
+    async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt: datetime.datetime,
+                             data_frequency: datetime.timedelta | Period = None) -> pl.DataFrame:
         return await self.get_data_by_limit(
             fields=fields,
             limit=1,
@@ -210,20 +260,21 @@ class SimulationExchange(Exchange):
                                  include_end_date: bool,
                                  source: str
                                  ) -> pl.DataFrame:
-        return await self.data_source.get_data_by_limit(fields=fields,
-                                                        limit=limit,
-                                                        end_date=end_date,
-                                                        frequency=frequency,
-                                                        assets=assets,
-                                                        include_end_date=include_end_date,
-                                                        )
+        return self.data_source.get_data_by_date(
+            fields=fields,
+            from_date=start_date,
+            to_date=end_date,
+            frequency=frequency,
+            assets=assets,
+            include_bounds=include_end_date,
+        )
 
     @aiocache.cached(cache=Cache.MEMORY)
     async def get_data_by_limit(self, fields: frozenset[str],
                                 limit: int,
                                 end_date: datetime.datetime,
                                 frequency: datetime.timedelta | Period,
-                                assets: frozenset[Asset],
+                                assets: frozenset[ExchangeAsset],
                                 include_end_date: bool,
                                 ) -> pl.DataFrame:
         return await self.data_source.get_data_by_limit(fields=fields,

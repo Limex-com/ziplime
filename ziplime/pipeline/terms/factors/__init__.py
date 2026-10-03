@@ -15,7 +15,7 @@ from .custom_factor import CustomFactor
 from .events.business_day_since_previous_event import BusinessDaysSincePreviousEvent
 from .events.business_days_until_next_event import BusinessDaysUntilNextEvent
 from .factor import Factor
-from .grouped_row_transform import GroupedRowTransform
+from .grouped_row_transform import GroupedRowTransform  # noqa: F401 - compatibility re-export
 from .latest import Latest
 from .recarray_field import RecarrayField
 from .statistical.rolling_linear_regression_of_returns import RollingLinearRegressionOfReturns
@@ -70,4 +70,3 @@ __all__ = [
     "VWAP",
     "WeightedAverageValue",
 ]
-

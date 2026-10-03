@@ -15,7 +15,6 @@ from ziplime.utils.numpy_utils import (
 )
 
 
-
 class BusinessDaysUntilNextEvent(Factor):
     """
     Abstract class for business days since a next event.

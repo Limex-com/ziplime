@@ -402,9 +402,9 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
             date_indexes[: last_adjustment_split_asof_idx + 1],
         )
         post_adjustments = (
-            adjustment_values[last_adjustment_split_asof_idx + 1 :],
-            date_indexes[last_adjustment_split_asof_idx + 1 :],
-            timestamps[last_adjustment_split_asof_idx + 1 :],
+            adjustment_values[last_adjustment_split_asof_idx + 1:],
+            date_indexes[last_adjustment_split_asof_idx + 1:],
+            timestamps[last_adjustment_split_asof_idx + 1:],
         )
         return pre_adjustments, post_adjustments
 
@@ -468,4 +468,3 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
                     add_new_adjustments(
                         overwrites, post[column_name][ts], column_name, ts
                     )
-

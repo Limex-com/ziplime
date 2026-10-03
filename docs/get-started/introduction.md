@@ -39,7 +39,7 @@ Ziplime is Zipline reborn from scratch for 2025:
 
 | Feature | Description |
 |---|---|
-| **AI assistant** | Describe strategies in plain English — no code required |
+| **MCP server** | Claude, Cursor or any agent drives the engine as a tool |
 | **Polars engine** | 2–5× faster than pandas-based backtesters |
 | **Any frequency** | 1-minute, hourly, daily, weekly, monthly, or custom |
 | **Fundamental data** | P/E, revenue, margins, earnings alongside OHLCV |
@@ -68,30 +68,31 @@ Backtrader        ████████████████████�
 
 ## Two Ways to Use Ziplime
 
-### 1. AI Mode — No Code Required
+### 1. AI Mode — Let Your Agent Drive
 
-Describe your strategy. Ziplime handles everything else.
+Give Claude, Cursor or any MCP client the engine as a tool. It ingests data, writes the strategy,
+runs the backtest and reads the results back to you.
 
 ```bash
-pip install -r ai_assistant/requirements.txt
-export OPENROUTER_API_KEY=your_key_here
-python -m ai_assistant
+pip install "ziplime[mcp]"
+```
+
+```json
+{
+  "mcpServers": {
+    "ziplime": { "command": "ziplime", "args": ["mcp"] }
+  }
+}
 ```
 
 ```
-You: RSI mean-reversion on AAPL and MSFT for 2023, starting with $50,000
-
-AI: Running backtest...
-    ╭─ Backtest Results ──────────────────────────╮
-    │ Total Return         +18.4%                 │
-    │ Annualized Return    +18.4%                 │
-    │ Sharpe Ratio          1.42                  │
-    │ Max Drawdown         -8.1%                  │
-    │ Final Value         $59,200                 │
-    ╰─────────────────────────────────────────────╯
+You: Backtest a 20/50 SMA crossover on AAPL for 2023 and compare it to buy-and-hold.
 ```
 
-The AI downloads data from Yahoo Finance, generates production-ready algorithm code, runs the simulation, and interprets the results — all in a single conversation.
+!!! warning
+    The local server lets the agent write a strategy file and run it: arbitrary Python executing
+    on your machine with your permissions. `check_strategy_code` catches mistakes; it is not a
+    sandbox. Review what the agent writes, or run the server in a container.
 
 ### 2. Code Mode — Full Control
 
@@ -99,17 +100,22 @@ Write strategies in Python using the familiar Zipline lifecycle:
 
 ```python
 # my_strategy.py
+import datetime
+
 from ziplime.finance.execution import MarketOrder
 
 async def initialize(context):
     context.asset = await context.symbol("AAPL")
 
 async def handle_data(context, data):
-    df = data.history(assets=[context.asset], fields=["close"], bar_count=50)
-    closes = df["close"].to_numpy()
+    df = await data.history(assets=[context.asset], fields=["close"], bar_count=50,
+                            frequency=datetime.timedelta(days=1))
+    closes = df["close"].to_list()
+    if len(closes) < 50:
+        return
 
-    sma20 = talib.SMA(closes, timeperiod=20)[-1]
-    sma50 = talib.SMA(closes, timeperiod=50)[-1]
+    sma20 = sum(closes[-20:]) / 20
+    sma50 = sum(closes) / 50
 
     if sma20 > sma50:
         await context.order_target_percent(
@@ -121,18 +127,16 @@ async def handle_data(context, data):
         )
 ```
 
-```python
-import asyncio, datetime
-from ziplime.core.run_simulation import run_simulation
+Load the data once, then run it:
 
-asyncio.run(run_simulation(
-    algorithm_file="my_strategy.py",
-    start_date=datetime.datetime(2023, 1, 1, tzinfo=datetime.timezone.utc),
-    end_date=datetime.datetime(2023, 12, 31, tzinfo=datetime.timezone.utc),
-    total_cash=100_000,
-    trading_calendar="NYSE",
-))
+```bash
+ziplime ingest-assets
+ziplime ingest -b quickstart -s AAPL --start-date 2023-01-01 --end-date 2023-12-31
+ziplime run -f my_strategy.py -b quickstart -s AAPL --start-date 2023-01-03 --end-date 2023-12-29
 ```
+
+The [README quick start](https://github.com/Limex-com/ziplime#-python-quick-start) shows the same
+run from Python with `run_simulation`.
 
 ---
 
@@ -160,7 +164,7 @@ asyncio.run(run_simulation(
 │                    Natural Language Input                     │
 │             "RSI strategy on AAPL, 2023"                     │
 └─────────────────────────┬────────────────────────────────────┘
-                          │ AI Assistant (OpenRouter LLM)
+                          │ Your agent, over MCP
 ┌─────────────────────────▼────────────────────────────────────┐
 │                    Your Algorithm                             │
 │   async initialize()  ·  async handle_data()                 │
@@ -197,7 +201,7 @@ asyncio.run(run_simulation(
 
 1. **[Install Ziplime](installation.md)**
 2. **[Run your first backtest](../tutorial/first-steps.md)**
-3. **[Try the AI assistant](../ai-assistant/index.md)** — no code needed
+3. **[Connect your agent over MCP](#1-ai-mode-let-your-agent-drive)**
 4. **[Learn the algorithm API](../tutorial/algorithm-file-structure.md)**
 
 ---

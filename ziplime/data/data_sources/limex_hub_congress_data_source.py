@@ -62,7 +62,10 @@ def fetch_congress_data_task(
 
     df = df.with_columns(
         pl.lit(symbol).alias("symbol"),
-        date=pl.col("notification_date").str.to_datetime(format="%Y-%m-%d", strict=False).dt.replace_time_zone(str(date_from.tzinfo)),
+        date=(
+            pl.col("notification_date").str.to_datetime(format="%Y-%m-%d", strict=False)
+            .dt.replace_time_zone(str(date_from.tzinfo))
+        ),
         amount=((pl.col("min_amount_usd") + pl.col("max_amount_usd")) / 2),
     ).filter(
         pl.col("date") >= date_from,
@@ -74,7 +77,6 @@ def fetch_congress_data_task(
 
 class LimexHubCongressDataSource(DataBundleSource):
     def __init__(self, limex_api_key: str, maximum_threads: int | None = None):
-        super().__init__()
         self._limex_api_key = limex_api_key
         self._logger = structlog.get_logger(__name__)
         self._limex_client = limexhub.RestAPI(token=limex_api_key)

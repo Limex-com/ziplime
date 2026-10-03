@@ -1,19 +1,32 @@
 import datetime
+from collections.abc import Sequence
+from typing import Any
+
 import polars as pl
-from typing import Any, Self
+import pandas as pd
+from typing import Self
 
 from ziplime.assets.entities.asset import Asset
-from ziplime.assets.models.dividend import Dividend
+
+from ziplime.assets.models.divident_payout_model import DividendPayoutModel
+from ziplime.assets.models.stock_dividend_payout_model import StockDividendPayoutModel
 
 
 class AdjustmentRepository:
     async def get_splits(self, assets: frozenset[Asset], dt: datetime.date): ...
 
-    async def get_stock_dividends(self, sid: int, trading_days: pl.Series) -> list[Dividend]: ...
+    async def get_dividend_payouts(self, sid: int, trading_days: pl.Series) -> list[DividendPayoutModel]: ...
 
-    async def load_pricing_adjustments(self, columns, dates, assets): ...
+    async def get_stock_dividends(self, sid: int, trading_days: pl.Series) -> list[StockDividendPayoutModel]: ...
 
-    def to_json(self): ...
+    async def load_pricing_adjustments(
+        self,
+        columns: Sequence[str],
+        dates: pd.DatetimeIndex,
+        assets: pd.Index,
+    ) -> list[Any]: ...
+
+    def to_json(self) -> dict[str, Any]: ...
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> Self: ...

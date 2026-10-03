@@ -9,8 +9,10 @@ import structlog
 from pandas import isnull
 
 from ziplime.assets.entities.asset import Asset
+from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.errors import LiquidityExceeded
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.shared import FinancialModelMeta
@@ -58,7 +60,7 @@ class SlippageModel(metaclass=FinancialModelMeta):
     """
 
     # Asset types that are compatible with the given model.
-    allowed_asset_types = (Equity, FuturesContract)
+    allowed_asset_types = (Equity, Bond, FuturesContract, OptionContract)
 
     def __init__(self):
         self._volume_for_bar = 0
@@ -119,9 +121,10 @@ class SlippageModel(metaclass=FinancialModelMeta):
 
         volume_s = current_val["volume"]
         price_s = current_val[price_used_in_order_execution]
-        print("")
         if len(volume_s) == 0:
-            self._logger.warning(f"No volume for {current_dt}, assets={[a.asset_name for a in assets]}")
+            # `assets` holds exchange listings, which are named by `symbol`; `asset_name` lives on
+            # the instrument and reaching for it here turned a warning into an AttributeError.
+            self._logger.warning(f"No volume for {current_dt}, assets={[a.symbol for a in assets]}")
             # volume is 0, since there is no volume our order couldn't have been executed
             return
         volume = volume_s[0]
@@ -160,15 +163,6 @@ class SlippageModel(metaclass=FinancialModelMeta):
                 )
 
                 if execution_price is not None:
-                    # print(
-                    #     f"[{current_dt}] Execution price for quantity {execution_volume} is {execution_price}. Open price is {price_s[0]} Total={execution_volume * execution_price}")
-                    # txn = create_transaction(
-                    #     order,
-                    #     data.current_dt,
-                    #     execution_price,
-                    #     execution_volume,
-                    # )
-
                     txn = Transaction(
                         id=uuid.uuid4().hex,
                         asset=order.asset,
@@ -179,7 +173,6 @@ class SlippageModel(metaclass=FinancialModelMeta):
                         exchange_name=exchange.name,
                         trading_account_id=order.trading_account_id
                     )
-
 
             except LiquidityExceeded:
                 break

@@ -14,4 +14,3 @@ class Latest(LatestMixin, CustomFactor):
 
     def compute(self, today, assets, out, data):
         out[:] = data[-1]
-

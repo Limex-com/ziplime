@@ -1,5 +1,4 @@
 import datetime
-from abc import abstractmethod
 from dataclasses import dataclass
 
 
@@ -19,7 +18,6 @@ class Asset:
 
     def __hash__(self):
         return hash(self.id)
-
 
     def __str__(self):
         return f"{self.asset_name}-{self.isin}-({self.id})"

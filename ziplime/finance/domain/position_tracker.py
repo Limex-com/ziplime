@@ -2,7 +2,6 @@ import uuid
 
 import datetime
 from collections import OrderedDict
-from functools import partial
 from math import isnan, copysign
 
 import numpy as np
@@ -10,8 +9,12 @@ import structlog
 
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
-from ziplime.assets.models.dividend import Dividend
+from ziplime.assets.entities.bond import Bond
+from ziplime.assets.entities.bond_event import BondEvent
+from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
+from ziplime.finance.bonds import BondBook
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.domain.position import Position
 from ziplime.finance.domain.transaction import Transaction
@@ -19,7 +22,6 @@ from ziplime.finance.finance_ext import (
     PositionStats,
     calculate_position_tracker_stats
 )
-import polars as pl
 
 
 class PositionTracker:
@@ -31,13 +33,23 @@ class PositionTracker:
         The data frequency of the simulation.
     """
 
-    def __init__(self, data_frequency: datetime.timedelta):
+    def __init__(self, data_frequency: datetime.timedelta, bond_book: BondBook | None = None):
 
-        # (exchange_id, asset, trading_account_id)
+        # (exchange_name, trading_account_id, asset)
         self.positions = OrderedDict()
+        # (exchange_name, trading_account_id)
+        self.positions_by_trading_account = {}
+        # (asset,)
+        self.positions_by_asset = {}
+        # (exchange_name,)
+        self.positions_by_exchange = {}
 
         self._unpaid_dividends = {}
         self._unpaid_stock_dividends = {}
+        #: pay date -> money owed, from coupons and amortization instalments already earned.
+        self._unpaid_bond_payments: dict[datetime.date, float] = {}
+        #: Coupon and amortization schedules, shared with the ledger that owns this tracker.
+        self.bond_book = bond_book if bond_book is not None else BondBook()
         # self._positions_store = {}
 
         self.data_frequency = data_frequency
@@ -46,6 +58,40 @@ class PositionTracker:
         self._dirty_stats = True
         self._stats = PositionStats.new()
         self._logger = structlog.get_logger(__name__)
+        self.position_trades = {}
+
+    def _register_position(
+            self,
+            position: Position,
+            position_key: tuple,
+            position_key_trading_account: tuple,
+            position_key_asset: tuple,
+            position_key_exchange: tuple,
+    ) -> None:
+        # Every index holds a reference to the very same Position object;
+        # only the keys are duplicated.
+        self.positions[position_key] = position
+        self.positions_by_trading_account.setdefault(
+            position_key_trading_account, set()
+        ).add(position)
+        self.positions_by_asset.setdefault(position_key_asset, set()).add(position)
+        self.positions_by_exchange.setdefault(position_key_exchange, set()).add(position)
+
+    def _unregister_position(self, position: Position) -> None:
+        del self.positions[
+            (position.exchange_name, position.trading_account_id, position.asset)
+        ]
+        for positions_by_key, key in (
+                (self.positions_by_trading_account, (position.exchange_name, position.trading_account_id)),
+                (self.positions_by_asset, (position.asset,)),
+                (self.positions_by_exchange, (position.exchange_name,))
+        ):
+            positions = positions_by_key.get(key)
+            if positions is None:
+                continue
+            positions.discard(position)
+            if not positions:
+                del positions_by_key[key]
 
     def update_position(
             self,
@@ -58,12 +104,13 @@ class PositionTracker:
             cost_basis=None,
     ) -> Position:
         self._dirty_stats = True
-        if exchange_name not in self.positions:
-            self.positions[exchange_name] = {}
-        if trading_account_id not in self.positions[exchange_name]:
-            self.positions[exchange_name][trading_account_id] = {}
 
-        if asset not in self.positions[exchange_name][trading_account_id]:
+        position_key = (exchange_name, trading_account_id, asset)
+        position_key_trading_account = (exchange_name, trading_account_id)
+        position_key_asset = (asset,)
+        position_key_exchange = (exchange_name,)
+
+        if position_key not in self.positions:
             position = Position(
                 asset=asset,
                 exchange_name=exchange_name,
@@ -73,9 +120,15 @@ class PositionTracker:
                 last_sale_price=float(0.0),
                 last_sale_date=None,
             )
-            self.positions[exchange_name][trading_account_id][asset] = position
+            self._register_position(
+                position=position,
+                position_key=position_key,
+                position_key_trading_account=position_key_trading_account,
+                position_key_asset=position_key_asset,
+                position_key_exchange=position_key_exchange,
+            )
         else:
-            position = self.positions[exchange_name][trading_account_id][asset]
+            position = self.positions[position_key]
 
         if amount is not None:
             position.amount = amount
@@ -116,17 +169,10 @@ class PositionTracker:
             last_sale_date=None,
             cost_basis=None
         )
+
         self._update_position(position=position, txn=txn)
         if position.amount == 0:
-
-            del self.positions[position.exchange_name][position.trading_account_id][position.asset]
-            #
-            # try:
-            #     # if this position exists in our user-facing dictionary,
-            #     # remove it as well.
-            #     del self._positions_store[asset]
-            # except KeyError:
-            #     pass
+            self._unregister_position(position)
 
     def _update_position(self, position: Position, txn: Transaction):
         if position.asset != txn.asset:
@@ -162,9 +208,12 @@ class PositionTracker:
 
     def handle_commission(self, asset: ExchangeAsset, cost: float) -> None:
         # Adjust the cost basis of the stock if we own it
-        if asset in self.positions:
-            self._dirty_stats = True
-            self.adjust_commission_cost_basis(position=self.positions[asset], cost=cost)
+        positions = self.positions_by_asset.get((asset,))
+        if not positions:
+            return
+        self._dirty_stats = True
+        for position in positions:
+            self.adjust_commission_cost_basis(position=position, cost=cost)
 
     def adjust_commission_cost_basis(self, position: Position, cost: float):
         """
@@ -198,8 +247,17 @@ class PositionTracker:
         # cost_basis positive, while subtracting the commission.
 
         prev_cost = position.cost_basis * position.amount
-        if isinstance(position.asset, FuturesContract):
-            cost_to_use = cost / position.asset.price_multiplier
+        instrument = position.asset.asset
+        if isinstance(instrument, (FuturesContract, OptionContract)):
+            # Both carry their cost basis in quoted units -- points for a future, premium for an
+            # option -- while a commission arrives in money, so it has to be divided by the
+            # multiplier before it can be folded in.
+            cost_to_use = cost / instrument.multiplier
+        elif isinstance(instrument, Bond):
+            # A bond's cost basis is carried in quote units (percent of face), so a commission in
+            # money has to be converted before it can be folded in.
+            per_point = self.bond_book.money_per_quote_unit(instrument, position.last_sale_date)
+            cost_to_use = cost / per_point if per_point else cost
         else:
             cost_to_use = cost
         new_cost = prev_cost + cost_to_use
@@ -220,19 +278,26 @@ class PositionTracker:
         """
         total_leftover_cash = 0
 
-        for asset, ratio in splits:
-            if asset in self.positions:
-                self._dirty_stats = True
+        for split in splits:
+            for position in self.positions.values():
+                if position.asset.asset.id == split.asset.id:
+                    self._dirty_stats = True
+                    leftover_cash = self.handle_split(position=position, asset=split.asset, ratio=split.ratio)
+                    total_leftover_cash += leftover_cash
 
-                # Make the position object handle the split. It returns the
-                # leftover cash from a fractional share, if there is any.
-                position = self.positions[asset]
-                leftover_cash = self.handle_split(position=position, asset=asset, ratio=ratio)
-                total_leftover_cash += leftover_cash
+        # for split in splits:
+        #     if split.asset in self.positions:
+        #         self._dirty_stats = True
+        #
+        #         # Make the position object handle the split. It returns the
+        #         # leftover cash from a fractional share, if there is any.
+        #         position = self.positions[split.asset]
+        #         leftover_cash = self.handle_split(position=position, asset=split.asset, ratio=split.ratio)
+        #         total_leftover_cash += leftover_cash
 
         return total_leftover_cash
 
-    def earn_dividend(self, position: Position, dividend: Dividend) -> dict[str, float]:
+    def earn_dividend(self, position: Position, dividend: DividendPayout) -> dict[str, float]:
         """
         Register the number of shares we held at this dividend's ex date so
         that we can pay out the correct amount on the dividend's pay date.
@@ -249,14 +314,14 @@ class PositionTracker:
             "share_count": np.floor(position.amount * float(stock_dividend.ratio)),
         }
 
-    def handle_split(self, position: Position, asset: ExchangeAsset, ratio: float):
+    def handle_split(self, position: Position, asset: Asset, ratio: float):
         """
         Update the position by the split ratio, and return the resulting
         fractional share that will be converted into cash.
 
         Returns the unused cash.
         """
-        if position.asset != asset:
+        if position.asset.asset != asset:
             raise Exception("updating split with the wrong asset!")
 
         # adjust the # of shares by the ratio
@@ -302,21 +367,35 @@ class PositionTracker:
             namedtuples.
         """
         for cash_dividend in cash_dividends:
-            self._dirty_stats = True  # only mark dirty if we pay a dividend
-
             # Store the earned dividends so that they can be paid on the
             # dividends' pay_dates.
-            div_owed = self.earn_dividend(position=self.positions[cash_dividend.asset], dividend=cash_dividend)
+            divs_owed = [
+                self.earn_dividend(position=position, dividend=cash_dividend)
+                for position in self.positions.values()
+                if position.asset.asset.id == cash_dividend.asset.id
+            ]
+            if not divs_owed:
+                continue
+            self._dirty_stats = True  # only mark dirty if we pay a dividend
             try:
-                self._unpaid_dividends[cash_dividend.pay_date].append(div_owed)
+                self._unpaid_dividends[cash_dividend.pay_date].extend(divs_owed)
             except KeyError:
-                self._unpaid_dividends[cash_dividend.pay_date] = [div_owed]
+                self._unpaid_dividends[cash_dividend.pay_date] = divs_owed
 
         for stock_dividend in stock_dividends:
+            position = next(
+                (
+                    position
+                    for position in self.positions.values()
+                    if position.asset.asset.id == stock_dividend.asset.id
+                ),
+                None,
+            )
+            if position is None:
+                continue
             self._dirty_stats = True  # only mark dirty if we pay a dividend
 
-            div_owed = self.earn_stock_dividend(position=self.positions[stock_dividend.asset],
-                                                stock_dividend=stock_dividend)
+            div_owed = self.earn_stock_dividend(position=position, stock_dividend=stock_dividend)
             try:
                 self._unpaid_stock_dividends[stock_dividend.pay_date].append(
                     div_owed,
@@ -325,6 +404,41 @@ class PositionTracker:
                 self._unpaid_stock_dividends[stock_dividend.pay_date] = [
                     div_owed,
                 ]
+
+    def earn_bond_payments(self, bond_events: list[BondEvent]) -> None:
+        """Record what the coupons and amortizations in ``bond_events`` will pay us.
+
+        Entitlement is settled on the record date and paid later, so this snapshots the position
+        size now and the money moves in :meth:`pay_bond_payments`. Selling in between does not
+        forfeit the payment, which is what a record date means; a short position owes it, and the
+        negative amount carries that through.
+
+        Holdings are summed across every exchange and account, so the same coupon is never earned
+        twice and a position split over two accounts is paid in full.
+        """
+        for event in bond_events:
+            held = sum(position.amount
+                       for position in self.positions.values()
+                       if isinstance(position.asset.asset, Bond)
+                       and position.asset.asset.id == event.asset.id)
+            if held == 0:
+                continue
+            self._dirty_stats = True
+            owed = held * event.value
+            self._unpaid_bond_payments[event.date] = (
+                self._unpaid_bond_payments.get(event.date, 0.0) + owed)
+
+    def pay_bond_payments(self, session: datetime.date) -> float:
+        """Cash from every coupon and amortization instalment due on or before ``session``.
+
+        On or *before*, not on: a payment dated to a weekend or an exchange holiday still has to
+        reach the account, and it reaches it on the next session rather than never.
+
+        Negative for a short position: a short bond seller owes the coupon to whoever lent them
+        the paper, exactly as a short equity owes the dividend.
+        """
+        due = [date for date in self._unpaid_bond_payments if date <= session]
+        return sum(self._unpaid_bond_payments.pop(date) for date in due)
 
     def pay_dividends(self, next_trading_day: datetime.datetime):
         """
@@ -356,46 +470,60 @@ class PositionTracker:
         for stock_payment in stock_payments:
             payment_asset = stock_payment["payment_asset"]
             share_count = stock_payment["share_count"]
-            # note we create a Position for stock dividend if we don't
-            # already own the asset
-            if payment_asset in self.positions:
-                position = self.positions[payment_asset]
-            else:
-                position = self.positions[payment_asset] = Position(
-                    asset=payment_asset,
-                    amount=0,
-                    cost_basis=0.0,
-                    last_sale_price=0.0,
-                    last_sale_date=None
 
+            positions = self.positions_by_asset.get((payment_asset,))
+            if not positions:
+                self._logger.warning(
+                    "Not paying stock dividend of {} shares of {}: no open "
+                    "position for the payment asset".format(
+                        share_count,
+                        getattr(payment_asset, "asset_name", payment_asset)
+                    )
                 )
-
-            position.amount += share_count
+                continue
+            for position in positions:
+                position.amount += share_count
 
         return net_cash_payment
 
-    def maybe_create_close_position_transaction(self, asset: ExchangeAsset, dt: datetime.datetime):
-        if not self.positions.get(asset):
-            return None
+    def close_positions(self, asset: ExchangeAsset, dt: datetime.datetime,
+                        price: float | None = None) -> list[Transaction]:
+        """Create a closing transaction for every open position in ``asset``.
 
-        amount = self.positions.get(asset).amount
-        # TODO: check this
-        price = self.data_bundle.get_spot_value(assets=asset, field="price", dt=dt,
-                                                data_frequency=self._data_frequency)
+        Args:
+            price: What to liquidate at. Defaults to each position's own last mark, which is the
+                right answer when the instrument simply stopped trading. An expiring option passes
+                its **settlement** price instead -- see
+                :meth:`ziplime.finance.domain.ledger.Ledger.close_position`.
 
-        # Get the last traded price if price is no longer available
-        if isnan(price):
-            price = self.positions.get(asset).last_sale_price
-
-        return Transaction(
-            id=uuid.uuid4().hex,
-            asset=asset,
-            amount=-amount,
-            dt=dt,
-            price=price,
-            order_id=None,
-            exchange_name=None
-        )
+        A position that has never been marked, and for which no ``price`` is supplied, contributes
+        no transaction rather than one priced NaN: a NaN trade posts to the ledger and quietly
+        turns the whole portfolio value into NaN from that bar on.
+        """
+        positions = self.positions_by_asset.get((asset,))
+        if not positions:
+            return []
+        transactions = []
+        for position in positions:
+            if position.amount == 0:
+                continue
+            mark = position.last_sale_price if price is None else price
+            if mark is None or isnan(mark):
+                self._logger.warning(
+                    "Cannot close a position: it has never been marked",
+                    symbol=asset.symbol, dt=str(dt))
+                continue
+            transactions.append(Transaction(
+                id=uuid.uuid4().hex,
+                asset=asset,
+                amount=-position.amount,
+                dt=dt,
+                price=mark,
+                order_id=None,
+                exchange_name=position.exchange_name,
+                trading_account_id=position.trading_account_id,
+            ))
+        return transactions
 
     def get_positions(self):
         return self.positions
@@ -409,11 +537,9 @@ class PositionTracker:
 
     def get_position_list(self):
         return [
-            pos
-            for trading_account_values in self.positions.values()
-            for trading_account_positions in trading_account_values.values()
-            for pos in trading_account_positions.values()
-            if pos.amount != 0
+            position
+            for position in self.positions.values()
+            if position.amount != 0
         ]
 
     def sync_last_sale_prices(self, dt: datetime.datetime,
@@ -426,16 +552,24 @@ class PositionTracker:
         self._dirty_stats = True
 
         for (asset_sid, exchange), last_sale_price in prices.items():
-            for trading_account, asset_positions in self.positions[exchange.name].items():
-                for asset, position in asset_positions.items():
-                    if asset.sid == asset_sid:
-                        # for position in self.positions[(asset, exchange)].values():
-                        if last_sale_price is None:
-                            self._logger.warning(
-                                f"Error updating last sale price for {position.asset.asset_name} on {dt}. Price is None")
-                        else:
-                            position.last_sale_price = last_sale_price
-                            position.last_sale_date = dt
+            exchange_positions = self.positions_by_exchange.get((exchange.name,))
+            if not exchange_positions:
+                continue
+            for position in exchange_positions:
+                if position.asset.sid != asset_sid:
+                    continue
+                if last_sale_price is None:
+                    # An instrument that did not trade in this bar. Never happens on daily
+                    # bars, which is why this branch raised AttributeError on a field
+                    # `ExchangeAsset` does not have until an intraday run reached it. The
+                    # position keeps its previous mark, which is the right answer: no
+                    # trade is not a price of zero.
+                    self._logger.debug(
+                        "No trade in this bar; last sale price left as it was",
+                        asset=str(position.asset), dt=dt)
+                else:
+                    position.last_sale_price = last_sale_price
+                    position.last_sale_date = dt
         # for position in self.positions[()].values():
         #     # print("SYNCING")
         #     #last_sale_price = (await get_price(position.asset))["close"][0]
@@ -450,6 +584,14 @@ class PositionTracker:
         #     else:  # last_sale_price == last_sale_price:
         #         position.last_sale_price = last_sale_price
         #         position.last_sale_date = dt
+
+    def get_position(
+            self,
+            asset: ExchangeAsset,
+            exchange_name: str,
+            trading_account_id: str,
+    ) -> Position | None:
+        return self.positions.get((exchange_name, trading_account_id, asset))
 
     @property
     def stats(self):
@@ -466,8 +608,9 @@ class PositionTracker:
         the stats may have changed.
         """
         if self._dirty_stats:
-            calculate_position_tracker_stats(self.positions, position_count=len(self.get_position_list()),
-                                             stats=self._stats)
+            active_positions = self.get_position_list()
+            calculate_position_tracker_stats(active_positions, position_count=len(active_positions),
+                                             stats=self._stats, bond_book=self.bond_book)
             self._dirty_stats = False
 
         return self._stats

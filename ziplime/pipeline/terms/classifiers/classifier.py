@@ -13,6 +13,7 @@ from ziplime.lib.labelarray import LabelArray
 from ziplime.pipeline.dtypes import (
     CLASSIFIER_DTYPES,
 )
+from ziplime.pipeline.errors.invalid_classifier_comparison import InvalidClassifierComparison
 from ziplime.pipeline.terms.computable_term import ComputableTerm
 from ziplime.utils.compat import unicode
 from ziplime.utils.numpy_utils import (
@@ -110,7 +111,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
 
     del bad_compare
 
-    #@string_classifiers_only
+    # @string_classifiers_only
     def startswith(self, prefix: bytes | unicode):
         """
         Construct a Filter matching values starting with ``prefix``.
@@ -132,7 +133,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
             opargs=(prefix,),
         )
 
-    #@string_classifiers_only
+    # @string_classifiers_only
     def endswith(self, suffix: bytes | unicode):
         """
         Construct a Filter matching values ending with ``suffix``.
@@ -154,7 +155,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
             opargs=(suffix,),
         )
 
-    #@string_classifiers_only
+    # @string_classifiers_only
     def has_substring(self, substring: bytes | unicode):
         """
         Construct a Filter matching values containing ``substring``.
@@ -176,8 +177,8 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
             opargs=(substring,),
         )
 
-    #@string_classifiers_only
-    def matches(self, pattern: bytes | unicode | type(re.compile(""))):
+    # @string_classifiers_only
+    def matches(self, pattern: bytes | unicode | re.Pattern):
         """
         Construct a Filter that checks regex matches against ``pattern``.
 
@@ -203,7 +204,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
         )
 
     # TODO: Support relabeling for integer dtypes.
-    #@string_classifiers_only
+    # @string_classifiers_only
     def relabel(self, relabeler):
         """
         Convert ``self`` into a new classifier by mapping a function over each
@@ -220,6 +221,8 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
             A classifier produced by applying ``relabeler`` to each unique
             value produced by ``self``.
         """
+        from ziplime.pipeline.terms.classifiers.relabel import Relabel
+
         return Relabel(term=self, relabeler=relabeler)
 
     def element_of(self, choices):
@@ -396,4 +399,3 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
         from ..factors import PeerCount
 
         return PeerCount(inputs=[self], mask=mask)
-

@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytz
 
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.core.ingest_data import get_asset_service
 from ziplime.core.run_simulation import run_simulation
 from ziplime.data.services.bundle_service import BundleService
@@ -30,18 +32,25 @@ async def _run_simulation():
     )
     start_date = datetime.datetime(year=2025, month=1, day=3, tzinfo=pytz.timezone("America/New_York"))
     end_date = datetime.datetime(year=2025, month=2, day=1, tzinfo=pytz.timezone("America/New_York"))
-    market_data_bundle = await bundle_service.load_bundle(bundle_name="limex_us_minute_data",
-                                                          bundle_version=None,
-                                                          frequency=emission_rate,
-                                                          start_date=start_date,
-                                                          end_date=end_date,
-                                                          symbols=["VOO", "META", "AAPL", "AMZN", "NFLX", "GOOGL",
-                                                                   "VXX"],
-                                                          )
+
+    symbols = ["VOO", "META", "AAPL", "AMZN", "NFLX", "GOOGL", "VXX"]
+
+    exchange_assets = await asset_service.get_exchange_assets_by_symbols(symbols=[AssetSymbol(
+        symbol=symbol, mic=None
+    ) for symbol in symbols], asset_type=AssetType.EQUITY)
+
+    market_data_bundle, missing_data = await bundle_service.load_bundle(bundle_name="limex_us_minute_data",
+                                                                        bundle_version=None,
+                                                                        frequency=emission_rate,
+                                                                        start_date=start_date,
+                                                                        end_date=end_date,
+                                                                        assets=exchange_assets,
+                                                                        )
 
     custom_data_sources = []
-    custom_data_sources.append(
-        await bundle_service.load_bundle(bundle_name="limex_us_fundamental_data", bundle_version=None))
+    custom_data, missing_data = await bundle_service.load_bundle(bundle_name="limex_us_fundamental_data",
+                                                                 bundle_version=None)
+    custom_data_sources.append(custom_data)
 
     # run daily simulation
     result = await run_simulation(

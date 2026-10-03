@@ -15,15 +15,11 @@
 
 import abc
 import datetime
-import uuid
 from sys import float_info
 from numpy import isfinite
 import ziplime.utils.math_utils as zp_math
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.errors import BadOrderParameters
-from ziplime.trading.entities.orders.market_order_request import MarketOrderRequest
-from ziplime.trading.entities.trading_pair import TradingPair
-from ziplime.trading.enums.order_side import OrderSide
 from ziplime.trading.enums.order_type import OrderType
 from ziplime.utils.compat import consistent_round
 
@@ -74,20 +70,6 @@ class MarketOrder(ExecutionStyle):
 
     def to_order_type(self) -> OrderType:
         return OrderType.MARKET
-
-    async def to_order_request(self, base_asset: ExchangeAsset, quote_asset: ExchangeAsset,
-                               quantity: int,
-                               creation_dt: datetime.datetime,
-                               ) -> MarketOrderRequest:
-        order_req = MarketOrderRequest(
-            order_id=uuid.uuid4().hex,
-            trading_pair=TradingPair(base_asset=base_asset,
-                                     quote_asset=quote_asset),
-            order_side=OrderSide.BUY if quantity > 0 else OrderSide.SELL,
-            quantity=float(quantity),
-            creation_date=creation_dt
-        )
-        return order_req
 
     def __str__(self):
         return "MarketOrder()"
@@ -180,7 +162,7 @@ class StopLimitOrder(ExecutionStyle):
         the order will be placed if market price rises above this value.
     """
 
-    def __init__(self, limit_price: float, stop_price: float, tick_size: float=0.01):
+    def __init__(self, limit_price: float, stop_price: float, tick_size: float = 0.01):
         check_stoplimit_prices(price=limit_price, label="limit")
         check_stoplimit_prices(price=stop_price, label="stop")
 
@@ -255,16 +237,43 @@ def check_stoplimit_prices(price: float, label: str):
         if not isfinite(float(price)):
             raise BadOrderParameters(
                 msg=f"Attempted to place an order with a {label} price "
-                    f"of {price}."
+                f"of {price}."
             )
     # This catches arbitrary objects
     except TypeError as exc:
         raise BadOrderParameters(
             msg=f"Attempted to place an order with a {label} price "
-                f"of {type(price)}."
+            f"of {type(price)}."
         ) from exc
 
     if price < 0:
         raise BadOrderParameters(
             msg=f"Can't place a {label} order with a negative price."
         )
+
+
+def make_execution_style(limit_price: float | None = None, stop_price: float | None = None,
+                         style: ExecutionStyle | None = None) -> ExecutionStyle:
+    """Resolve the shorthand order arguments into a single execution style.
+
+    ``limit_price=N`` means :class:`LimitOrder`, ``stop_price=M`` means :class:`StopOrder`, both
+    together mean :class:`StopLimitOrder`, and neither means :class:`MarketOrder`. An explicit
+    ``style`` wins, but combining it with a loose price is an error rather than a silent choice of
+    one over the other.
+
+    Raises:
+        ValueError: if ``style`` is given alongside ``limit_price`` or ``stop_price``.
+    """
+    if style is not None:
+        if limit_price is not None or stop_price is not None:
+            raise ValueError(
+                "Pass either an execution style or limit_price/stop_price, not both."
+            )
+        return style
+    if limit_price is not None and stop_price is not None:
+        return StopLimitOrder(limit_price=limit_price, stop_price=stop_price)
+    if limit_price is not None:
+        return LimitOrder(limit_price=limit_price)
+    if stop_price is not None:
+        return StopOrder(stop_price=stop_price)
+    return MarketOrder()

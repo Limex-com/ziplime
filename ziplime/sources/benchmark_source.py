@@ -116,6 +116,37 @@ class BenchmarkSource:
 
         return daily_returns.filter(pl.col("date").is_between(start, end))
 
+    def daily_returns_by_session(self, sessions) -> pl.DataFrame:
+        """One benchmark return per **session**, in session order.
+
+        :meth:`daily_returns` answers with the days the benchmark has bars for, which is not the
+        same list as the sessions the simulation runs: an index can miss a session, and it can
+        carry a bar stamped on a day that is not one. Measured on the Moscow daily bundle,
+        `IMOEX@RTSX` holds 4,212 bar days against 4,203 XMOS sessions, with 907 sessions
+        unrepresented.
+
+        The metrics index this series **by position** -- ``daily_returns[:session_ix + 1]`` -- so
+        a single missing day shifts every reading after it onto the wrong session, and the run
+        dies on its last bar, where the lengths finally disagree, with
+        ``operands could not be broadcast together`` out of ``empyrical``. Aligning here makes
+        that impossible: the answer always has one row per session, a session the benchmark did
+        not trade counts as a flat day, and position *is* session.
+        """
+        wanted = pl.DataFrame({
+            "date": [session.date() if hasattr(session, "date") else session
+                     for session in sessions]
+        })
+        if not wanted.height:
+            return wanted.with_columns(pl.lit(0.0).alias("pct_change"))
+
+        returns = self.daily_returns(wanted["date"][0], wanted["date"][-1])
+        if returns.is_empty():
+            return wanted.with_columns(pl.lit(0.0).alias("pct_change"))
+
+        return (wanted
+                .join(returns.select(["date", "pct_change"]), on="date", how="left")
+                .with_columns(pl.col("pct_change").fill_null(0.0).fill_nan(0.0)))
+
     async def validate_benchmark(self, benchmark_asset: ExchangeAsset):
         # check if this security has a stock dividend.  if so, raise an
         # error suggesting that the user pick a different asset to use
@@ -159,4 +190,3 @@ class BenchmarkSource:
         daily_returns = minutely_returns[closes].pct_change()
         daily_returns.index = closes.index
         return daily_returns.iloc[1:]
-

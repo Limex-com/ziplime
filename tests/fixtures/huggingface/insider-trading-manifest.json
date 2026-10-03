@@ -1,0 +1,158 @@
+{
+  "amendment_policy": "retain original and Form 4/A knowledge events; reconcile conservatively without in-place historical overwrite",
+  "append_only": true,
+  "artifacts": [
+    {
+      "max_knowledge_date": "2004-06-23T04:00:00+00:00",
+      "min_knowledge_date": "2004-01-03T05:00:00+00:00",
+      "path": "data/features/knowledge_year=2004/part-000.parquet",
+      "rows": 11056,
+      "sha256": "35d39f130c980a800d2936af9adb07a31387d6f3b38a8c078bee3417a4e9da95"
+    },
+    {
+      "max_knowledge_date": "2004-09-20T04:00:00+00:00",
+      "min_knowledge_date": "2004-01-03T05:00:00+00:00",
+      "path": "data/features/knowledge_year=2004/part-001.parquet",
+      "rows": 10175,
+      "sha256": "c8075d1bb3d2eb0d56682459ed07972f5885f12462fab295e2a0d5a310b8fa73"
+    }
+  ],
+  "automation": {
+    "backfill_flavor": "cpu-xl",
+    "docs": "https://huggingface.co/docs/huggingface_hub/main/en/guides/jobs",
+    "gates": [
+      "ruff",
+      "pytest",
+      "validate_dataset"
+    ],
+    "registered": false,
+    "runner": "huggingface_jobs",
+    "schedule": null,
+    "script": "jobs/run.py",
+    "update_flavor": "cpu-upgrade"
+  },
+  "bundle_storage_class": "ziplime.data.services.file_system_delta_lake_bundle_storage.FileSystemDeltaLakeBundleStorage",
+  "bundle_storage_data": {
+    "table_uri": "data/pit/insider_trading.delta"
+  },
+  "classification_version": "1.0.0",
+  "config_rows": {
+    "features": 4083563,
+    "filings": 2430943,
+    "owners": 2604561,
+    "pit": 6460698,
+    "transactions": 6460698
+  },
+  "configs": {
+    "features": {
+      "grain": "one issuer/ticker and knowledge-day observation",
+      "path": "data/features/**/*.parquet"
+    },
+    "filings": {
+      "grain": "one SEC accession number",
+      "path": "data/filings/**/*.parquet"
+    },
+    "owners": {
+      "grain": "one accession-number/reporting-owner relation",
+      "path": "data/owners/**/*.parquet"
+    },
+    "pit": {
+      "delta_path": "data/pit/insider_trading.delta",
+      "grain": "one point-in-time transaction knowledge event",
+      "path": "data/pit/**/*.parquet"
+    },
+    "transactions": {
+      "grain": "one Form 4 Table I or Table II transaction row per filing revision",
+      "path": "data/transactions/**/*.parquet"
+    }
+  },
+  "coverage": {
+    "max_knowledge_date": "2016-03-03T02:57:48+00:00",
+    "min_knowledge_date": "2004-01-02T12:42:42+00:00"
+  },
+  "data_type": "PIT_DATA",
+  "dataset": "insider-trading",
+  "entity_domain": "us_equities",
+  "event_date": "transaction_date",
+  "event_date_type": "date",
+  "feature_version": "1.0.0",
+  "frequency_seconds": null,
+  "generated_at": "2026-09-03T14:07:53.621352+00:00",
+  "knowledge_date": "accepted_at",
+  "knowledge_date_policy": {
+    "dissemination_caveat": "accepted_at is a reproducible proxy, not exact sec.gov first availability; documents are often available within 1-3 minutes and ownership-form submissions begun after the 22:00 ET cutoff may wait until the next business day",
+    "fallbacks": [
+      "filing_date_eod_fallback",
+      "first_seen_fallback"
+    ],
+    "fallbacks_are_estimated": true,
+    "filing_date_eod_timezone": "America/New_York",
+    "primary": "edgar_acceptance_datetime"
+  },
+  "knowledge_date_type": "timestamp[us, tz=UTC]",
+  "name": "insider_trading",
+  "parser_version": "0.4.0",
+  "pit": {
+    "append_only": true,
+    "knowledge_lag_model": "sec_section16_two_business_days",
+    "model_knowledge_cutoff": null,
+    "statutory_lag_days": 2
+  },
+  "pretty_name": "ZipLime US Insider Trading Disclosures (PIT)",
+  "quality_ok": true,
+  "reconciler_version": "1.0.0",
+  "rows": 6460698,
+  "schema": {
+    "accession_number": "Utf8",
+    "amendment_status": "Utf8",
+    "disclosure_lag_days": "Int32",
+    "economic_type": "Utf8",
+    "holding_change_pct": "Float64",
+    "insider_cik": "Utf8",
+    "insider_name": "Utf8",
+    "is_10b5_1": "Boolean",
+    "is_derivative": "Boolean",
+    "is_director": "Boolean",
+    "is_officer": "Boolean",
+    "is_ten_percent_owner": "Boolean",
+    "issuer_cik": "Utf8",
+    "knowledge_date_source": "Utf8",
+    "logical_transaction_id": "Utf8",
+    "operation": "Utf8",
+    "pit_event_id": "Utf8",
+    "price": "Float64",
+    "primary_role": "Utf8",
+    "reporting_owner_ciks": "Utf8",
+    "reporting_owner_names": "Utf8",
+    "revision": "Int32",
+    "shares": "Float64",
+    "shares_owned_after": "Float64",
+    "signal_type": "Utf8",
+    "source_transaction_id": "Utf8",
+    "supersedes_transaction_id": "Utf8",
+    "ticker": "Utf8",
+    "transaction_code": "Utf8",
+    "transaction_id": "Utf8",
+    "transaction_value": "Float64"
+  },
+  "source": {
+    "base_url": "https://www.sec.gov/Archives/edgar/",
+    "fair_access_url": "https://www.sec.gov/about/developer-resources",
+    "forms": [
+      "4",
+      "4/A"
+    ],
+    "license": "Apache-2.0 for the recipe, schema and compilation; the underlying filings are issuer and reporting-person documents made available through SEC EDGAR (see NOTICE)",
+    "license_note": "Apache-2.0 applies only to rights ZipLime can license in its recipe, documentation, schema, and compilation. Underlying filings are issuer/reporting-person documents made available through SEC EDGAR; they are not asserted here to be U.S. Government works.",
+    "name": "U.S. SEC EDGAR",
+    "origin": "SEC EDGAR Form 4 and Form 4/A statements of changes in beneficial ownership, filed under Section 16(a) of the Securities Exchange Act",
+    "recipe": "recipe/",
+    "recipe_hash": "sha256:c90429a1797b1702f1a0c984eab4cb2aacad87706a670b0da62d4cd7522e14b0",
+    "schedule": null,
+    "user_agent": "ZipLime insider-trading/1.0 algo@limex.com"
+  },
+  "trading_calendar_name": null,
+  "update_schedule": null,
+  "version": "1.0.0",
+  "_fixture_note": "artifacts trimmed from 8722 entries to 2; the adapter does not read them"
+}

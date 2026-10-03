@@ -1,13 +1,12 @@
 import datetime
-import importlib.util
-import sys
+import inspect
 import traceback
 import uuid
 from collections import namedtuple, OrderedDict
 from contextlib import AsyncExitStack
 from copy import copy
 import warnings
-from typing import Callable, Literal
+from typing import Callable
 import pandas as pd
 import structlog
 from pygments.styles import default
@@ -21,6 +20,9 @@ from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.entities.option_contract import OptionContract
+from ziplime.finance.options.chain import OptionChain
+from ziplime.finance.options.greeks import Greeks, greeks, position_greeks, time_to_expiry
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.constants.logging_event import LoggingEvent
 from ziplime.core.algorithm_file import AlgorithmFile
@@ -42,7 +44,6 @@ from ziplime.gens.domain.trading_clock import TradingClock
 from ziplime.exchanges.exchange import Exchange
 from ziplime.trading.base_trading_algorithm import BaseTradingAlgorithm
 from ziplime.trading.enums.simulation_event import SimulationEvent
-from ziplime.trading.trading_signal_executor import TradingSignalExecutor
 from ziplime.utils.calendar_utils import get_calendar
 
 from ziplime.protocol import handle_non_market_minutes
@@ -67,15 +68,17 @@ from ziplime.errors import (
     ZeroCapitalError, SymbolNotFound, BarSimulationError,
 )
 
-from ziplime.finance.execution import ExecutionStyle
+from ziplime.finance.execution import ExecutionStyle, make_execution_style
 from ziplime.finance.asset_restrictions import Restrictions
 from ziplime.finance.cancel_policy import CancelPolicy
 from ziplime.finance.asset_restrictions import (
     NoRestrictions,
 )
+from ziplime.assets.domain.continuous_future import ContinuousFuture
+from ziplime.finance.margin import FuturesMarginModel
+from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.equity import Equity
-from ziplime.finance.domain.simulation_paremeters import SimulationParameters
 from ziplime.finance.metrics_tracker import MetricsTracker
 from ziplime.pipeline import Pipeline
 import ziplime.pipeline.domain as domain
@@ -91,7 +94,6 @@ from ziplime.utils.api_support import (
     disallowed_in_before_trading_start,
 )
 from ziplime.utils.compat import ExitStack
-from ziplime.utils.date_utils import make_utc_aware
 from ziplime.utils.cache import ExpiringCache
 
 from ziplime.utils.events import (
@@ -108,7 +110,10 @@ from ziplime.utils.math_utils import (
     round_if_near_integer,
 )
 from ziplime.sources.benchmark_source import BenchmarkSource
-import polars as pl
+from ziplime.vectorized.signals import (
+    PricePanel, SignalPanel, as_of_panel, normalise_signals, verify_causality,
+)
+
 
 # For creating and storing pipeline instances
 AttachedPipeline = namedtuple("AttachedPipeline", "pipe chunks eager")
@@ -119,6 +124,48 @@ class NoBenchmark(ValueError):
         super(NoBenchmark, self).__init__(
             "Must specify either benchmark_sid or benchmark_returns.",
         )
+
+
+def _named_universe(universe) -> dict:
+    """Accept either shape a strategy already writes its universe in.
+
+    A dict names the panel's columns explicitly. A plain list -- which is what every strategy in
+    `examples/huggingface` already builds -- is named by ticker, so vectorising one of those is a
+    `compute_signals` function and nothing else.
+    """
+    if isinstance(universe, dict):
+        return universe
+    if not isinstance(universe, (list, tuple, set, frozenset)):
+        raise TypeError(
+            f"context.universe has to be a list of listings or a dict of name -> listing, got "
+            f"{type(universe).__name__}.")
+
+    named = {}
+    for listing in universe:
+        symbol = getattr(listing, "symbol", None)
+        if symbol is None:
+            raise TypeError(
+                f"context.universe holds a {type(listing).__name__}, which has no symbol to name "
+                f"a column by. Pass listings, or a dict of name -> listing.")
+        if symbol in named:
+            # Two venues, one ticker. Naming both "T" would silently drop one of them from the
+            # panel, so the strategy has to say which name means which listing.
+            raise ValueError(
+                f"Two listings in context.universe are both called {symbol!r} "
+                f"({named[symbol].mic} and {listing.mic}). Give them names: "
+                f"context.universe = {{'{symbol}.{named[symbol].mic}': ..., "
+                f"'{symbol}.{listing.mic}': ...}}.")
+        named[symbol] = listing
+    return named
+
+
+def _as_datetime(value, tz, default: datetime.date) -> datetime.datetime:
+    """A source's start bound as an aware datetime, however it was stored."""
+    if isinstance(value, datetime.datetime):
+        return value if value.tzinfo else value.replace(tzinfo=tz)
+    if isinstance(value, datetime.date):
+        return datetime.datetime.combine(value, datetime.time.min, tzinfo=tz)
+    return datetime.datetime.combine(default, datetime.time.min, tzinfo=tz)
 
 
 class TradingAlgorithm(BaseTradingAlgorithm):
@@ -200,13 +247,14 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             create_event_context=None,
             stop_on_error: bool = False,
             same_bar_execution: bool = True,
+            futures_margin_model: FuturesMarginModel | None = None,
+            intraday_metrics: bool = False,
 
     ):
         self.algorithm = algorithm
         self.config = algorithm.config
         self.exchange_repository = exchange_repository
         self.stop_on_error = stop_on_error
-        self.trading_signal_executor = TradingSignalExecutor()
         # List of trading controls to be used to validate orders.
         self.trading_controls = []
 
@@ -259,7 +307,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
         self._handle_data = None
 
-        self._ledger = Ledger(trading_sessions=clock.sessions,
+        self._ledger = Ledger(futures_margin_model=futures_margin_model,
+                              trading_sessions=clock.sessions,
                               data_frequency=clock.emission_rate)
 
         self._initialize = algorithm.initialize
@@ -267,6 +316,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self._before_trading_start = algorithm.before_trading_start
         # Optional analyze function, gets called after run
         self._analyze = algorithm.analyze
+        # The vectorised half, computed once between `initialize` and the first bar.
+        self._compute_signals = getattr(algorithm, "compute_signals", None)
+        self._signals_warmup = int(getattr(algorithm, "warmup", 0) or 0)
+        #: Set by :meth:`_compute_vectorised_signals`; read by strategies as `context.signals`.
+        self.signals = None
 
         self.event_manager.add_event(
             ziplime.utils.events.Event(
@@ -297,7 +351,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             simulation_dt_func=self.get_datetime,
             trading_calendar=self.clock.trading_calendar,
             restrictions=self.restrictions,
-            data_sources=data_sources
+            data_sources=data_sources,
+            data_source_resolver=self._resolve_named_data_source,
         )
 
         # We don't have a datetime for the current snapshot until we
@@ -307,11 +362,19 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.clock = clock
 
         self.same_bar_execution = same_bar_execution
+        #: See MetricsTracker: the whole metric set on every intraday bar, or only at the close.
+        self.intraday_metrics = intraday_metrics
         self._logger = structlog.get_logger(__name__)
         self._session_count = 0
+        #: Listings whose bars ran out mid-run, see `data_delistings`.
+        self._data_delistings: dict[ExchangeAsset, datetime.date] = {}
         if self.same_bar_execution:
             self._logger.warning(
-                "You are running same day execution. Submitted orders in handle_data will be executed in the SAME bar where handle_data is running.")
+                "LOOK-AHEAD: same-bar execution is on. Orders submitted from handle_data fill in "
+                "the SAME bar, so a decision taken on that bar's close is filled at that same "
+                "close -- a price the market had not printed when the decision was made. Results "
+                "are optimistic by roughly one bar of edge. Pass same_bar_execution=False to fill "
+                "on the next bar instead.")
         else:
             self._logger.warning(
                 "You are NOT running same day execution. Submitted orders in handle_data will be executed in the NEXT bar after handle_data is finished.")
@@ -337,7 +400,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         with ZiplineAPI(self):
             await self._initialize(self, *args, **kwargs)
 
-    def before_trading_start(self, data):
+    async def before_trading_start(self, data):
+        """Run the algorithm's daily preparation hook.
+
+        Awaits the hook when it is `async def`. It is the one place zipline expects the day's data
+        to be read, and every read in this fork -- `data.history`, `data.current`,
+        `huggingface_dataset` -- is a coroutine, so an author writing the natural thing got a
+        coroutine that was built, dropped and never run. No exception, no warning in the output,
+        and a hook that silently did nothing all backtest.
+        """
         self.compute_eager_pipelines()
 
         if self._before_trading_start is None:
@@ -345,10 +416,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
         self._in_before_trading_start = True
 
+        # `before_trading_start` fires 46 minutes before the open, which is not a market minute at
+        # any intraday rate -- not only at one minute. Testing for equality left every other
+        # intraday rate reading data at a minute the calendar does not have.
         with handle_non_market_minutes(
                 data
-        ) if self.clock.emission_rate == datetime.timedelta(minutes=1) else ExitStack():
-            self._before_trading_start(self, data)
+        ) if self.clock.emission_rate < datetime.timedelta(days=1) else ExitStack():
+            result = self._before_trading_start(self, data)
+            if inspect.isawaitable(result):
+                await result
 
         self._in_before_trading_start = False
 
@@ -385,7 +461,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             emission_rate=self.clock.emission_rate,
             ledger=self._ledger,
             metrics=self._metrics_set,
-            benchmark_source=self.benchmark_source
+            benchmark_source=self.benchmark_source,
+            intraday_metrics=self.intraday_metrics,
         )
 
         # Set the dt initially to the period start by forcing it to change.
@@ -399,10 +476,178 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     raise ZeroCapitalError()
             await self.initialize()
             self.initialized = True
+            assets = getattr(self, "assets", None)
+            if assets:
+                await self.asset_service.preload_corporate_actions(
+                    assets=list({asset.asset for asset in assets}),
+                    date_from=self.clock.start_session,
+                    date_to=self.clock.end_session,
+                )
+        await self._compute_vectorised_signals()
         await self.metrics_tracker.handle_start_of_simulation()
         return self.transform()
 
-    def calculate_capital_changes(
+    async def _compute_vectorised_signals(self) -> None:
+        """Run the strategy's ``compute_signals`` once, before the first bar.
+
+        This is the whole of the in-run hybrid. The indicators are array work and are done here in
+        one pass; the decisions stay in `handle_data`, bar by bar, with the ordinary blotter,
+        slippage and commissions. A strategy that does not define ``compute_signals`` is untouched
+        by any of it.
+
+        The panel handed to the hook covers the run plus exactly ``WARMUP`` bars before it -- not
+        however much history the bundle happens to hold, because then a strategy's first signals
+        would depend on how deeply the bundle was ingested rather than on what it declared.
+        """
+        if self._compute_signals is None:
+            return
+
+        universe = getattr(self, "universe", None)
+        if not universe:
+            raise ValueError(
+                "compute_signals needs to know which instruments to compute over. Set "
+                "`context.universe = {'JNJ': listing, ...}` in initialize -- the keys become the "
+                "column names of the price panel and of the signals read back in handle_data.")
+        universe = _named_universe(universe)
+
+        calendar = self.clock.trading_calendar
+        sessions = list(self.clock.sessions)
+        emission = self.clock.emission_rate
+        # Generous on purpose: fetching too little is a correctness bug, fetching too much costs
+        # a moment and is trimmed to the declared warm-up below.
+        bars_per_session = (1 if emission >= datetime.timedelta(days=1)
+                            else max(1, int(datetime.timedelta(hours=24) / emission)))
+        limit = (len(sessions) + self._signals_warmup + 1) * bars_per_session
+
+        # In the calendar's own zone, not the UTC `session_close` returns: bundles are stamped that
+        # way, and polars refuses to compare two zones rather than quietly aligning them.
+        end_stamp = calendar.session_close(self.clock.end_session).tz_convert(calendar.tz)
+
+        source = await self.current_data.resolve_data_source(None)
+        rows = await source.get_data_by_limit(
+            fields=None, limit=limit, frequency=emission, include_end_date=True,
+            end_date=end_stamp.to_pydatetime(), assets=frozenset(universe.values()))
+        if rows.is_empty():
+            raise ValueError(
+                f"No bars for {', '.join(universe)} in the run's window, so there is nothing to "
+                f"compute signals over.")
+
+        names = {listing.sid: name for name, listing in universe.items()}
+        panel = PricePanel.from_bundle_rows(rows, names)
+        panel = self._trim_to_warmup(panel, first_session=self.clock.start_session)
+        panel = await self._attach_datasets(panel, universe=universe, names=names)
+
+        computed = normalise_signals(self._compute_signals(self, panel), panel.index)
+        verify_causality(lambda prices: self._compute_signals(self, prices),
+                         panel=panel, computed=computed, warmup=self._signals_warmup)
+        self.signals = SignalPanel(computed, clock=self.get_datetime)
+
+        in_run = sum(1 for stamp in panel.index if stamp.date() >= self.clock.start_session)
+        expected = len(sessions) * bars_per_session
+        if emission >= datetime.timedelta(days=1) and in_run < expected:
+            self._logger.warning(
+                "The price panel is short of the run's sessions; on a bar it has no row for, a "
+                "signal reads its previous value, the way a forward-filled price does",
+                sessions=expected, panel_rows=in_run)
+        self._logger.info("Computed signals vectorised, ahead of the run",
+                          signals=sorted(computed), instruments=len(universe),
+                          bars=len(panel), warmup=self._signals_warmup)
+
+    async def _attach_datasets(self, panel: PricePanel, universe: dict, names: dict) -> PricePanel:
+        """Mount whatever `context.datasets` declares and resolve each as of every bar.
+
+        This is what lets a vectorised signal read fundamentals, filings or disclosures. Those
+        arrive a few times a year rather than once a bar, so each is resolved into the same shape
+        the prices already have -- at every bar, what was known by then -- by
+        :func:`~ziplime.vectorized.signals.as_of_panel`, which answers the question `data.current`
+        answers at one bar for the whole history at once.
+
+        The resolution the source declares is carried across rather than guessed: a source that
+        republishes revisions coalesces by column, and reading it by row instead silently drops
+        most of what it holds.
+        """
+        declared = getattr(self, "datasets", None)
+        if not declared:
+            return panel
+        if not isinstance(declared, dict):
+            raise TypeError(
+                f"context.datasets has to be a dict of name -> source, got "
+                f"{type(declared).__name__}.")
+
+        calendar = self.clock.trading_calendar
+        end_stamp = calendar.session_close(self.clock.end_session).tz_convert(calendar.tz)
+
+        datasets = {}
+        for label, address in declared.items():
+            source = await self.current_data.resolve_data_source(address)
+            # Everything the source holds, not just the run's window. WARMUP governs how much
+            # price history an indicator gets; an as-of view needs something different and
+            # unbounded -- the statement current on the first bar is whichever one was filed last
+            # before it, which may be eleven months earlier, and a window that starts at the first
+            # bar simply does not contain it. Fetching from the source's own start covers it.
+            reach = end_stamp.to_pydatetime() - _as_datetime(
+                getattr(source, "start_date", None), calendar.tz, default=datetime.date(1900, 1, 1))
+            rows = await source.get_data_by_window(
+                fields=None, since=reach + datetime.timedelta(days=1),
+                end_date=end_stamp.to_pydatetime(), frequency=self.clock.emission_rate,
+                assets=frozenset(universe.values()), include_end_date=True)
+            if rows.is_empty():
+                self._logger.warning(
+                    "Dataset has no rows over the run's window, so every signal built from it "
+                    "will be empty", dataset=label, source=getattr(source, "name", str(source)))
+            coalesce = str(getattr(getattr(source, "resolution", None), "value", "")) == "coalesce"
+            datasets[label] = as_of_panel(rows, names=names, index=panel.index,
+                                          coalesce=coalesce)
+            self._logger.info("Resolved a dataset as of every bar", dataset=label,
+                              rows=len(rows), coalesce=coalesce, fields=datasets[label].fields)
+
+        return PricePanel({field: getattr(panel, field) for field in panel.fields},
+                          panel.index, datasets)
+
+    def _trim_to_warmup(self, panel: PricePanel, first_session: datetime.date) -> PricePanel:
+        """Keep the run's bars plus exactly the declared warm-up ahead of them."""
+        positions = [ix for ix, stamp in enumerate(panel.index) if stamp.date() >= first_session]
+        if not positions:
+            raise ValueError(
+                f"The bundle has no bars on or after {first_session}, the run's first session.")
+        if positions[0] < self._signals_warmup:
+            # Worth saying out loud: an indicator that never fills its window produces NaN, and a
+            # comparison against NaN is False rather than an error, so the strategy simply does
+            # not trade early and nothing in the output says why.
+            self._logger.warning(
+                "The bundle holds less history before the run than WARMUP asks for, so indicators "
+                "start the run part-way through their windows",
+                warmup_requested=self._signals_warmup, warmup_available=positions[0],
+                first_session=str(first_session))
+        start = max(0, positions[0] - self._signals_warmup)
+        if start == 0:
+            return panel
+        kept = {field: getattr(panel, field).iloc[start:] for field in panel.fields}
+        return PricePanel(kept, panel.index[start:])
+
+    def data_delistings(self) -> dict[ExchangeAsset, datetime.date]:
+        """Instruments the run held whose bars simply stopped, and the session they stopped on.
+
+        Only the unannounced ones. A bond that redeems and a futures contract that expires both
+        say so in their own reference data and leave the book through that; what lands here is the
+        case nothing declares -- an equity delisting, or a bundle that was ingested short. Both
+        look identical from inside the engine and both are worth saying out loud, because the
+        window after them contributes sessions of flat, riskless return to every metric computed
+        over the run.
+        """
+        return dict(self._data_delistings)
+
+    def _record_data_delisting(self, asset: ExchangeAsset, session: datetime.date) -> None:
+        if asset in self._data_delistings:
+            return
+        self._data_delistings[asset] = self.current_data.last_bar_session(asset)
+        self._logger.warning(
+            "No bars after this session; the position is closed at its last mark and the "
+            "listing cannot be traded again",
+            symbol=asset.symbol, mic=asset.mic,
+            last_bar=str(self._data_delistings[asset]), dt=str(session))
+
+    async def calculate_capital_changes(
             self, dt: datetime.datetime, emission_rate: datetime.timedelta, is_interday: bool,
             portfolio_value_adjustment: float = 0.00
     ):
@@ -423,7 +668,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         except KeyError:
             return
 
-        self._sync_last_sale_prices()
+        # Both of these are coroutines and both were called without awaiting, so a target capital
+        # change was computed against unsynced prices and then applied to a portfolio that had not
+        # been updated. Nothing raised; the deposit was simply the wrong size.
+        await self._sync_last_sale_prices()
         if capital_change["type"] == "target":
             target = capital_change["value"]
             capital_change_amount = target - (
@@ -449,7 +697,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             return
 
         self.capital_change_deltas.update({dt: capital_change_amount})
-        self._ledger.capital_change(change_amount=capital_change_amount)
+        await self._ledger.capital_change(change_amount=capital_change_amount)
 
         yield {
             "capital_change": {
@@ -523,9 +771,12 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         date_rule = date_rule or date_rules.every_day()
         time_rule = (
             (time_rule or time_rules.every_minute())
-            if self.clock.emission_rate == datetime.timedelta(minutes=1)
+            if self.clock.emission_rate < datetime.timedelta(days=1)
             else
-            # If we are in daily mode the time_rule is ignored.
+            # A daily simulation has one bar per session, so there is no time of day to schedule
+            # against and the time rule is ignored. Any intraday rate does have one: this used to
+            # test for exactly one minute, which silently discarded `market_open(minutes=30)` on a
+            # five-minute run and fired the function on every bar instead.
             time_rules.every_minute()
         )
 
@@ -576,7 +827,69 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             self._recorded_vars[name] = value
 
     @api_method
-    def continuous_future(
+    def futures_margin_requirement(self, maintenance: bool = False,
+                                   currency: str | None = None) -> float:
+        """Margin the open futures positions tie up, in one currency.
+
+        Pass ``currency`` when the book spans venues that collect different ones -- an exchange
+        may collect
+        roubles even for its dollar-quoted contracts, CME collects dollars. Returns 0.0 when
+        margin is not being modelled; check :meth:`models_futures_margin` to tell that apart from
+        a book that genuinely needs no margin.
+        """
+        return self._ledger.futures_margin_requirement(maintenance=maintenance, currency=currency)
+
+    @api_method
+    def futures_margin_by_currency(self, maintenance: bool = False) -> dict:
+        """Margin posted per currency, e.g. ``{"RUB": 41_000.0, "USD": 10_500.0}``."""
+        return self._ledger.futures_margin_by_currency(maintenance=maintenance)
+
+    @api_method
+    def models_futures_margin(self) -> bool:
+        """Whether this simulation models futures margin at all."""
+        return self._ledger.futures_margin_model.models_margin
+
+    @api_method
+    def realism_warnings(self) -> list:
+        """Effects this simulation does not reproduce, given how it was configured.
+
+        See :mod:`ziplime.finance.realism`.
+        """
+        from ziplime.finance.realism import realism_warnings
+        return realism_warnings(
+            futures_margin_model=self._ledger.futures_margin_model,
+            same_bar_execution=self.same_bar_execution,
+            trades_futures=any(
+                isinstance(position.asset.asset, FuturesContract)
+                for position in self._ledger.position_tracker.get_position_list()
+            ) or True,
+            trades_bonds=any(
+                isinstance(position.asset.asset, Bond)
+                for position in self._ledger.position_tracker.get_position_list()
+            ),
+        )
+
+    @api_method
+    def notional_exposure(self, asset: ExchangeAsset, amount: float, price: float) -> float:
+        """Notional of ``amount`` contracts at ``price``: ``amount * price * multiplier``.
+
+        Futures sizing is a notional calculation, so this is the number to size against rather
+        than ``amount * price``.
+        """
+        multiplier = getattr(asset.asset, "multiplier", 1.0)
+        return amount * price * multiplier
+
+    @api_method
+    def contracts_for_notional(self, asset: ExchangeAsset, notional: float,
+                               price: float) -> int:
+        """Whole contracts closest to ``notional`` of exposure, rounded toward zero."""
+        multiplier = getattr(asset.asset, "multiplier", 1.0)
+        if price == 0 or multiplier == 0:
+            return 0
+        return int(notional / (price * multiplier))
+
+    @api_method
+    async def continuous_future(
             self, root_symbol_str: str, offset: int = 0, roll: str = "volume", adjustment: str = "mul"
     ):
         """Create a specifier for a continuous contract.
@@ -601,11 +914,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         continuous_future : ziplime.assets.ContinuousFuture
             The continuous future specifier.
         """
-        return self.data_portal._data_bundle.asset_repository.create_continuous_future(
-            root_symbol_str,
-            offset,
-            roll,
-            adjustment,
+        return await self.asset_service.create_continuous_future(
+            root_symbol=root_symbol_str,
+            offset=offset,
+            roll_style=roll,
+            adjustment=adjustment,
         )
 
     @api_method
@@ -666,7 +979,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return asset
 
     @api_method
-    def symbols(self, *args, **kwargs):
+    async def symbols(self, *args, **kwargs):
         """Lookup multuple Equities as a list.
 
         Parameters
@@ -692,7 +1005,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         --------
         :func:`ziplime.api.set_symbol_lookup_date`
         """
-        return [self.symbol(identifier, **kwargs) for identifier in args]
+        # `symbol` is a coroutine, so the list comprehension used to return a list of coroutines
+        # rather than a list of listings -- and nothing raised until the caller tried to order one.
+        return [await self.symbol(identifier, **kwargs) for identifier in args]
 
     @api_method
     async def symbols_universe(self, name: str, dt: datetime.date = None):
@@ -721,7 +1036,185 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         --------
         :func:`ziplime.api.set_symbol_lookup_date`
         """
-        return await self.asset_service.get_symbols_universe(name=name, dt=dt or self.simulation_dt)
+        # Memberships are dated with ``date`` objects, and ``simulation_dt`` is a datetime;
+        # comparing the two raises, so the default is narrowed here rather than in the caller.
+        return await self.asset_service.get_symbols_universe(
+            name=name, dt=dt or self._simulation_date())
+
+    def _simulation_date(self) -> datetime.date:
+        dt = self.simulation_dt
+        return dt.date() if isinstance(dt, datetime.datetime) else dt
+
+    async def _loaded_sids(self) -> set[int] | None:
+        """The instruments this run's market data holds, or ``None`` if that cannot be told.
+
+        The default source is the simulation's exchange, which wraps the bundle rather than being
+        one, so the bundle it reads is where the sids are.
+        """
+        try:
+            source = await self.current_data.resolve_data_source(None)
+        except Exception:
+            return None
+        for candidate in (source, getattr(source, "data_source", None)):
+            sid_indexes = getattr(candidate, "sid_indexes", None)
+            if sid_indexes:
+                return set(sid_indexes)
+        return None
+
+    @api_method
+    async def universe_symbols(self, name: str, dt: datetime.date = None,
+                               mic: str | None = None,
+                               tradeable: bool = True) -> list[ExchangeAsset]:
+        """The members of a named universe as listings, ordered by symbol.
+
+        The tradeable form of :meth:`symbols_universe`, which answers with
+        memberships: what a membership holds is the issuer, stored under the
+        company's name rather than its ticker, so it can be counted but not
+        priced or ordered. These go straight into ``data.current``,
+        ``data.history`` and :meth:`order`, exactly like :meth:`symbol`.
+
+        ``dt`` defaults to today's session, so a strategy calling this on every
+        rebalance follows the composition as it changes rather than freezing
+        the one it read in ``initialize`` -- which is the whole reason to name
+        a universe instead of a list of tickers.
+
+        The name takes a venue the way a ticker does -- ``"IMOEX@MISX"`` reads
+        like ``symbol("SBER@MISX")`` -- and an index universe usually wants
+        one: a member is an *issuer*, and issuers here can carry listings on
+        several markets. Worse, the asset import keys companies by ticker, so
+        Moscow's MAGN and an American MAGN are one issuer with two listings;
+        naming the venue is what keeps the other market out of a Moscow index.
+
+        **Only what this run can actually trade is returned.** A universe is a
+        reference list, not a promise of data: it carries companies listed on
+        several venues at once, and the vendor does not answer for every one of
+        them. Both are silent failures waiting to happen -- a history request
+        over several assets filters by sid, so a listing with no bars simply
+        contributes no rows, while ordering one **raises**. So the members are
+        filtered to the instruments the run's market data holds. Pass
+        ``tradeable=False`` for the reference list itself, and ``mic`` to pin
+        one venue.
+        """
+        if "@" in name:
+            name, venue = name.split("@", 1)
+            mic = mic or venue
+        listings = await self.asset_service.get_universe_symbols(
+            name=name, dt=dt or self._simulation_date(), mic=mic)
+        if not tradeable:
+            return listings
+        loaded = await self._loaded_sids()
+        if loaded is None:
+            return listings
+        return [listing for listing in listings if listing.sid in loaded]
+
+    @api_method
+    def is_month_start(self) -> bool:
+        """Whether this is the month's first trading session.
+
+        The gate a monthly strategy opens with, without the bookkeeping: no remembered month on
+        ``context``, no arithmetic on dates that a holiday makes wrong. Reads the calendar the
+        simulation runs on, so "the first session of September" is whatever that market says.
+        """
+        return self._is_period_start(unit="month")
+
+    @api_method
+    def is_week_start(self) -> bool:
+        """Whether this is the week's first trading session. See :meth:`is_month_start`."""
+        return self._is_period_start(unit="week")
+
+    def _is_period_start(self, unit: str) -> bool:
+        calendar = self.clock.trading_calendar
+        today = self._simulation_date()
+        try:
+            previous = calendar.previous_session(today)
+        except Exception:
+            # Before the first session the calendar knows: nothing precedes this one.
+            return True
+        previous = previous.date() if hasattr(previous, "date") else previous
+        if unit == "week":
+            return previous.isocalendar()[:2] != today.isocalendar()[:2]
+        return (previous.year, previous.month) != (today.year, today.month)
+
+    @api_method
+    async def front_contract(self, root_symbol: str, roll_before_days: int = 0,
+                             mic: str | None = None) -> ExchangeAsset | None:
+        """The nearest contract of ``root_symbol`` still alive ``roll_before_days`` from now.
+
+        :meth:`futures_chain` answers with the whole chain, settled deliveries included, and does
+        not filter by the simulation date -- so every futures strategy starts by picking the front
+        contract itself, and picking it wrong is how a backtest ends up holding a contract that
+        stopped existing. This is that choice, made once.
+
+        ``roll_before_days`` is the distance to keep from expiry, and what makes this the roll as
+        well as the pick: once the contract being held fails the test, the answer becomes the next
+        delivery, and the strategy rolls by ordering what it now returns.
+
+        Returns ``None`` when the chain has nothing left that far out.
+        """
+        chain = await self.futures_chain(root_symbol=root_symbol, mic=mic)
+        horizon = self._simulation_date() + datetime.timedelta(days=roll_before_days)
+        for contract in chain:
+            expiration = contract.asset.expiration_date
+            if isinstance(expiration, datetime.datetime):
+                expiration = expiration.date()
+            if expiration and expiration > horizon:
+                return contract
+        return None
+
+    @api_method
+    async def rebalance(self, weights: dict, style: ExecutionStyle = None,
+                        exchange_name: str | None = None) -> None:
+        """Hold exactly these weights, and nothing else.
+
+        ``{listing: share_of_the_portfolio}``. Every listing named is ordered to its target, and
+        **every position not named is closed** -- which is the half that strategies forget, so a
+        name drops out of the universe and quietly stays in the book forever.
+
+            await context.rebalance({listing: 0.1 for listing in winners})
+            await context.rebalance({})          # flat
+
+        Weights are shares of portfolio value, as in :meth:`order_target_percent`; they are not
+        checked against 1.0, because a futures book is levered by construction.
+        """
+        style = make_execution_style(style=style)
+        wanted = {listing: weight for listing, weight in (weights or {}).items()}
+
+        held = {position.asset for position in self.portfolio.positions.values()
+                if position.amount}
+        for listing in held - set(wanted):
+            wanted[listing] = 0.0
+
+        for listing, weight in wanted.items():
+            amount = await self.portfolio.get_asset_positions_amount(
+                listing, exchange_name=exchange_name)
+
+            # Closing is subtraction, not a target: it needs no price, no model and no
+            # rounding, and it works the same for a share and for a contract.
+            if not weight:
+                if amount:
+                    await self.order(asset=listing, amount=-amount, style=style,
+                                     exchange_name=exchange_name)
+                continue
+
+            # A future has no position value to take a percentage of -- what it has is
+            # exposure -- and `order_target_percent` asks the slippage model a question the
+            # futures models do not answer. So a weight on a contract is a share of the
+            # portfolio in *notional*, sized here.
+            if isinstance(listing.asset, FuturesContract):
+                quotes = await self.current_data.current(assets=[listing], fields=["price"])
+                prices = dict(zip(quotes["sid"].to_list(), quotes["price"].to_list()))
+                price = prices.get(listing.sid)
+                if not price or price <= 0:
+                    continue
+                target = self.contracts_for_notional(
+                    asset=listing, notional=self.portfolio.portfolio_value * weight, price=price)
+                if target != amount:
+                    await self.order(asset=listing, amount=target - amount, style=style,
+                                     exchange_name=exchange_name)
+                continue
+
+            await self.order_target_percent(asset=listing, target=weight, style=style,
+                                            exchange_name=exchange_name)
 
     @api_method
     async def sid(self, sid: int) -> Asset | None:
@@ -745,7 +1238,275 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return await self.asset_service.get_asset_by_sid(sid=sid)
 
     @api_method
-    async def future_symbol(self, symbol: str, exchange_name: str = None) -> FuturesContract | None:
+    async def bond_symbol(self, symbol: str, mic: str = None) -> ExchangeAsset | None:
+        """Look up a bond listing by ticker, in ``TICKER`` or ``TICKER@MIC`` form.
+
+        A shorthand for ``symbol(..., asset_type=AssetType.BOND)``. Worth having its own name:
+        the same ticker can be an equity on one venue and a bond on another, and asking for the
+        wrong type is the kind of mistake that shows up as a strange price rather than an error.
+        """
+        return await self.symbol(symbol=symbol, mic=mic, asset_type=AssetType.BOND)
+
+    @api_method
+    async def bond_schedule(self, asset: ExchangeAsset) -> list:
+        """Every stored coupon, amortization, maturity and offer event of ``asset``, by date."""
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return self._ledger.bond_book.events(bond)
+
+    @api_method
+    async def accrued_interest(self, asset: ExchangeAsset, dt: datetime.date = None) -> float:
+        """Coupon accrued on one bond -- what a buyer owes the seller on top of the quote."""
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return self._ledger.bond_book.accrued_interest(bond, dt or self.simulation_dt)
+
+    @api_method
+    async def bond_face_value(self, asset: ExchangeAsset, dt: datetime.date = None) -> float:
+        """Principal outstanding on one bond, after every amortization instalment paid so far."""
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return self._ledger.bond_book.face_value(bond, dt or self.simulation_dt)
+
+    @api_method
+    async def bond_dirty_price(self, asset: ExchangeAsset, quoted_price: float,
+                               dt: datetime.date = None) -> float:
+        """Money one bond changes hands for at ``quoted_price``: clean value plus accrued interest."""
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return self._ledger.bond_book.dirty_value(bond, quoted_price, dt or self.simulation_dt)
+
+    @api_method
+    async def bond_current_yield(self, asset: ExchangeAsset, quoted_price: float,
+                                 dt: datetime.date = None) -> float:
+        """Annual coupon income as a fraction of what the bond costs to buy today."""
+        from ziplime.finance.bonds import current_yield
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return current_yield(bond, self._ledger.bond_book, quoted_price,
+                             dt or self.simulation_dt)
+
+    @api_method
+    async def bond_yield_to_maturity(self, asset: ExchangeAsset, quoted_price: float,
+                                     dt: datetime.date = None) -> float:
+        """Simple (non-compounded) annualised return of holding to maturity from ``quoted_price``."""
+        from ziplime.finance.bonds import simple_yield_to_maturity
+        bond = self._require_bond(asset)
+        await self._ledger.bond_book.load(self.asset_service, [bond])
+        return simple_yield_to_maturity(bond, self._ledger.bond_book, quoted_price,
+                                        dt or self.simulation_dt)
+
+    @staticmethod
+    def _require_bond(asset: ExchangeAsset) -> Bond:
+        """Unwrap the bond behind a listing, with a message that names what was passed instead."""
+        instrument = getattr(asset, "asset", asset)
+        if not isinstance(instrument, Bond):
+            raise TypeError(
+                f"Expected a bond listing, got {type(instrument).__name__}. Look the instrument "
+                f"up with `await context.bond_symbol(...)`."
+            )
+        return instrument
+
+    @api_method
+    async def futures_symbol(self, symbol: str, mic: str = None) -> ExchangeAsset | None:
+        """Look up a futures **listing** by ticker, in ``TICKER`` or ``TICKER@MIC`` form.
+
+        This is what you order. :meth:`future_symbol` returns the contract behind a listing, which
+        carries the specification but is not tradeable — passing it to :meth:`order` fails, because
+        an order needs the listing that owns the sid.
+        """
+        return await self.symbol(symbol=symbol, mic=mic,
+                                 asset_type=AssetType.FUTURES_CONTRACT)
+
+    async def _resolve_named_data_source(self, name: str):
+        """Mount a data source a strategy named but never registered.
+
+        Today that means a Hugging Face dataset address. It is resolved here rather than in
+        :class:`~ziplime.domain.bar_data.BarData` because a mount needs the asset database, to
+        turn the dataset's tickers into sids, and the simulation window, to avoid downloading
+        years the run cannot reach -- and this object holds both.
+        """
+        from ziplime.data.data_sources.huggingface.huggingface_data_source import (
+            HuggingFaceDataSource, is_address,
+        )
+        if not is_address(name):
+            raise KeyError(
+                f"No data source named {name!r}. Register it with "
+                f"run_simulation(custom_data_sources=[...]), or name a Hugging Face dataset as "
+                f"hf://owner/name/config.")
+        return await HuggingFaceDataSource.mount(
+            name, asset_service=self.asset_service,
+            start_date=self.clock.start_session, end_date=self.clock.end_session,
+            trading_calendar=self.clock.trading_calendar)
+
+    @api_method
+    async def huggingface_dataset(self, repo_id: str, config: str | None = None,
+                                  revision: str | None = None,
+                                  fields: list[str] | None = None,
+                                  start_date: datetime.date | None = None,
+                                  end_date: datetime.date | None = None,
+                                  name: str | None = None):
+        """Mount a point-in-time dataset from the Hugging Face Hub.
+
+        The explicit form of ``data.history(data_source="hf://owner/name/config")``. Use it when
+        the defaults are not what you want -- above all to **pin a revision**, so a result can be
+        reproduced after the dataset has grown:
+
+            context.congress = await context.huggingface_dataset(
+                "ZipLime/congress-trading", config="features", revision="67c335f5")
+
+        Then read it like any other source::
+
+            df = await data.history(assets=[apple], bar_count=30,
+                                    data_source=context.congress)
+
+        Args:
+            repo_id: ``owner/name`` on the Hub, or a full ``hf://owner/name/config`` address.
+            config: Table to mount. Defaults to the dataset's ``features`` table if it has one.
+            revision: Branch, tag or commit. Defaults to the default branch, resolved to the
+                commit it points at now and reported, so the run can be repeated exactly.
+            fields: Columns to keep besides ``date`` and ``sid``. All of them by default.
+            start_date, end_date: Window to fetch. Defaults to the simulation's own, which is
+                what keeps a long dataset from being downloaded in full.
+            name: What to call the source. Defaults to its address.
+
+        Returns:
+            The mounted source. Nothing is downloaded until it is first read.
+        """
+        from ziplime.data.data_sources.huggingface.huggingface_data_source import (
+            HuggingFaceDataSource,
+        )
+        source = await HuggingFaceDataSource.mount(
+            repo_id, config=config, revision=revision, asset_service=self.asset_service,
+            start_date=start_date or self.clock.start_session,
+            end_date=end_date or self.clock.end_session,
+            fields=fields, name=name,
+            trading_calendar=self.clock.trading_calendar)
+        self.current_data.data_sources[source.name] = source
+        return source
+
+    @api_method
+    async def futures_chain(self, root_symbol: str, mic: str = None) -> list[ExchangeAsset]:
+        """The contract chain of ``root_symbol`` as **listings**, ordered by expiration.
+
+        This is the term structure: element 0 is the front contract, and each one after it is
+        further out on the curve. Ordering by expiration rather than by ticker matters -- an
+        alphabetical sort puts ``CLF27`` before ``CLX26``, which reverses the curve.
+
+        Returns the listings, so the result can be passed straight to :meth:`order` and to
+        ``data.current``; :attr:`ExchangeAsset.asset` on each one carries the multiplier and the
+        expiration date.
+        """
+        return await self.asset_service.get_exchange_futures_contracts_by_root(
+            root_symbol=root_symbol, mic=mic)
+
+    @api_method
+    async def option_chain(self, underlying: ExchangeAsset | str,
+                           expiration_date: datetime.date | None = None,
+                           mic: str | None = None) -> OptionChain:
+        """The option chain on ``underlying``, as a selectable
+        :class:`~ziplime.finance.options.chain.OptionChain`.
+
+        ``expiration_date`` defaults to **today's session**, which is what makes this the 0DTE
+        call: the chain listed this morning, expiring at this afternoon's close. Pass a date to
+        reach another expiry.
+
+        A 0DTE strategy has to call this every session. The contracts are listed fresh each day and
+        every symbol in the chain changes with it -- ``SPY240614C00523000`` exists for one session
+        and never again -- so there is nothing to resolve once in ``initialize`` and hold onto.
+
+        Raises:
+            ValueError: if no contracts are listed for that underlying and expiry. On a 0DTE chain
+                that usually means the session has no chain rather than that the underlying is
+                wrong.
+        """
+        symbol = underlying.symbol if isinstance(underlying, ExchangeAsset) else underlying
+        if mic is None and isinstance(underlying, ExchangeAsset):
+            mic = underlying.mic
+        session = expiration_date or self.get_datetime().date()
+        listings = await self.asset_service.get_exchange_option_contracts(
+            underlying_symbol=symbol, expiration_date=session, mic=mic)
+        if not listings:
+            raise ValueError(
+                f"No options listed on {symbol} expiring {session}. For a 0DTE chain that is a "
+                f"statement about the session, not about the underlying: the chain exists only on "
+                f"its own expiration day.")
+        return OptionChain.from_listings(listings, expiration_date=session)
+
+    @api_method
+    async def option_symbol(self, symbol: str, mic: str | None = None) -> ExchangeAsset | None:
+        """Resolve one option listing by its OCC symbol, e.g. ``SPY240614C00523000``."""
+        return await self.asset_service.get_exchange_asset_by_symbol(
+            symbol=AssetSymbol(symbol=symbol, mic=mic), asset_type=AssetType.OPTIONS_CONTRACT)
+
+    @api_method
+    def time_to_expiry(self, asset: ExchangeAsset) -> float:
+        """Years left on ``asset``, measured to its expiration session's **close**.
+
+        The number every option formula takes, and on a 0DTE contract the one that moves fastest:
+        at the open it is about 0.0018 years and ninety minutes before the close it is a tenth of
+        that. Measuring in whole days instead -- the obvious shortcut -- overprices an afternoon
+        straddle several-fold.
+
+        Returns 0.0 once the closing bar is reached, which is not an error: it is the instant the
+        contract settles at intrinsic value.
+        """
+        contract = asset.asset
+        if not isinstance(contract, OptionContract):
+            raise TypeError(f"{asset.symbol} is not an option listing.")
+        calendar = self.clock.trading_calendar
+        expires_at = calendar.session_close(contract.expiration_date).tz_convert(
+            calendar.tz).to_pydatetime()
+        return time_to_expiry(self.get_datetime(), expires_at)
+
+    @api_method
+    async def option_greeks(self, asset: ExchangeAsset, volatility: float | None = None,
+                            rate: float = 0.0, amount: float = 0.0) -> Greeks:
+        """Price and Greeks for one option listing at the current bar.
+
+        ``volatility`` defaults to the ``implied_volatility`` column of the contract's own current
+        bar when the data source carries one -- the synthetic feed does, and a real one should --
+        and raises when it does not, rather than substituting a number nobody chose.
+
+        With ``amount`` the figures are scaled to a position of that many contracts (multiplier
+        included), so ``amount=-10`` on a short call gives the delta of the book rather than of one
+        unit.
+        """
+        contract = asset.asset
+        if not isinstance(contract, OptionContract):
+            raise TypeError(f"{asset.symbol} is not an option listing.")
+        underlying = contract.underlying_exchange_asset
+        if underlying is None:
+            raise ValueError(
+                f"{asset.symbol} has no underlying listing stored, so its Greeks cannot be "
+                f"computed: every one of them needs the underlying's price.")
+
+        spot = await self._spot_price(asset=underlying, dt=self.get_datetime())
+        if spot is None:
+            raise ValueError(f"No price for {underlying.symbol} at {self.get_datetime()}.")
+
+        if volatility is None:
+            volatility = await self._implied_volatility_of(asset)
+            if volatility is None:
+                raise ValueError(
+                    f"The data source carries no implied volatility for {asset.symbol}, so pass "
+                    f"volatility= explicitly. Inferring one from the price is possible with "
+                    f"ziplime.finance.options.greeks.implied_volatility, but it should be a "
+                    f"decision the strategy makes rather than a default.")
+
+        per_unit = greeks(contract.option_type, spot, contract.strike,
+                          self.time_to_expiry(asset), rate, volatility)
+        if amount:
+            return position_greeks(per_unit, amount=amount, multiplier=contract.multiplier)
+        return per_unit
+
+    async def _implied_volatility_of(self, asset: ExchangeAsset) -> float | None:
+        """The ``implied_volatility`` of this contract's current bar, if the source carries one."""
+        return await self._read_field(asset=asset, dt=self.get_datetime(),
+                                      field="implied_volatility")
+
+    @api_method
+    async def future_symbol(self, symbol: str, mic: str = None) -> FuturesContract | None:
         """Lookup a futures contract with a given symbol.
 
         Parameters
@@ -763,10 +1524,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         SymbolNotFound
             Raised when no contract named 'symbol' is found.
         """
-        return await self.asset_service.get_futures_contract_by_symbol(
-            symbol=symbol,
-            exchange_name=exchange_name or (await self.exchange_repository.get_default_exchange()).name
-        )
+        return await self.asset_service.get_futures_contract_by_symbol(symbol=symbol, mic=mic)
 
     async def _calculate_order_value_amount(self, asset: ExchangeAsset, value: float, exchange: Exchange):
         """Calculates how many shares/contracts to order based on the type of
@@ -807,14 +1565,30 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             # Don't place any order
             return 0
         if type(asset.asset) is FuturesContract:
-            return value / (last_price * asset.multiplier)
+            return value / (last_price * asset.asset.multiplier)
+        elif type(asset.asset) is Bond:
+            # A bond quote is a percentage of face value, and the buyer also pays accrued
+            # interest, so the money one bond costs is neither of those numbers on its own.
+            await self._ledger.bond_book.load(self.asset_service, [asset.asset])
+            per_bond = self._ledger.bond_price_in_money(asset=asset, quoted_price=last_price,
+                                                        dt=self.simulation_dt)
+            if per_bond == 0:
+                return 0
+            return value / per_bond
         else:
             return value / last_price
 
     def _can_order_asset(self, asset: ExchangeAsset):
-        if asset.auto_close_date:
-            day = self.clock.trading_calendar.minute_to_session(self.simulation_dt).date()
+        day = self.clock.trading_calendar.minute_to_session(self.simulation_dt).date()
 
+        # Out of bars. Reference data does not record an equity's delisting -- the listing keeps
+        # an end date decades away -- so without this an order in a dead name is accepted and
+        # filled at the last price it ever printed, however many months ago that was.
+        if self.current_data.has_stopped_trading(asset=asset, session=day):
+            self._record_data_delisting(asset=asset, session=day)
+            return False
+
+        if asset.auto_close_date:
             if day > min(asset.end_date, asset.auto_close_date):
                 # If we are after the asset's end date or auto close date, warn
                 # the user that they can't place an order for this asset, and
@@ -903,11 +1677,21 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         :func:`ziplime.api.order_value`
         :func:`ziplime.api.order_percent`
         """
+        if isinstance(asset, ContinuousFuture):
+            raise ValueError(
+                f"Cannot place an order for {asset}: a continuous future is a data specifier, "
+                f"not a tradeable contract. Order the contract it currently resolves to, which "
+                f"`await data.current_contract(continuous_future)` returns."
+            )
         if not self._can_order_asset(asset=asset):
             return None
+        if isinstance(asset.asset, Bond):
+            # The ledger settles the fill synchronously and needs the coupon schedule to price it
+            # dirty, so it is fetched here, while we are still on an async path.
+            await self._ledger.bond_book.load(self.asset_service, [asset.asset])
         # TODO: implement dynamic risk control
 
-        self.validate_order_params(asset=asset, amount=amount)
+        await self.validate_order_params(asset=asset, amount=amount)
         if exchange_name is None:
             exchange = await self.exchange_repository.get_default_exchange()
             exchange_name = exchange.name
@@ -985,11 +1769,18 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.new_orders[order.id] = order
         return order
 
-    def validate_order_params(self, asset: ExchangeAsset, amount: int):
-        """
-        Helper method for validating parameters to the order API function.
+    async def validate_order_params(self, asset: ExchangeAsset, amount: int):
+        """Check an order against every registered trading control before it is placed.
 
-        Raises an UnsupportedOrderParameters if invalid arguments are found.
+        Every control's ``validate`` is ``async def`` -- `MaxPositionSize` reads the current price
+        to check a notional cap -- and this method used to be synchronous and call them without
+        awaiting. Each call built a coroutine, dropped it, and returned None, so
+        `set_max_position_size`, `set_max_order_size`, `set_max_order_count`, `set_long_only` and
+        `set_asset_restrictions` all accepted their arguments and then enforced nothing. These are
+        the fail-safes; a fail-safe that silently does not fire is worse than none.
+
+        Raises:
+            TradingControlViolation: if a control with ``on_error="fail"`` rejects the order.
         """
 
         if not self.initialized:
@@ -998,7 +1789,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             )
 
         for control in self.trading_controls:
-            control.validate(
+            await control.validate(
                 asset=asset,
                 amount=amount,
                 portfolio=self.portfolio,
@@ -1056,9 +1847,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return await self.order(
             asset,
             amount,
-            limit_price=limit_price,
-            stop_price=stop_price,
-            style=style,
+            # `order` takes an execution style, not loose prices: passing limit_price/stop_price
+            # through raised a TypeError, so order_value only ever worked by accident when the
+            # caller supplied a style of its own.
+            style=make_execution_style(limit_price=limit_price, stop_price=stop_price,
+                                       style=style),
             exchange_name=exchange_name
         )
 
@@ -1106,10 +1899,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             )
 
         else:
-            chunks = []
-            for exchange_name, trading_accounts in self._ledger.position_tracker.positions.items():
-                exchange = await self.exchange_repository.get_exchange_by_mic(mic=exchange_name)
-                assets = [asset for tr in trading_accounts.values() for asset in tr]
+            price_by_asset = {}
+            for exchange_name, exchange_positions in self._ledger.position_tracker.positions_by_exchange.items():
+                exchange = await self.exchange_repository.get_exchange_by_mic(mic=exchange_name[0])
+                assets = [position.asset for position in exchange_positions]
 
                 chunk = await exchange.get_spot_value(
                     fields=frozenset(["close"]),
@@ -1117,13 +1910,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     assets=frozenset(assets),
                     # data_frequency=self.data_frequency
                 )
-                chunks.append(chunk)
-
-            prices = pl.concat(chunks) if chunks else pl.DataFrame()
-        price_by_asset = {
-            (row["sid"], exchange): row["close"]
-            for row in prices.select(["sid", "close"]).to_dicts()
-        }
+                price_by_asset.update({
+                    (row["sid"], exchange): row["close"]
+                    for row in chunk.select(["sid", "close"]).to_dicts()
+                })
 
         self._ledger.sync_last_sale_prices(dt=dt, prices=price_by_asset)
 
@@ -1156,7 +1946,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         # return dt
 
     @api_method
-    def set_slippage(self, us_equities=None, us_futures=None):
+    def set_slippage(self, us_equities=None, us_futures=None, bonds=None):
         """Set the slippage models for the simulation.
 
         Parameters
@@ -1196,8 +1986,17 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                 )
             self.blotter.slippage_models[FuturesContract] = us_futures
 
+        if bonds is not None:
+            if Bond not in bonds.allowed_asset_types:
+                raise IncompatibleSlippageModel(
+                    asset_type="bonds",
+                    given_model=bonds,
+                    supported_asset_types=bonds.allowed_asset_types,
+                )
+            self.blotter.slippage_models[Bond] = bonds
+
     @api_method
-    def set_commission(self, us_equities=None, us_futures=None):
+    def set_commission(self, us_equities=None, us_futures=None, bonds=None):
         """Sets the commission models for the simulation.
 
         Parameters
@@ -1238,6 +2037,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     supported_asset_types=us_futures.allowed_asset_types,
                 )
             self.blotter.commission_models[FuturesContract] = us_futures
+
+        if bonds is not None:
+            if Bond not in bonds.allowed_asset_types:
+                raise IncompatibleCommissionModel(
+                    asset_type="bonds",
+                    given_model=bonds,
+                    supported_asset_types=bonds.allowed_asset_types,
+                )
+            self.blotter.commission_models[Bond] = bonds
 
     @api_method
     def set_cancel_policy(self, cancel_policy):
@@ -1347,9 +2155,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                                                                       exchange=exchange)
         commission = exchange.get_commission_model(asset=asset)
         slippage = exchange.get_slippage_model(asset=asset)
-        projected_commission = commission.calculate_for_asset(asset=asset, quantity=requested_quantity, transaction_amount=value)
+        projected_commission = commission.calculate_for_asset(asset=asset, quantity=requested_quantity,
+                                                              transaction_amount=value)
         new_quantity = await self._calculate_order_value_amount(asset=asset, value=value - projected_commission,
                                                                 exchange=exchange)
+        self._logger.info(
+            f"Projected commission for {requested_quantity} quantity of {asset.symbol} is {projected_commission}. Quantity corrected to {new_quantity}"
+        )
         # return new_quantity
         estimated_price, estimated_quantity = await slippage.order_target_percentage_maximum_quantity(asset=asset,
                                                                                                       exchange=exchange,
@@ -1434,8 +2246,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             exchange_name=exchange_name
         )
 
-    def _calculate_order_target_amount(self, exchange: Exchange, trading_account_id: str, asset: ExchangeAsset, target: int):
-        current_position = self.portfolio.positions.get(exchange.name, {}).get(trading_account_id, {}).get(asset, None)
+    def _calculate_order_target_amount(self, exchange: Exchange, trading_account_id: str, asset: ExchangeAsset,
+                                       target: int):
+        current_position = self.portfolio.positions.get((exchange.name,trading_account_id, asset), None)
         if current_position is not None:
             # current_position = self.portfolio.positions[asset].amount
             target -= current_position.amount
@@ -1607,17 +2420,26 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             If an asset is passed then this will return a list of the open
             orders for this asset.
         """
+        # `blotter.open_orders` is keyed by exchange name first and by listing second. Indexing it
+        # with a listing therefore matched nothing -- an asset is never an exchange name -- so this
+        # returned [] for every asset that had orders working, and the no-asset form returned
+        # exchange names mapped to listings rather than orders. A strategy topping an order up
+        # relies on this to see what is already working; without it, it stacks order on order.
         if asset is None:
-            return {
-                key: list(orders.values())  # [order.to_api_obj() for order in orders]
-                for key, orders in self.blotter.open_orders.items()
-                if orders
-            }
-        if asset in self.blotter.open_orders:
-            orders = self.blotter.open_orders[asset]
-            return list(orders.values())
-            # return [order.to_api_obj() for order in orders]
-        return []
+            merged: dict[ExchangeAsset, list[Order]] = {}
+            for exchange_orders in self.blotter.open_orders.values():
+                for listing, orders in exchange_orders.items():
+                    if orders:
+                        merged.setdefault(listing, []).extend(orders.values())
+            return merged
+
+        open_orders: list[Order] = []
+        for exchange_name in self.blotter.open_orders:
+            orders = self.blotter.get_open_orders_by_asset(asset=asset,
+                                                           exchange_name=exchange_name)
+            if orders:
+                open_orders.extend(orders.values())
+        return open_orders
 
     @api_method
     def get_order(self, order_id: str, exchange_name: str) -> Order | None:
@@ -1673,11 +2495,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         orders = self.blotter.get_open_orders_by_asset(asset=asset, exchange_name=exchange_name)
         if not orders:
             return
-        # We're making a copy here because `cancel` mutates the list of open
-        # orders in place.  The right thing to do here would be to make
-        # self.open_orders no longer a defaultdict.  If we do that, then we
-        # should just remove the orders once here and be done with the matter.
-        for order_id, order in orders.items():
+        # The comment below has been here since ziplime forked, and it is right about the problem
+        # and wrong about the code: cancelling *does* mutate the blotter's open orders, and this
+        # loop iterated the live mapping rather than a copy, so it raised `RuntimeError: dictionary
+        # changed size during iteration` the moment it had anything to cancel. It is reached when
+        # an order is still open on a contract that has expired -- routine on an option book, and
+        # essentially never on an equity one, which is why it survived this long.
+        for order_id, order in list(orders.items()):
             await self.cancel_order(order_id=order.id, exchange_name=order.exchange_name, relay_status=relay_status)
             if warn:
                 # Message appropriately depending on whether there's
@@ -2031,7 +2855,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     def calculate_minute_capital_changes(self, dt: datetime.datetime):
         # process any capital changes that came between the last
-        # and current minutes
+        # and current minutes. An async generator: iterate it with `async for`.
         return self.calculate_capital_changes(dt, emission_rate=self.metrics_tracker.emission_rate,
                                               is_interday=False)
 
@@ -2044,7 +2868,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             handle_data,
     ):
         # print(f"dt_to_use: in every_bar: {dt_to_use}")
-        for capital_change in self.calculate_minute_capital_changes(dt_to_use):
+        async for capital_change in self.calculate_minute_capital_changes(dt_to_use):
             yield capital_change
 
         self.simulation_dt = dt_to_use
@@ -2100,6 +2924,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             self._ledger.process_commission(commission=commission, tr=self)
         # print("LEVERAGE: BEFORE 4", self.account.leverage, self.account.net_leverage)
         if not self.same_bar_execution:
+            # The fills above changed the positions, and `portfolio` is a cache last refreshed
+            # at the top of the bar. Without this, handle_data saw yesterday's positions with
+            # today's orders already filled, and every order_target* re-sent the difference:
+            # a long-only daily rebalance went short and ran gross leverage past 4.
+            if new_transactions or new_commissions:
+                await self._ledger.update_portfolio()
+                self._ledger.update_account()
             await handle_data(context=self, data=current_data, dt=dt_to_use)
         # print("LEVERAGE: AFTER 4", self.account.leverage, self.account.net_leverage)
 
@@ -2122,7 +2953,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             asset_service,
     ):
         # process any capital changes that came overnight
-        for capital_change in self.calculate_capital_changes(
+        async for capital_change in self.calculate_capital_changes(
                 midnight_dt, emission_rate=self.metrics_tracker.emission_rate,
                 is_interday=True
         ):
@@ -2136,23 +2967,36 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         # move processing of ledger and dividends before metrics
         self._ledger.start_of_session(session_label=midnight_dt)
         # TODO: handle ajustments repository
-        adjustment_reader = self.asset_service._adjustments_repository
-        if adjustment_reader is not None:
-            # this is None when running with a dataframe source
-            await self._ledger.process_dividends(
-                next_session=midnight_dt,
-                adjustment_reader=adjustment_reader,
-            )
-            # self._sync_last_sale_prices(dt=datetime.datetime.combine(midnight_dt, datetime.time())) # my
-            # self._ledger.update_portfolio()
-            # self._ledger.update_account()
+        # adjustment_reader = self.asset_service._adjustments_repository
+        # if adjustment_reader is not None:
+        # this is None when running with a dataframe source
+        await self._ledger.process_dividends(
+            next_session=midnight_dt,
+            asset_service=self.asset_service,
+        )
+        # Coupons and amortization instalments first, then redemption: the final coupon of a bond
+        # maturing today is earned while the position still exists.
+        await self._ledger.process_bond_events(
+            next_session=midnight_dt,
+            asset_service=self.asset_service,
+        )
+        await self._ledger.redeem_matured_bonds(
+            session=midnight_dt,
+            asset_service=self.asset_service,
+        )
+        # self._sync_last_sale_prices(dt=datetime.datetime.combine(midnight_dt, datetime.time())) # my
+        # self._ledger.update_portfolio()
+        # self._ledger.update_account()
 
         await self.metrics_tracker.handle_market_open(session_label=midnight_dt)
 
         # handle any splits that impact any positions or any open orders.
-        assets_we_care_about = (
-                self._ledger.position_tracker.positions.keys() | self.blotter.get_all_assets_in_open_orders()
-        )
+        # assets_we_care_about = (
+        #         self._ledger.position_tracker.positions.keys() | self.blotter.get_all_assets_in_open_orders()
+        # )
+        assets_we_care_about = set([pos.asset.asset for pos in self._ledger.position_tracker.get_position_list()] + [exchange_asset.asset for
+                                                                                                exchange_asset in
+                                                                                                self.blotter.get_all_assets_in_open_orders()])
 
         if assets_we_care_about:
             splits = await asset_service.get_splits(assets_we_care_about, midnight_dt)
@@ -2254,9 +3098,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                         self.simulation_dt = dt
                         # self.datetime = dt
                         # self.on_dt_changed(dt=dt)
-                        self.before_trading_start(data=self.current_data)
-                    elif action == SimulationEvent.EMISSION_RATE_END and self.clock.emission_rate == datetime.timedelta(
-                            minutes=1):
+                        await self.before_trading_start(data=self.current_data)
+                    elif (action == SimulationEvent.EMISSION_RATE_END
+                          and self.clock.emission_rate < datetime.timedelta(days=1)):
+                        # Syncing sale prices to the ledger happens here for intraday rates and in
+                        # the session-end branch for daily ones. Testing for exactly one minute
+                        # meant a five-minute run did neither, and carried a portfolio value that
+                        # never moved between sessions.
                         # await self._ledger.sync_last_sale_prices(dt=dt, handle_non_market_minutes=False)
                         await self.sync_last_sale_prices_to_ledger(dt=dt,
                                                                    handle_non_market_minutes=False)  # TODO : remove
@@ -2277,8 +3125,116 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     self._logger.error(f"Simulation error on dt={dt}")
                     if self.stop_on_error:
                         raise
+
+            errors.extend(self._end_of_run_warnings())
             risk_message = self.metrics_tracker.handle_simulation_end()
             yield risk_message, errors
+
+    def _end_of_run_warnings(self) -> list[BarSimulationError]:
+        """Facts about the run that a table of metrics cannot show, reported where they are read.
+
+        Two of them, both about a record that does not say what it looks like it says:
+
+        * sessions the run never recorded, which makes every metric a metric over a shorter window
+          than the one the run is labelled with;
+        * instruments whose prices ran out mid-run, which is a delisting nothing else announces --
+          they contribute flat, riskless sessions from then on.
+
+        These go in ``errors`` rather than into a log line because that is what a caller reads:
+        ``result.errors`` is checked, and the twentieth warning of a run is not.
+        """
+        warnings = []
+
+        expected = len(self.clock.sessions)
+        if self._session_count < expected:
+            recorded = self.clock.sessions[self._session_count - 1] if self._session_count else None
+            message = (
+                f"Performance record covers {self._session_count} of {expected} sessions: it ends "
+                f"at {recorded} instead of {self.clock.sessions[-1]}. Every metric in this result "
+                f"is computed over that shorter window, not over the one that was asked for."
+            )
+            self._logger.error(message)
+            warnings.append(BarSimulationError(trace="", message=message,
+                                               simulation_dt=self.simulation_dt))
+
+        if self._data_delistings:
+            listed = ", ".join(
+                f"{asset.symbol}@{asset.mic} after {session}"
+                for asset, session in sorted(self._data_delistings.items(),
+                                             key=lambda item: item[0].symbol))
+            message = (
+                f"The market data stops mid-run for {len(self._data_delistings)} listing(s) with "
+                f"nothing in their reference data to explain it: {listed}. Each was closed at its "
+                f"last mark and could not be traded again, so the sessions after it are flat for "
+                f"that name -- check whether it delisted or the bundle is simply short."
+            )
+            self._logger.error(message)
+            warnings.append(BarSimulationError(trace="", message=message,
+                                               simulation_dt=self.simulation_dt))
+
+        return warnings
+
+    async def _settlement_price(self, asset: ExchangeAsset, dt: datetime.datetime) -> float | None:
+        """What an expiring position settles at, or ``None`` to use its last mark.
+
+        Only options answer with a price, and the answer is arithmetic rather than a quote: an
+        expiring option is worth ``max(S - K, 0)`` per unit for a call and ``max(K - S, 0)`` for a
+        put, against wherever the underlying finished. Closing at the last mark instead is wrong in
+        both directions on the same day -- a wing that stopped being quoted at lunchtime carries a
+        few cents into a settlement of zero, and the strike that finishes ten cents in the money
+        carries nothing into ten dollars a contract.
+
+        **Cash settlement only.** A physically settled contract is settled in cash at intrinsic and
+        says so, rather than quietly delivering a hundred shares nobody asked for.
+        """
+        instrument = getattr(asset, "asset", None)
+        if not isinstance(instrument, OptionContract):
+            return None
+
+        underlying = instrument.underlying_exchange_asset
+        if underlying is None:
+            self._logger.warning(
+                "Expiring option has no underlying listing, so it cannot be settled at intrinsic "
+                "value; closing at its last mark instead",
+                symbol=asset.symbol, dt=str(dt))
+            return None
+
+        underlying_price = await self._spot_price(asset=underlying, dt=dt)
+        if underlying_price is None:
+            self._logger.warning(
+                "No price for the underlying on the expiration session, so the option cannot be "
+                "settled at intrinsic value; closing at its last mark instead",
+                symbol=asset.symbol, underlying=underlying.symbol, dt=str(dt))
+            return None
+
+        if instrument.settlement_type.is_deliverable:
+            self._logger.warning(
+                "Settling a physically delivered option in cash at its intrinsic value; delivery "
+                "of the underlying is not modelled",
+                symbol=asset.symbol, dt=str(dt))
+        return instrument.intrinsic_value(underlying_price)
+
+    async def _spot_price(self, asset: ExchangeAsset, dt: datetime.datetime) -> float | None:
+        """The close of ``asset``'s most recent bar at ``dt``, or ``None`` if it has none."""
+        return await self._read_field(asset=asset, dt=dt, field="close")
+
+    async def _read_field(self, asset: ExchangeAsset, dt: datetime.datetime,
+                          field: str) -> float | None:
+        """One column of ``asset``'s most recent bar at ``dt``.
+
+        Reads through the default exchange rather than the asset's own venue. Those are different
+        things and the repository's `get_exchange_by_mic` does not bridge them: it is keyed by the
+        exchange's *name* -- the broker the simulation trades through, "LIME" -- while a listing's
+        `mic` names where the instrument is listed, "ARCX". Asking it for a listing's MIC raises a
+        KeyError on every simulation with one exchange, which is all of them.
+        """
+        exchange = await self.exchange_repository.get_default_exchange()
+        rows = await exchange.get_spot_value(fields=frozenset([field]), dt=dt,
+                                             assets=frozenset({asset}))
+        if rows is None or rows.is_empty() or field not in rows.columns:
+            return None
+        value = rows[field][-1]
+        return None if value is None else float(value)
 
     async def _cleanup_expired_assets(self, dt: datetime.datetime, position_assets):
         """
@@ -2294,21 +3250,37 @@ class TradingAlgorithm(BaseTradingAlgorithm):
            auto_close_date.
         """
 
+        session = dt.date()
+
         def past_auto_close_date(asset: ExchangeAsset):
             acd = asset.auto_close_date
-            if acd is not None:
-                acd = acd
-            return acd is not None and acd <= dt.date()
+            return acd is not None and acd <= session
+
+        def delisted(asset: ExchangeAsset):
+            """Expired by the calendar, or out of bars.
+
+            Two different facts with the same consequence. A futures contract announces its own
+            end and carries an ``auto_close_date``; an equity does not -- a delisted listing keeps
+            its row and an end date decades away, and the only record of the delisting is that the
+            bars stop. Closing on the first fact alone left the second kind on the book at a mark
+            that never moved again, still counted in exposure, leverage and returns.
+            """
+            return (past_auto_close_date(asset)
+                    or self.current_data.has_stopped_trading(asset=asset, session=session))
 
         # Remove positions in any sids that have reached their auto_close date.
         assets_to_clear = [
             asset
             for asset in position_assets
-            if past_auto_close_date(asset)
+            if delisted(asset)
         ]
         # data_portal = self.data_portal
         for asset in assets_to_clear:
-            self._ledger.close_position(asset=asset, dt=dt)
+            if not past_auto_close_date(asset):
+                self._record_data_delisting(asset=asset, session=session)
+            self._ledger.close_position(
+                asset=asset, dt=dt,
+                price=await self._settlement_price(asset=asset, dt=dt))
 
         # Remove open orders for any sids that have reached their auto close
         # date. These orders get processed immediately because otherwise they
@@ -2316,7 +3288,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         assets_to_cancel = [
             asset
             for asset in self.blotter.get_all_assets_in_open_orders()
-            if past_auto_close_date(asset=asset)
+            if delisted(asset=asset)
         ]
 
         for asset in assets_to_cancel:

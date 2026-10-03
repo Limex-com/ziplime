@@ -363,6 +363,3 @@ class Term(ABC):
         """A short repr to use when recursively rendering terms with inputs."""
         # Default recursive_repr is just the name of the type.
         return type(self).__name__
-
-
-

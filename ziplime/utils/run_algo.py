@@ -1,3 +1,4 @@
+from ziplime.finance.margin import FuturesMarginModel
 import datetime
 import sys
 
@@ -8,7 +9,6 @@ from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.core.algorithm_file import AlgorithmFile
 from ziplime.data.services.data_source import DataSource
-from ziplime.domain import account
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.controls.max_leverage import MaxLeverage
 
@@ -34,12 +34,27 @@ from ziplime.pipeline.data.equity_pricing import EquityPricing
 
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
-from ziplime.assets.entities.asset import Asset
 from exchange_calendars import ExchangeCalendar
 from ziplime.exchanges.repositories.exchange_repository import ExchangeRepository
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 logger = structlog.get_logger(__name__)
+
+
+def benchmark_bucket(emission_rate: datetime.timedelta) -> datetime.timedelta:
+    """How wide a benchmark bar is, given the rate the simulation emits at.
+
+    Not simply the emission rate. `SimulationClock` emits one bar per *session* for any rate of a
+    day or more -- a weekly run still steps session by session -- so bucketing the benchmark by
+    the raw rate built 52 rows against the ledger's 245, and `AlphaBeta` sliced both by the same
+    session index until the shorter one ran out:
+
+        ValueError: operands could not be broadcast together with shapes (26,1) () (25,1)
+
+    which names neither the benchmark nor the emission rate. Below a day the two already agree,
+    so this only ever clamps.
+    """
+    return min(emission_rate, datetime.timedelta(days=1))
 
 
 async def run_algorithm(
@@ -53,11 +68,13 @@ async def run_algorithm(
         exchange_repository: ExchangeRepository,
         stop_on_error: bool = False,
         benchmark_asset_symbol: str | None = None,
-        benchmark_asset_mic: str | None = "XNGS",
+        benchmark_asset_mic: str | None = None,
         benchmark_returns: pl.Series | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
-        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
+        intraday_metrics: bool = False,
+        futures_margin_model: FuturesMarginModel | None = None,
+        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
 ) -> TradingAlgorithmExecutionResult:
     """Run a backtest for the given algorithm.
     This is shared between the cli and :func:`ziplime.run_algo`.
@@ -69,8 +86,10 @@ async def run_algorithm(
                                   benchmark_asset_mic=benchmark_asset_mic,
                                   benchmark_returns=benchmark_returns,
                                   max_leverage=max_leverage, same_bar_execution=same_bar_execution,
+                                  futures_margin_model=futures_margin_model,
                                   exchange_repository=exchange_repository,
-                                  price_used_in_order_execution=price_used_in_order_execution)
+                                  price_used_in_order_execution=price_used_in_order_execution,
+                                  intraday_metrics=intraday_metrics)
     trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
     result = await trading_algorithm_executor.run_algorithm(trading_algorithm=tr)
@@ -95,7 +114,9 @@ async def run_algorithm_iter(
         benchmark_returns: pl.Series | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
-        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
+        futures_margin_model: FuturesMarginModel | None = None,
+        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
+        intraday_metrics: bool = False,
 ) -> AsyncIterator[TradingAlgorithmExecutionStatus]:
     """Run a backtest for the given algorithm.
     This is shared between the cli and :func:`ziplime.run_algo`.
@@ -105,8 +126,10 @@ async def run_algorithm_iter(
                                   clock=clock, custom_data_sources=custom_data_sources, stop_on_error=stop_on_error,
                                   benchmark_asset_symbol=benchmark_asset_symbol, benchmark_returns=benchmark_returns,
                                   max_leverage=max_leverage, same_bar_execution=same_bar_execution,
+                                  futures_margin_model=futures_margin_model,
                                   price_used_in_order_execution=price_used_in_order_execution,
-                                  exchange_repository=exchange_repository)
+                                  exchange_repository=exchange_repository,
+                                  intraday_metrics=intraday_metrics)
     trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
     async for status in trading_algorithm_executor.run_algorithm_iter(trading_algorithm=tr):
@@ -131,7 +154,9 @@ async def _prepare_algorithm(
         benchmark_returns: pl.Series | None = None,
         max_leverage: float = 1.0,
         same_bar_execution: bool = True,
-        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
+        futures_margin_model: FuturesMarginModel | None = None,
+        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
+        intraday_metrics: bool = False,
 ) -> TradingAlgorithmExecutionResult:
     """Run a backtest for the given algorithm.
     This is shared between the cli and :func:`ziplime.run_algo`.
@@ -196,7 +221,7 @@ async def _prepare_algorithm(
                 clock.trading_calendar.tz)
         )
         benchmark_precalculated_series = pl.DataFrame({"date": all_bars, "close": 0.00}).group_by_dynamic(
-            index_column="date", every=clock.emission_rate
+            index_column="date", every=benchmark_bucket(clock.emission_rate)
         ).agg(pl.col("close").sum())
     else:
         all_bars = pl.from_pandas(
@@ -204,7 +229,7 @@ async def _prepare_algorithm(
                 clock.trading_calendar.tz)
         )
         benchmark_precalculated_series = pl.DataFrame({"date": all_bars, "close": 0.00}).group_by_dynamic(
-            index_column="date", every=clock.emission_rate
+            index_column="date", every=benchmark_bucket(clock.emission_rate)
         ).agg(pl.col("close").sum())
 
     benchmark_source = BenchmarkSource(
@@ -218,7 +243,10 @@ async def _prepare_algorithm(
         benchmark_fields=frozenset({"close"}),
         precalculated_series=benchmark_precalculated_series
     )
-    await benchmark_source.validate_benchmark(benchmark_asset=benchmark_asset)
+    if benchmark_asset is not None:
+        # Running without a benchmark is supported -- the zero-returns series above is built for
+        # exactly that case -- but validation used to run anyway and fail on the missing asset.
+        await benchmark_source.validate_benchmark(benchmark_asset=benchmark_asset)
 
     for exchange in reversed(await exchange_repository.get_all_exchanges()):
         custom_data_sources.insert(0, exchange)
@@ -235,9 +263,10 @@ async def _prepare_algorithm(
         stop_on_error=stop_on_error,
         custom_data_sources=custom_data_sources,
         same_bar_execution=same_bar_execution,
+        futures_margin_model=futures_margin_model,
+        intraday_metrics=intraday_metrics,
     )
 
-    orders_by_exchange = {}
     for exchange in await exchange_repository.get_all_exchanges():
         # exchange_orders = await exchange.get_orders()
         # trades = await exchange._trades(
@@ -251,7 +280,7 @@ async def _prepare_algorithm(
         # for order in exchange_orders.values():
         #     tr.new_order_submitted(order=order)
         # positions = await exchange.get_positions()
-        portfolio = await  exchange.get_portfolio()
+        portfolio = await exchange.get_portfolio()
         tr._ledger.synchronize_exchange_portfolio(portfolio=portfolio)
 
     if max_leverage is not None:
@@ -307,14 +336,15 @@ async def _initialize_precalculated_series(
         trading_calendar.sessions_minutes(start=sessions[0], end=sessions[-1]).tz_convert(
             trading_calendar.tz)
     )
+    bucket = benchmark_bucket(emission_rate)
     limit = all_bars.to_frame("date").group_by_dynamic(
-        index_column="date", every=emission_rate
+        index_column="date", every=bucket
     ).agg()["date"].len()
 
     benchmark_series = await exchange.get_data_by_limit(
         fields=benchmark_fields,
         limit=limit,
-        frequency=emission_rate,
+        frequency=bucket,
         end_date=all_bars[-1],
         assets=frozenset({asset}),
         include_end_date=True

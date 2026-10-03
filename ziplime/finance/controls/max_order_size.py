@@ -35,12 +35,10 @@ class MaxOrderSize(TradingControl):
         if self.max_shares is not None and abs(amount) > self.max_shares:
             self.handle_violation(asset, amount, algo_datetime)
 
+        # See `MaxPositionSize.validate`: no quote is needed for a share-only cap.
+        if self.max_notional is None:
+            return
+
         current_asset_price = await algo_current_data.current(asset, "price")
-        order_value = amount * current_asset_price
-
-        too_much_value = (
-                self.max_notional is not None and abs(order_value) > self.max_notional
-        )
-
-        if too_much_value:
+        if abs(amount * current_asset_price) > self.max_notional:
             self.handle_violation(asset, amount, algo_datetime)

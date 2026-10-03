@@ -56,4 +56,3 @@ class DataSetFamilyMeta(abc.ABCMeta):
             self.__name__,
             list(self.extra_dims),
         )
-

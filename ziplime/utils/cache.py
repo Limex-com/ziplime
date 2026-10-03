@@ -1,7 +1,6 @@
 """Caching utilities for ziplime"""
 
 
-
 class Expired(Exception):
     """Marks that a :class:`CachedObject` has expired."""
 

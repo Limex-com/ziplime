@@ -7,4 +7,3 @@ class nop_context:
 
     def __exit__(self, *excinfo):
         pass
-

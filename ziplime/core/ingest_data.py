@@ -1,30 +1,24 @@
 import datetime
+from typing import Sequence
 import os
 from pathlib import Path
 
-import asyncio
-from exchange_calendars import ExchangeCalendar
-from scipy.constants import micro
-
-from ziplime.assets.models.exchange_asset_model import ExchangeAssetModel
 from ziplime.utils.calendar_utils import get_calendar
+from ziplime.utils.date_utils import normalize_datetime
 
+from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES
-from ziplime.assets.entities.currency import Currency
-from ziplime.assets.entities.equity import Equity
-from ziplime.assets.entities.symbol_universe import SymbolsUniverse
-from ziplime.assets.models.exchange_info_model import ExchangeInfoModel
 from ziplime.assets.repositories.sqlalchemy_adjustments_repository import SqlAlchemyAdjustmentRepository
 from ziplime.assets.repositories.sqlalchemy_asset_repository import SqlAlchemyAssetRepository
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.constants.period import Period
-from ziplime.constants.stock_symbols import ALL_US_STOCK_SYMBOLS
 from ziplime.data.data_sources.asset_data_source import AssetDataSource
 from ziplime.data.services.bundle_service import BundleService
 from ziplime.data.services.data_bundle_source import DataBundleSource
 from ziplime.data.services.file_system_bundle_registry import FileSystemBundleRegistry
-from ziplime.data.services.file_system_parquet_bundle_storage import FileSystemParquetBundleStorage
+from ziplime.data.services.file_system_delta_lake_bundle_storage import FileSystemDeltaLakeBundleStorage
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
+
 
 def get_asset_service(db_path: str = str(Path(Path.home(), ".ziplime", "assets.sqlite").absolute()),
                       clear_asset_db: bool = False) -> AssetService:
@@ -46,6 +40,9 @@ def get_asset_service(db_path: str = str(Path(Path.home(), ".ziplime", "assets.s
     """
     if clear_asset_db and os.path.exists(db_path):
         os.remove(db_path)
+    # SQLite creates the file but not the folder it lives in, so a first run on a machine with no
+    # ~/.ziplime failed with "unable to open database file" before anything had been ingested.
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     db_url = f"sqlite+aiosqlite:///{db_path}"
     assets_repository = SqlAlchemyAssetRepository(db_url=db_url, future_chain_predicates=CHAIN_PREDICATES)
     adjustments_repository = SqlAlchemyAdjustmentRepository(db_url=db_url)
@@ -70,14 +67,21 @@ async def ingest_assets(asset_service: AssetService, asset_data_source: AssetDat
     Raises:
         Exception: Propagates any exceptions raised during data fetching or saving processes where applicable.
     """
-    asset_start_date = datetime.datetime(year=1900, month=1, day=1, tzinfo=datetime.timezone.utc)
-    asset_end_date = datetime.datetime(year=2099, month=1, day=1, tzinfo=datetime.timezone.utc)
-
     exchanges = await asset_data_source.get_exchanges()
     if len(exchanges) > 0:
         await asset_service.save_exchanges(exchanges=exchanges)
-    exchange_assets = await asset_data_source.get_assets(exchanges=exchanges)
-    await asset_service.save_exchange_assets(exchange_assets=exchange_assets)
+    assets_import = await asset_data_source.get_assets(exchanges=exchanges)
+    # A listing can name an exchange the source did not report up front -- Yahoo returns venues
+    # outside its MIC map under its own code (NGM, SHZ, ...). Without a row in `exchanges` the
+    # listing reads back with no exchange, and every bar that touches it fails.
+    known_mics = {exchange.mic for exchange in exchanges}
+    unlisted = {
+        listing.exchange.mic: listing.exchange for listing in assets_import.exchange_assets
+        if listing.exchange is not None and listing.exchange.mic not in known_mics
+    }
+    if unlisted:
+        await asset_service.save_exchanges(exchanges=list(unlisted.values()))
+    await asset_service.import_assets(assets_import=assets_import)
     # await asset_service.save_equities(equities=assets)
 
 
@@ -175,8 +179,11 @@ async def ingest_market_data(
         data_frequency: datetime.timedelta,
         data_bundle_source: DataBundleSource,
         asset_service: AssetService,
+        merge: bool = False,
         forward_fill_missing_ohlcv_data: bool = True,
         bundle_storage_path: str = str(Path(Path.home(), ".ziplime", "data")),
+        asset_type: AssetType | Sequence[AssetType] = AssetType.EQUITY,
+        assets: list[ExchangeAsset] | None = None,
 ):
     """
     Ingests market data into a specified bundle for a given time period, using
@@ -194,10 +201,18 @@ async def ingest_market_data(
         data_frequency (datetime.timedelta): The frequency at which data intervals should be recorded.
         data_bundle_source (DataBundleSource): The source responsible for providing market data.
         asset_service (AssetService): Service for handling and obtaining asset-related information.
+        merge (bool, optional): If true, merge the new rows into the latest stored bundle version.
+            Defaults to False.
         forward_fill_missing_ohlcv_data (bool, optional): Indicates whether to forward-fill missing
             Open-High-Low-Close-Volume (OHLCV) data in the ingested bundle. Defaults to True.
         bundle_storage_path (str, optional): The path where the data bundle should be stored.
             Defaults to the directory ".ziplime/data" within the user's home path.
+        asset_type (AssetType | Sequence[AssetType]): Which kind of asset the symbols name, used
+            to resolve them to sids when ``assets`` is not given. Pass AssetType.FUTURES_CONTRACT
+            when ingesting futures.
+        assets (list[ExchangeAsset] | None): The listings themselves, already resolved. Preferred,
+            and effectively required for a bundle spanning asset classes -- a ticker is unique only
+            within a class, so resolving one by name alone can return the wrong instrument.
 
     Raises:
         Exception: May raise exceptions related to data retrieval, storage processes, or configuration
@@ -207,13 +222,23 @@ async def ingest_market_data(
 
     bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
     bundle_service = BundleService(bundle_registry=bundle_registry)
-    bundle_storage = FileSystemParquetBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
+    bundle_storage = FileSystemDeltaLakeBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
 
-    bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
-
-    await bundle_service.ingest_market_data_bundle(
-        date_start=start_date.replace(tzinfo=calendar.tz),
-        date_end=end_date.replace(tzinfo=calendar.tz),
+    if merge:
+        existing_bundle_metadata = await bundle_registry.load_bundle_metadata(bundle_name=bundle_name,
+                                                                              bundle_version=None)
+        if not existing_bundle_metadata:
+            bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
+        else:
+            bundle_version = existing_bundle_metadata["version"]
+    else:
+        bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
+    # Returned, not discarded: ingestion skips silently when the source hands back nothing -- a
+    # mistyped symbol, a window the vendor does not cover -- and a caller that gets None back can
+    # say so instead of reporting success over an empty bundle.
+    return await bundle_service.ingest_market_data_bundle(
+        date_start=normalize_datetime(start_date, calendar.tz),
+        date_end=normalize_datetime(end_date, calendar.tz),
         bundle_storage=bundle_storage,
         data_bundle_source=data_bundle_source,
         frequency=data_frequency,
@@ -222,7 +247,10 @@ async def ingest_market_data(
         bundle_version=bundle_version,
         trading_calendar=calendar,
         asset_service=asset_service,
+        merge=merge,
         forward_fill_missing_ohlcv_data=forward_fill_missing_ohlcv_data,
+        asset_type=asset_type,
+        assets=assets,
     )
 
 
@@ -236,6 +264,8 @@ async def ingest_custom_data(
         data_frequency_use_window_end: bool,
         data_bundle_source: DataBundleSource,
         asset_service: AssetService,
+        merge: bool = False,
+        merge_columns: Sequence[str] = ("sid", "date"),
         bundle_storage_path: str = str(Path(Path.home(), ".ziplime", "data")),
 ):
     """
@@ -260,6 +290,10 @@ async def ingest_custom_data(
         data_bundle_source (DataBundleSource): The source of the data to ingest.
         asset_service (AssetService): The asset service providing information about
             assets.
+        merge (bool, optional): If true, merge the new rows into the latest stored bundle version.
+            Defaults to False.
+        merge_columns (Sequence[str], optional): Columns forming the row identity during a merge.
+            Defaults to ``("sid", "date")``.
         bundle_storage_path (str, optional): The path to store the ingested bundle.
             Defaults to the data directory under the user's home path.
 
@@ -268,12 +302,23 @@ async def ingest_custom_data(
 
     bundle_registry = FileSystemBundleRegistry(base_data_path=bundle_storage_path)
     bundle_service = BundleService(bundle_registry=bundle_registry)
-    bundle_storage = FileSystemParquetBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
-    bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
+    bundle_storage = FileSystemDeltaLakeBundleStorage(base_data_path=bundle_storage_path, compression_level=5)
+
+    if merge:
+        existing_bundle_metadata = await bundle_registry.load_bundle_metadata(bundle_name=bundle_name,
+                                                                              bundle_version=None)
+        if not existing_bundle_metadata:
+            bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
+        else:
+            bundle_version = existing_bundle_metadata["version"]
+    else:
+        bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
+
+    # bundle_version = str(int(datetime.datetime.now(tz=calendar.tz).timestamp()))
 
     await bundle_service.ingest_custom_data_bundle(
-        date_start=start_date.replace(tzinfo=calendar.tz),
-        date_end=end_date.replace(tzinfo=calendar.tz),
+        date_start=normalize_datetime(start_date, calendar.tz),
+        date_end=normalize_datetime(end_date, calendar.tz),
         bundle_storage=bundle_storage,
         data_bundle_source=data_bundle_source,
         frequency=data_frequency,
@@ -283,4 +328,6 @@ async def ingest_custom_data(
         bundle_version=bundle_version,
         trading_calendar=calendar,
         asset_service=asset_service,
+        merge=merge,
+        merge_columns=list(merge_columns)
     )

@@ -34,7 +34,6 @@ from .downsample_helpers import (
 from ziplime.pipeline.terms.term import Term
 
 
-
 class PositiveWindowLengthMixin(Term):
     """
     Validation mixin enforcing that a Term gets a positive WindowLength

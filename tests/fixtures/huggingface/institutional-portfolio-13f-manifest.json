@@ -1,0 +1,125 @@
+{
+  "amendment_policy": "13F-HR/A carries an amendment type. RESTATEMENT replaces the quarter's table and any position it omits earns a RETRACT event; NEW HOLDINGS adds to the quarter, which is how a position held back under confidential treatment becomes public months later. An amendment declaring no type is left UNRESOLVED rather than guessed.",
+  "automation": {
+    "docs": "https://huggingface.co/docs/huggingface_hub/main/en/guides/jobs",
+    "flavor": "cpu-upgrade",
+    "gates": [
+      "ruff",
+      "pytest",
+      "validate_dataset"
+    ],
+    "runner": "huggingface_jobs",
+    "script": "jobs/run.py"
+  },
+  "bundle_storage_class": "ziplime.data.services.file_system_delta_lake_bundle_storage.FileSystemDeltaLakeBundleStorage",
+  "bundle_storage_data": {
+    "table_uri": "data/positions/fund_portfolios.delta"
+  },
+  "config_rows": {
+    "filings": 409731,
+    "holdings": 124036778,
+    "positions": 87872126
+  },
+  "configs": {
+    "filings": {
+      "grain": "one 13F submission",
+      "path": "data/filings/**/*.parquet"
+    },
+    "holdings": {
+      "grain": "one information-table row, as filed",
+      "path": "data/holdings/**/*.parquet"
+    },
+    "positions": {
+      "delta_path": "data/positions/fund_portfolios.delta",
+      "grain": "one manager/quarter/security knowledge event",
+      "path": "data/positions/fund_portfolios.delta/*.parquet"
+    },
+    "quality": {
+      "grain": "per-filing judgements about value reliability",
+      "path": "data/quality/*.parquet"
+    }
+  },
+  "coverage": {
+    "earliest_period_any_filer_reported": "1987-03-31",
+    "first_reporting_period": "2013-06-30",
+    "last_filing_date": "2026-09-03",
+    "last_reporting_period": "2026-06-30",
+    "managers": 16521,
+    "quarters_covered": 53
+  },
+  "data_type": "PIT_DATA",
+  "entity_domain": "us_equities",
+  "event_date": "period_of_report",
+  "event_date_type": "date",
+  "frequency_seconds": null,
+  "generated_at": "2026-09-04T11:48:19.373860+00:00",
+  "knowledge_date": "accepted_at",
+  "knowledge_date_policy": {
+    "dissemination_caveat": "Acceptance time is read from each submission's SGML header, which is stamped in Eastern local time and converted here. EDGAR's submission index was not used: it reports some historical acceptances as Eastern time labelled UTC, four to five hours early -- the direction that creates look-ahead. Where no header timestamp exists the end of the filing day in New York is recorded and the row is marked estimated, which errs late.",
+    "fallbacks": [
+      "filing_date_eod_fallback"
+    ],
+    "fallbacks_are_estimated": true,
+    "filing_date_eod_timezone": "America/New_York",
+    "header_timezone": "America/New_York",
+    "primary": "edgar_header_acceptance_datetime"
+  },
+  "knowledge_date_type": "timestamp[us, tz=UTC]",
+  "name": "fund_portfolios",
+  "parser_version": "0.1.0",
+  "pit": {
+    "append_only": true,
+    "knowledge_lag_model": "sec_13f_forty_five_days",
+    "model_knowledge_cutoff": null,
+    "statutory_lag_days": 45
+  },
+  "pretty_name": "ZipLime Institutional Fund Portfolios (PIT)",
+  "quality_ok": true,
+  "rows": 87872126,
+  "schema": {
+    "accession_number": "Utf8",
+    "amendment_status": "Utf8",
+    "cusip": "Utf8",
+    "disclosure_lag_days": "Int32",
+    "inserted_at": "Datetime",
+    "issuer_name": "Utf8",
+    "logical_position_id": "Utf8",
+    "manager_cik": "Utf8",
+    "manager_name": "Utf8",
+    "operation": "Utf8",
+    "portfolio_value_usd": "Float64",
+    "position_count": "Int32",
+    "position_event_id": "Utf8",
+    "put_call": "Utf8",
+    "revision": "Int32",
+    "rows_aggregated": "Int32",
+    "shares": "Float64",
+    "supersedes_position_id": "Utf8",
+    "title_of_class": "Utf8",
+    "value_flagged": "Boolean",
+    "value_usd": "Float64",
+    "was_confidential": "Boolean",
+    "weight_pct": "Float64"
+  },
+  "source": {
+    "bulk_data_sets": "https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets",
+    "fair_access_url": "https://www.sec.gov/about/developer-resources",
+    "forms": [
+      "13F-HR",
+      "13F-HR/A",
+      "13F-NT",
+      "13F-NT/A"
+    ],
+    "full_index": "https://www.sec.gov/Archives/edgar/full-index",
+    "license": "Apache-2.0 for the recipe, schema and compilation; the underlying filings are institutional investment manager documents made available through SEC EDGAR (see NOTICE)",
+    "name": "U.S. SEC EDGAR",
+    "origin": "SEC Form 13F holdings reports filed under Section 13(f) of the Securities Exchange Act, loaded from SEC's quarterly Form 13F Data Sets and kept current from EDGAR's own quarterly index",
+    "recipe": "recipe/",
+    "recipe_hash": "sha256:a1e5501336865982b9be5a8f0e8034a592d01da832e2238147de4e651130ec12",
+    "schedule": "0 9 * * *"
+  },
+  "trading_calendar_name": null,
+  "update_schedule": "daily",
+  "value_units_policy": "Form 13F reported value in thousands of dollars until an amendment required whole dollars for filings made from January 2023, and filers adopted it on their own schedule. The unit is inferred per filing from implied share prices and then reconciled against each manager's own value history; what neither settles is published with value_continuity_flagged set.",
+  "version": "1.0.0"
+}

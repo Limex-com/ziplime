@@ -4,7 +4,9 @@ import numpy as np
 import pandas as pd
 import structlog
 
+from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.futures_contract import FuturesContract
+from ziplime.assets.entities.option_contract import OptionContract
 
 logger = structlog.get_logger(__name__)
 
@@ -103,13 +105,35 @@ class PositionStats:
         return self
 
 
-def calculate_position_tracker_stats(positions, position_count: int, stats):
+def _bond_unit_value(bond_book, bond, position) -> float:
+    """Money one bond of ``position`` is worth at its current mark.
+
+    Falls back to the bare quote when no schedule is loaded and the bond quotes in money; for a
+    percent-quoted bond the face value alone is enough to get the magnitude right, so the
+    conversion still happens without a schedule.
+    """
+    as_of = position.last_sale_date
+    if bond_book is None:
+        from ziplime.finance.bonds import BondBook
+        bond_book = BondBook()
+    return bond_book.dirty_value(bond, position.last_sale_price, as_of)
+
+
+def calculate_position_tracker_stats(positions, position_count: int, stats, bond_book=None):
     """Calculate various stats about the current positions.
 
     Parameters
     ----------
-    positions : OrderedDict
-        The ordered dictionary of positions.
+    positions : list[Position]
+        The positions with a non-zero amount.
+    position_count : int
+        How many positions ``positions`` holds, in total, across exchanges and accounts.
+    stats : PositionStats
+        The object to write the results into, reusing its arrays where they already fit.
+    bond_book : ziplime.finance.bonds.BondBook, optional
+        Coupon and amortization schedules. Bonds are quoted as a percentage of face value and
+        settle at the dirty price, so without it a bond position is valued at its bare quote --
+        roughly a tenth of its worth for a standard 1000-unit nominal.
 
     Returns
     -------
@@ -174,42 +198,53 @@ def calculate_position_tracker_stats(positions, position_count: int, stats):
 
     ix = 0
 
-    for trading_accounts in positions.values():
-        for trading_account_positions in trading_accounts.values():
-            for position in trading_account_positions.values():
-                # position = outer_position
+    for position in positions:
+        # NOTE: this loop does a lot of stuff!
+        # we call this function every time the portfolio value is needed,
+        # which is at least once per simulation day, so let's not iterate
+        # through every single position multiple times.
+        exposure = position.amount * position.last_sale_price
+        instrument = position.asset.asset
+        if type(instrument) is FuturesContract:
+            # Futures don't have an inherent position value.
+            value = 0
 
-                # NOTE: this loop does a lot of stuff!
-                # we call this function every time the portfolio value is needed,
-                # which is at least once per simulation day, so let's not iterate
-                # through every single position multiple times.
-                # try:
-                exposure = position.amount * position.last_sale_price
-                # except Exception as e:
-                #     print("exception multiplying a")
-                #     raise
-                if type(position.asset) is FuturesContract:
-                    # Futures don't have an inherent position value.
-                    value = 0
+            # unchecked cast, this is safe because we do a type check above
+            exposure *= instrument.multiplier
+        elif type(instrument) is OptionContract:
+            exposure *= instrument.multiplier
+            if instrument.premium_style.is_margined:
+                # Nothing was paid for it, so there is nothing to be worth. A margined option is
+                # carried exactly like a futures position: the P&L has already reached cash
+                # through variation margin, and counting a value here as well would book the same
+                # money twice.
+                value = 0
+            else:
+                # A premium-paid option *is* worth something: it was bought and paid for, and a
+                # short one is a liability that has to be bought back. Which is why a short option
+                # shows negative value here, exactly like a short equity.
+                value = exposure
+        elif type(instrument) is Bond:
+            # A bond quote is a percentage of face value, and a holding is worth the
+            # dirty price: what it would fetch is the clean value plus the coupon
+            # accrued so far, which the buyer would have to hand over.
+            per_bond = _bond_unit_value(bond_book, instrument, position)
+            value = exposure = position.amount * per_bond
+        else:
+            value = exposure
+        if exposure > 0:
+            longs_count += 1
+            long_value += value
+            long_exposure += exposure
+        elif exposure < 0:
+            shorts_count += 1
+            short_value += value
+            short_exposure += exposure
 
-                    # unchecked cast, this is safe because we do a type check above
-                    exposure *= position.asset.price_multiplier
-                else:
-                    value = exposure
+        index[ix] = position.asset.sid
+        position_exposure[ix] = exposure
 
-                if exposure > 0:
-                    longs_count += 1
-                    long_value += value
-                    long_exposure += exposure
-                elif exposure < 0:
-                    shorts_count += 1
-                    short_value += value
-                    short_exposure += exposure
-
-                index[ix] = position.asset.sid
-                position_exposure[ix] = exposure
-
-                ix += 1
+        ix += 1
 
     net_value = long_value + short_value
     gross_value = long_value - short_value

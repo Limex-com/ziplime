@@ -3,7 +3,6 @@ import datetime
 import asyncclick as click
 
 
-
 class _DatetimeParam(click.ParamType):
     def __init__(self, tz=None):
         self.tz = tz
@@ -58,4 +57,3 @@ class Date(_DatetimeParam):
     def parser(self, value):
         ts = super(Date, self).parser(value)
         return ts.normalize() if self.as_timestamp else ts.date()
-

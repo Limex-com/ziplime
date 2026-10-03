@@ -12,9 +12,6 @@ from ziplime.utils.numpy_utils import (
 )
 
 
-
-
-
 class MaximumFilter(Filter, StandardOutputs):
     """Pipeline filter that selects the top asset, possibly grouped and masked."""
 

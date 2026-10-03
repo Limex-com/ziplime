@@ -10,6 +10,8 @@ class ExchangeAssetModel(BaseModel):
     __tablename__ = "exchange_assets"
     sid: Mapped[IntegerPK]
     asset_id: Mapped[AssetRouterFK]
+    quote_id: Mapped[AssetRouterFK]
+
     mic: Mapped[ExchangeFK]
     symbol: Mapped[str | None]
 

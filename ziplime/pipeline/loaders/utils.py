@@ -391,6 +391,7 @@ def add_new_adjustments(adjustments_dict, adjustments, column_name, ts):
     except KeyError:
         adjustments_dict[column_name][ts] = adjustments
 
+
 def validate_split_adjusted_column_specs(name_map, columns):
     to_be_split = set(columns)
     available = set(name_map.keys())
@@ -406,5 +407,3 @@ def validate_split_adjusted_column_specs(name_map, columns):
                 available=sorted(available),
             )
         )
-
-

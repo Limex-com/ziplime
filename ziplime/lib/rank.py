@@ -6,7 +6,7 @@ from scipy.stats import rankdata
 from ziplime.utils.numpy_utils import is_missing
 
 
-def rankdata_1d_descending( data: np.ndarray, method: str):
+def rankdata_1d_descending(data: np.ndarray, method: str):
     """
     1D descending version of scipy.stats.rankdata.
     """
@@ -56,7 +56,7 @@ def masked_rankdata_2d(data: np.ndarray,
     return result
 
 
-def rankdata_2d_ordinal( array: np.ndarray):
+def rankdata_2d_ordinal(array: np.ndarray):
     """
     Equivalent to:
     numpy.apply_over_axis(scipy.stats.rankdata, 1, array, method='ordinal')
@@ -79,9 +79,9 @@ def rankdata_2d_ordinal( array: np.ndarray):
     return out
 
 
-def grouped_masked_is_maximal(data: np.ndarray, # 2 dim
-                                groupby,
-                                mask):
+def grouped_masked_is_maximal(data: np.ndarray,  # 2 dim
+                              groupby,
+                              mask):
     """Build a mask of the top value for each row in ``data``, grouped by
     ``groupby`` and masked by ``mask``.
     Parameters

@@ -45,9 +45,12 @@ class FixedBasisPointsSlippage(SlippageModel):
     def __init__(self, basis_points=5.0, volume_limit=0.1):
         super(FixedBasisPointsSlippage, self).__init__()
         if volume_limit <= 0:
-            raise ValueError("volume_limit must be positive.")
-        if basis_points <= 0:
-            raise ValueError("volume_limit must be positive.")
+            raise ValueError(f"volume_limit must be positive, got {volume_limit!r}.")
+        # Zero is allowed: it is the control run -- no price impact, but fills still capped by
+        # volume, which is what separates it from NoSlippage. Only a negative is meaningless, and
+        # rejecting zero here reported it as a problem with `volume_limit`, which it is not.
+        if basis_points < 0:
+            raise ValueError(f"basis_points cannot be negative, got {basis_points!r}.")
 
         self.basis_points = basis_points
         self.percentage = float(self.basis_points) / 10000.0
@@ -65,8 +68,12 @@ class FixedBasisPointsSlippage(SlippageModel):
             volume_limit=self.volume_limit,
         )
 
-    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: Order, price: float=None) -> tuple[float, float]:
-        current_val = await exchange.get_spot_value(assets=frozenset({order.asset}), fields=frozenset({"open","close", "volume"}), dt=dt)
+    async def process_order(
+            self, exchange: Exchange, dt: datetime.datetime, order: Order, price: float = None,
+    ) -> tuple[float, float]:
+        current_val = await exchange.get_spot_value(
+            assets=frozenset({order.asset}), fields=frozenset({"open", "close", "volume"}), dt=dt,
+        )
         volume = current_val["volume"][0]
         max_volume = int(self.volume_limit * volume)
         if price is None:
@@ -81,11 +88,14 @@ class FixedBasisPointsSlippage(SlippageModel):
             shares_to_fill * order.direction,
         )
 
-    async def order_target_percentage_maximum_quantity(self, exchange: Exchange, dt: datetime.datetime, asset: ExchangeAsset,
-                                percentage: float,
-                                available_cash: float) -> tuple[float, float]:
+    async def order_target_percentage_maximum_quantity(
+            self, exchange: Exchange, dt: datetime.datetime, asset: ExchangeAsset,
+            percentage: float, available_cash: float,
+    ) -> tuple[float, float]:
 
-        current_val = await exchange.get_spot_value(assets=frozenset({asset}), fields=frozenset({"close", "volume", }), dt=dt)
+        current_val = await exchange.get_spot_value(
+            assets=frozenset({asset}), fields=frozenset({"close", "volume"}), dt=dt,
+        )
         volume = current_val["volume"][0]
         max_volume = int(self.volume_limit * volume)
 
@@ -94,9 +104,16 @@ class FixedBasisPointsSlippage(SlippageModel):
         slippage = self.percentage * math.copysign(1, 1)  # +1 for buy, -1 for sell if needed
         price_with_slippage = price * (1 + slippage)
 
-        target_cash = available_cash #* percentage
+        target_cash = available_cash  # * percentage
         max_quantity = target_cash / price_with_slippage
-        shares_to_fill = min(abs(max_quantity), max_volume - self.volume_for_bar)
+        # A volume cap bounds how much of an order can fill; it must never turn the order around.
+        # `max_volume - volume_for_bar` goes negative on a thin bar once part of the limit is
+        # already used, and returning that made `order_target_percent` ask for a *negative* number
+        # of shares -- opening a short in a long-only strategy. On a micro-cap universe that ran a
+        # book to -13m of exposure on a 1m account. Clamp the remaining capacity at zero: an
+        # exhausted limit means nothing more fills, not that the position reverses.
+        remaining_capacity = max(0, max_volume - self.volume_for_bar)
+        shares_to_fill = min(abs(max_quantity), remaining_capacity)
         # print(f"estimated_price_for_target_percentage={price_with_slippage}, shares_to_fill={shares_to_fill},"
         #       f"price_without_slippage={price}")
         return price_with_slippage, shares_to_fill

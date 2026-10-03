@@ -1,28 +1,46 @@
 import datetime
 
 import polars as pl
-from abc import abstractmethod
-from typing import Any, Self
+from abc import ABC, abstractmethod
+from typing import Any, AsyncIterator, Self
 
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.constants.period import Period
 from ziplime.data.domain.data_bundle import DataBundle
 
 
-class BundleStorage:
+class BundleStorage(ABC):
 
     @abstractmethod
-    async def store_bundle(self, data_bundle: DataBundle):
+    async def store_bundle(self, data_bundle: DataBundle, merge: bool, merge_columns: list[str] | None = None):
         """
         Method for storing a data bundle asynchronously.
 
         Args:
             data_bundle (DataBundle): The data bundle to be stored.
+            merge: If True data will be merged with existing bundle data
+            merge_columns:  List of columns which are identifier which we should use to merge data
         """
-        ...
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_bundle_data(self, bundle_name: str, bundle_version: str) -> None:
+        """Remove one stored version's data.
+
+        Deleting the registry entry alone would leave the bars on disk with nothing pointing at
+        them -- invisible to `list_bundles` and still occupying the space the caller was trying to
+        reclaim.
+
+        Args:
+            bundle_name: Name of the bundle.
+            bundle_version: The single version to remove. Never all of them: a caller that wants
+                every version asks for each one.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     async def load_data_bundle(self, data_bundle: DataBundle,
-                               symbols: list[str] | None = None,
+                               assets: list[ExchangeAsset | None] = None,
                                start_date: datetime.datetime | None = None,
                                end_date: datetime.datetime | None = None,
                                frequency: datetime.timedelta | Period | None = None,
@@ -36,7 +54,7 @@ class BundleStorage:
 
         Args:
             data_bundle (DataBundle): The source bundle containing the data to be loaded.
-            symbols (list[str] | None, optional): A list of symbols to filter and load data for. If not
+            assets (list[ExchangeAsset] | None, optional): A list of symbols to filter and load data for. If not
                 provided, data for all available symbols is loaded.
             start_date (datetime.datetime | None, optional): The starting date-time for the data to be loaded.
                 If not specified, it loads data from the earliest available date-time.
@@ -71,7 +89,45 @@ class BundleStorage:
         Raises:
             NotImplementedError: Must be raised if this method is called directly from an abstract class.
         """
-        ...
+        raise NotImplementedError
+
+    @abstractmethod
+    async def iter_data_bundle_batches(
+            self,
+            data_bundle: DataBundle,
+            batch_days: int | None = 30,
+            batch_assets: int | None = 100,
+            sids: list[int] | None = None,
+    ) -> AsyncIterator[pl.DataFrame]:
+        """Yield bounded data batches without loading the complete bundle."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_data_bundle_sids(self, data_bundle: DataBundle) -> list[int]:
+        """Return the distinct sids contained in a data bundle."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def load_data_bundle_before(
+            self,
+            data_bundle: DataBundle,
+            sid: int,
+            date: datetime.datetime | datetime.date,
+            columns: list[str],
+    ) -> pl.DataFrame:
+        """Load the latest row for a sid strictly before a date."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def initialize_adjustment_columns(
+            self,
+            data_bundle: DataBundle,
+            adjusted_columns: dict[str, str],
+            adjusted_flag_column: str = "adjusted",
+            sids: list[int] | None = None,
+    ) -> None:
+        """Add adjustment columns and initialize them from the original values."""
+        raise NotImplementedError
 
     @classmethod
     @abstractmethod
@@ -87,7 +143,7 @@ class BundleStorage:
             Self: An instance of the class constructed from the provided
                 JSON data.
         """
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def to_json(self, data_bundle: DataBundle) -> dict[str, Any]:
@@ -100,4 +156,4 @@ class BundleStorage:
         Returns:
             dict[str, Any]: The JSON representation of the data bundle.
         """
-        ...
+        raise NotImplementedError

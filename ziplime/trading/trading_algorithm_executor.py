@@ -62,7 +62,7 @@ class TradingAlgorithmExecutor:
         )
 
     async def run_algorithm_iter(self, trading_algorithm: TradingAlgorithm) -> AsyncIterator[
-        TradingAlgorithmExecutionStatus]:
+            TradingAlgorithmExecutionStatus]:
         """Run the algorithm."""
         self._logger.info("Running algorithm")
 
@@ -90,7 +90,6 @@ class TradingAlgorithmExecutor:
                 if perf["progress"] < 1:
                     yield status
 
-
             # convert perf dict to pandas dataframe
             daily_stats, risk_report = self._create_daily_stats(perfs)
 
@@ -99,11 +98,11 @@ class TradingAlgorithmExecutor:
             trading_algorithm.data_portal = None
             trading_algorithm.metrics_tracker = None
         status.result = TradingAlgorithmExecutionResult(
-                trading_algorithm=trading_algorithm,
-                perf=daily_stats,
-                risk_report=risk_report,
-                errors=errors
-            )
+            trading_algorithm=trading_algorithm,
+            perf=daily_stats,
+            risk_report=risk_report,
+            errors=errors
+        )
         yield status
 
     def analyze(self, trading_algorithm: TradingAlgorithm, perf):

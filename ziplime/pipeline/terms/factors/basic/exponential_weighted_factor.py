@@ -1,6 +1,5 @@
 
 
-
 from numbers import Number
 from numpy import (
     exp,

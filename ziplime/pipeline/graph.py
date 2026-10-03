@@ -147,22 +147,22 @@ class TermGraph:
     def ordered(self):
         return iter(nx.topological_sort(self.graph))
 
-    #@lazyval
+    # @lazyval
     @property
     def loadable_terms(self):
         return {term for term in self.graph if isinstance(term, LoadableTerm)}
 
-    #@lazyval
+    # @lazyval
     @property
     def jpeg(self):
         return display_graph(self, "jpeg")
 
-    #@lazyval
+    # @lazyval
     @property
     def png(self):
         return display_graph(self, "png")
 
-    #@lazyval
+    # @lazyval
     @property
     def svg(self):
         return display_graph(self, "svg")
@@ -271,7 +271,14 @@ class ExecutionPlan(TermGraph):
     offset
     """
 
-    def __init__(self, domain: Domain, terms: list[Term], start_date: datetime.date, end_date: datetime.date, min_extra_rows: int=0):
+    def __init__(
+        self,
+        domain: Domain,
+        terms: list[Term],
+        start_date: datetime.date,
+        end_date: datetime.date,
+        min_extra_rows: int = 0,
+    ):
         super(ExecutionPlan, self).__init__(terms=terms)
 
         # Specialize all the LoadableTerms in the graph to our domain, so that
@@ -304,7 +311,14 @@ class ExecutionPlan(TermGraph):
 
         self._assert_all_loadable_terms_specialized_to(domain=domain)
 
-    def set_extra_rows(self, term: Term, all_dates: pd.DatetimeIndex, start_date: datetime.date, end_date: datetime.date, min_extra_rows: int) -> None:
+    def set_extra_rows(
+        self,
+        term: Term,
+        all_dates: pd.DatetimeIndex,
+        start_date: datetime.date,
+        end_date: datetime.date,
+        min_extra_rows: int,
+    ) -> None:
         # Specialize any loadable terms before adding extra rows.
         term = maybe_specialize(term=term, domain=self.domain)
 
@@ -337,7 +351,7 @@ class ExecutionPlan(TermGraph):
                 min_extra_rows=extra_rows_for_term + additional_extra_rows,
             )
 
-    #@lazyval
+    # @lazyval
     @property
     def offset(self) -> dict[tuple[Term, Term], int]:
         """
@@ -420,7 +434,7 @@ class ExecutionPlan(TermGraph):
 
         return out
 
-    #@lazyval
+    # @lazyval
     @property
     def extra_rows(self) -> dict[Term, int]:
         """
@@ -465,7 +479,9 @@ class ExecutionPlan(TermGraph):
         attrs = dict(self.graph.nodes())[term]
         attrs["extra_rows"] = max(N, attrs.get("extra_rows", 0))
 
-    def mask_and_dates_for_term(self, term: Term, root_mask_term: Term, workspace: dict[Term, AdjustedArray], all_dates: pd.DatetimeIndex):
+    def mask_and_dates_for_term(
+        self, term: Term, root_mask_term: Term, workspace: dict[Term, AdjustedArray], all_dates: pd.DatetimeIndex
+    ):
         """
         Load mask and mask row labels for term.
 

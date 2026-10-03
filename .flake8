@@ -1,2 +1,12 @@
 [flake8]
 max-line-length = 120
+exclude =
+    .git,
+    .venv,
+    .pytest_cache,
+    __pycache__,
+    build,
+    dist,
+    *.egg-info,
+    migrations,
+    ziplime/alembic/versions

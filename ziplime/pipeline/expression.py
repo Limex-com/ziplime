@@ -108,9 +108,6 @@ def _ensure_element(tup, elem):
         return tuple(chain(tup, (elem,))), len(tup)
 
 
-
-
-
 def method_name_for_op(op, commute=False):
     """
     Get the name of the Python magic method corresponding to `op`.

@@ -7,6 +7,8 @@ from ziplime.utils.math_utils import nanmean, nanstd
 
 # Functions to be passed to GroupedRowTransform.  These aren't defined inline
 # because the transformation function is part of the instance hash key.
+
+
 def demean(row):
     return row - nanmean(row)
 

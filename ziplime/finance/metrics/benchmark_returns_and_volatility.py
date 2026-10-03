@@ -6,7 +6,6 @@ import pandas as pd
 import polars as pl
 from exchange_calendars import ExchangeCalendar
 
-from ziplime.data.domain.data_bundle import DataBundle
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.domain.ledger import Ledger
 from ziplime.finance.finance_ext import minute_annual_volatility
@@ -18,22 +17,24 @@ class BenchmarkReturnsAndVolatility:
     """Tracks daily and cumulative returns for the benchmark as well as the
     volatility of the benchmark returns.
     """
+    #: This metric's ``end_of_bar`` only writes into the packet it is handed -- it carries nothing
+    #: from one bar to the next -- so a run that is not emitting intraday packets can skip it.
+    #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
+    packet_only = True
 
     def start_of_simulation(
             self, ledger: Ledger, emission_rate: datetime.timedelta, trading_calendar: ExchangeCalendar,
             sessions: pd.DatetimeIndex, benchmark_source: BenchmarkSource
     ):
-        daily_returns = benchmark_source.daily_returns(
-            start=sessions[0],
-            end=sessions[-1],
-        )
+        # One row per session; a benchmark day missing from the calendar would otherwise
+        # shift the whole series against `session_ix`.
+        daily_returns = benchmark_source.daily_returns_by_session(sessions)
         daily_returns = daily_returns.fill_nan(0.0)
         daily_returns_series = daily_returns.select("pct_change")
         if len(daily_returns_series) == 0:
             self._minute_cumulative_returns = None
             self._daily_cumulative_returns = None
             return
-            raise ValueError(f"No daily returns for benchmark. Please check if you properly loaded data for symbol {benchmark_source.benchmark_asset.get_symbol_by_exchange(exchange_name=None)} in memory.")
         self._daily_returns = daily_returns_array = daily_returns_series
         self._daily_cumulative_returns = np.cumprod(1 + daily_returns_array["pct_change"]) - 1
         self._daily_annual_volatility = (daily_returns_series.with_columns(

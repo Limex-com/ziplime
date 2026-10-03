@@ -323,6 +323,21 @@ Symbol '{symbol}' was not found.
 """.strip()
 
 
+class AmbiguousSymbol(ZiplineError):
+    """Raised when a ticker resolves to more than one asset class and nothing says which is meant.
+
+    A ticker is only unique within an asset class. The same ticker can be both a futures contract
+    and -- because an equity vendor listed it that way -- an equity; hundreds of such pairs exist
+    in a database carrying both. Picking one silently would tag a bundle's bars with another
+    instrument's sid, which surfaces much later as a strategy that mysteriously trades nothing.
+    """
+
+    msg = """
+Symbol '{symbol}' resolves to more than one asset class: {asset_types}.
+Pass a single asset_type to say which is meant, or resolve the listing yourself and pass it in.
+""".strip()
+
+
 class RootSymbolNotFound(ZiplineError):
     """Raised when a lookup_future_chain() call contains a non-existant symbol."""
 
@@ -837,3 +852,18 @@ class BarSimulationError:
     message: str
     trace: str
     simulation_dt: datetime.datetime
+
+
+class IncompatibleAssetDatabase(ZiplineError):
+    """
+    Raised when the asset database was created by a ziplime release whose schema history this
+    one does not continue, so it cannot be migrated in place.
+    """
+
+    msg = (
+        "The asset database {db_path} was created by an older ziplime release and cannot be "
+        "upgraded in place (unknown schema revision {revision!r}). Rebuild it with "
+        "`ziplime ingest-assets --clear`, then re-ingest your bundles: they are keyed by sids "
+        "from the old database."
+    )
+

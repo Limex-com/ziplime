@@ -25,7 +25,6 @@ from ziplime.pipeline.loaders.utils import (
 )
 
 
-
 class EarningsEstimatesLoader(PipelineLoader):
     """An abstract pipeline loader for estimates data that can load data a
     variable number of quarters forwards/backwards from calendar dates
@@ -642,7 +641,3 @@ class EarningsEstimatesLoader(PipelineLoader):
         )
         stacked_last_per_qtr = stacked_last_per_qtr.sort_values(EVENT_DATE_FIELD_NAME)
         return last_per_qtr, stacked_last_per_qtr
-
-
-
-

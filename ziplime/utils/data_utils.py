@@ -9,6 +9,8 @@ from ziplime.constants.period import Period
 from ziplime.assets.entities.asset_symbol import AssetSymbol
 
 _logger = structlog.get_logger(__name__)
+
+
 async def _process_data(data: pl.DataFrame,
                         date_start: datetime.datetime,
                         date_end: datetime.datetime,
@@ -20,7 +22,7 @@ async def _process_data(data: pl.DataFrame,
                         frequency: datetime.timedelta | Period, ):
     """Ingest data for a given bundle.        """
     _logger.info(f"Ingesting custom bundle: name={name}, date_start={date_start}, date_end={date_end}, "
-                      f"symbols={symbols}, frequency={frequency}")
+                 f"symbols={symbols}, frequency={frequency}")
     if date_start < trading_calendar.first_session.replace(tzinfo=trading_calendar.tz):
         raise ValueError(
             f"Date start must be after first session of trading calendar. "
@@ -43,8 +45,10 @@ async def _process_data(data: pl.DataFrame,
     # repair data
     all_bars = [
         s for s in pl.from_pandas(
-            trading_calendar.sessions_minutes(start=date_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None),
-                                              end=date_end.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)).tz_convert(trading_calendar.tz)
+            trading_calendar.sessions_minutes(
+                start=date_start.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None),
+                end=date_end.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None),
+            ).tz_convert(trading_calendar.tz)
         ) if s >= date_start and s <= date_end
     ]
 
@@ -71,19 +75,15 @@ async def _process_data(data: pl.DataFrame,
     if missing:
         raise ValueError(f"Ingested data is missing required columns: {missing}. Cannot ingest bundle.")
     if "symbol" not in data.columns and "sid" not in data.columns:
-        raise ValueError(f"When ingesting custom bundle you must supply either a symbol or a sid column.")
+        raise ValueError("When ingesting custom bundle you must supply either a symbol or a sid column.")
 
     sid_id = "sid" in data.columns
-    symbol_id = "symbol" in data.columns
-
-    asset_identifiers = list(data["sid"].unique()) if sid_id else list(data["symbol"].unique())
-
     if sid_id:
         data = await _backfill_symbol_data(data=data, asset_service=asset_service,
-                                                required_sessions=required_sessions)
+                                           required_sessions=required_sessions)
     else:
         data = await backfill_sid_data(data=data, asset_service=asset_service,
-                                             required_sessions=required_sessions)
+                                       required_sessions=required_sessions)
     return data
 
 
@@ -93,32 +93,99 @@ async def backfill_sid_data(data: pl.DataFrame, asset_service: AssetService, req
                      await asset_service.get_exchange_equities_by_symbols(
                          symbols=[AssetSymbol(symbol=symbol, mic="XNGS") for symbol in unique_symbols]
                      )}
-    data = data.with_columns(
-        pl.lit(0).alias("sid"),
+    required_dates = (
+        required_sessions["date"]
+        if isinstance(required_sessions, pl.DataFrame)
+        else required_sessions
+    ).unique()
+    expected_rows = pl.DataFrame({"symbol": unique_symbols}).join(
+        pl.DataFrame({"date": required_dates}),
+        how="cross",
+    )
+    missing_rows = expected_rows.join(
+        data.select(["symbol", "date"]).unique(),
+        on=["symbol", "date"],
+        how="anti",
     )
 
-    for symbol in unique_symbols:
-        symbol_data = data.filter(symbol=symbol).with_columns(pl.col("date"))
-        missing_sessions = sorted(set(required_sessions["date"]) - set(symbol_data["date"]))
+    for symbol in missing_rows["symbol"].unique():
+        missing_dates = sorted(
+            missing_rows.filter(pl.col("symbol") == symbol)["date"].to_list()
+        )
+        _logger.warning(
+            f"Data for symbol {symbol} is missing on ticks "
+            f"({len(missing_dates)}): {[date.isoformat() for date in missing_dates]}"
+        )
 
-        if len(missing_sessions) > 0:
-            _logger.warning(
-                f"Data for symbol {symbol} is missing on ticks ({len(missing_sessions)}): {[missing_session.isoformat() for missing_session in missing_sessions]}")
-            new_rows_df = pl.DataFrame(
-                {"date": missing_sessions, "symbol": symbol},
-                schema_overrides={"date": data.schema["date"]}
-            )
-            # Concatenate with the original DataFrame
-            data = pl.concat([data, new_rows_df], how="diagonal")
-        missing_symbols = set(unique_symbols) - set(symbol_to_sid)
-        if missing_symbols:
-            raise ValueError(f"Symbols are missing in asset database: {missing_symbols}")
-
-        data = data.with_columns(
-            pl.col("symbol").replace(symbol_to_sid).cast(pl.Int64).alias("sid")
-        ).sort(["sid", "date"])
+    missing_symbols = set(unique_symbols) - set(symbol_to_sid)
+    if missing_symbols:
+        raise ValueError(f"Symbols are missing in asset database: {missing_symbols}")
+    if not missing_rows.is_empty():
+        data = pl.concat(
+            [
+                data,
+                missing_rows.cast(
+                    {"symbol": data.schema["symbol"], "date": data.schema["date"]}
+                ),
+            ],
+            how="diagonal",
+        )
+    data = data.with_columns(
+        pl.col("symbol").replace(symbol_to_sid).cast(pl.Int64).alias("sid")
+    ).sort(["sid", "date"])
     return data
 
 
-async def _backfill_symbol_data(self):
-    pass
+async def _backfill_symbol_data(
+        data: pl.DataFrame,
+        asset_service: AssetService,
+        required_sessions: pl.DataFrame | pl.Series,
+) -> pl.DataFrame:
+    """Add missing sessions to data that is already keyed by ``sid``.
+
+    Backfilling repairs the shape of a bundle only: rows created for a missing
+    session contain the key columns and null values for all source fields.
+    """
+    if "sid" not in data.columns or "date" not in data.columns:
+        raise ValueError("Data keyed by sid must contain 'sid' and 'date' columns.")
+
+    session_values = (
+        required_sessions["date"]
+        if isinstance(required_sessions, pl.DataFrame)
+        else required_sessions
+    )
+    required_dates = set(session_values.to_list())
+    sids = data["sid"].drop_nulls().unique().to_list()
+    if not sids:
+        return data
+
+    assets = await asset_service.get_assets_by_ids(ids=[int(sid) for sid in sids])
+    resolved_sids = {asset.sid for asset in assets if asset is not None}
+    missing_sids = set(sids) - resolved_sids
+    if missing_sids:
+        raise ValueError(f"SIDs are missing in asset database: {sorted(missing_sids)}")
+
+    additions: list[pl.DataFrame] = []
+    for sid in sids:
+        existing_dates = set(
+            data.filter(pl.col("sid") == sid)["date"].drop_nulls().to_list()
+        )
+        missing_dates = sorted(required_dates - existing_dates)
+        if not missing_dates:
+            continue
+        _logger.warning(
+            "Data is missing sessions",
+            sid=sid,
+            count=len(missing_dates),
+            dates=[date.isoformat() for date in missing_dates],
+        )
+        additions.append(
+            pl.DataFrame(
+                {"sid": [sid] * len(missing_dates), "date": missing_dates},
+                schema_overrides={"sid": data.schema["sid"], "date": data.schema["date"]},
+            )
+        )
+
+    if additions:
+        data = pl.concat([data, *additions], how="diagonal")
+    return data.sort(["sid", "date"])

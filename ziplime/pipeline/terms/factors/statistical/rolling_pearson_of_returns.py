@@ -3,8 +3,6 @@ from ziplime.pipeline.terms.factors import RollingPearson, Returns
 from ziplime.pipeline.terms.filters import SingleAsset
 
 
-
-
 class RollingPearsonOfReturns(RollingPearson):
     """
     Calculates the Pearson product-moment correlation coefficient of the

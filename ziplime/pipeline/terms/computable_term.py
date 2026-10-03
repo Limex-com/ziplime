@@ -24,11 +24,6 @@ from ziplime.utils.numpy_utils import (
     bool_dtype,
     float64_dtype,
 )
-from ziplime.utils.sharedoc import (
-    templated_docstring,
-    PIPELINE_ALIAS_NAME_DOC,
-    PIPELINE_DOWNSAMPLING_FREQUENCY_DOC,
-)
 
 
 class ComputableTerm(Term):
@@ -265,7 +260,6 @@ class ComputableTerm(Term):
             .values
         )
 
-    @templated_docstring(frequency=PIPELINE_DOWNSAMPLING_FREQUENCY_DOC)
     def downsample(self, frequency):
         """
         Make a term that computes from ``self`` at lower-than-daily frequency.
@@ -288,7 +282,6 @@ class ComputableTerm(Term):
         downsampled_type = type(self)._with_mixin(DownsampledMixin)
         return downsampled_type(term=self, frequency=frequency)
 
-    @templated_docstring(name=PIPELINE_ALIAS_NAME_DOC)
     def alias(self, name):
         """
         Make a term from ``self`` that names the expression.

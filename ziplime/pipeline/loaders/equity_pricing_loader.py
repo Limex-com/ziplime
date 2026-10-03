@@ -68,7 +68,7 @@ class EquityPricingLoader(PipelineLoader):
             A loader that can only provide currency-naive data.
         """
         return cls(
-            data_source=data_source, # fix this
+            data_source=data_source,  # fix this
             fx_reader=ExplodingFXRateReader(),
             asset_service=asset_service
         )
@@ -211,4 +211,3 @@ class EquityPricingLoader(PipelineLoader):
                 ohlcv.append(c)
 
         return ohlcv, currency
-

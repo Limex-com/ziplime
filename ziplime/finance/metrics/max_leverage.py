@@ -10,7 +10,6 @@ from ziplime.finance.domain.ledger import Ledger
 from ziplime.sources.benchmark_source import BenchmarkSource
 
 
-
 class MaxLeverage:
     """Tracks the maximum account leverage."""
 

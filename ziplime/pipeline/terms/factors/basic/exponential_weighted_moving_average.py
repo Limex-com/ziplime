@@ -1,6 +1,7 @@
 from numpy import average
 
 from ziplime.pipeline.terms.factors.basic.exponential_weighted_factor import ExponentialWeightedFactor
+from ziplime.pipeline.terms.factors.utils.exponential_weights import exponential_weights
 
 
 class ExponentialWeightedMovingAverage(ExponentialWeightedFactor):

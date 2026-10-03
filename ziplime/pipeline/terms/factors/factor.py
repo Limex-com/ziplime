@@ -30,8 +30,6 @@ from ziplime.pipeline.terms.filters import (
 from ziplime.pipeline.mixins import RestrictedDTypeMixin
 
 from ziplime.utils.numpy_utils import float64_dtype
-from ziplime.utils.sharedoc import templated_docstring
-
 
 
 CORRELATION_METHOD_NOTE = dedent(
@@ -114,7 +112,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
 
     eq = binary_operator("==")
 
-    #@float64_only
+    # @float64_only
     def demean(self, mask: Filter | None = None,
                groupby: Classifier | None = None):
         """
@@ -242,7 +240,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             mask=mask,
         )
 
-    #@float64_only
+    # @float64_only
     def zscore(self, mask: Filter | None = None,
                groupby: Classifier | None = None):
         """
@@ -367,7 +365,6 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             window_safe=True,
         )
 
-    @templated_docstring(CORRELATION_METHOD_NOTE=CORRELATION_METHOD_NOTE)
     def pearsonr(self, target: Term, correlation_length: int, mask: Filter | None = None):
         """
         Construct a new Factor that computes rolling pearson correlation
@@ -431,7 +428,6 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             mask=mask,
         )
 
-    @templated_docstring(CORRELATION_METHOD_NOTE=CORRELATION_METHOD_NOTE)
     def spearmanr(self, target: Term, correlation_length: int, mask: Filter | None = None):
         """
         Construct a new Factor that computes rolling spearman rank correlation
@@ -494,7 +490,6 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             mask=mask,
         )
 
-    @templated_docstring(CORRELATION_METHOD_NOTE=CORRELATION_METHOD_NOTE)
     def linear_regression(self, target: Term, regression_length: int, mask: Filter | None = None):
         """
         Construct a new Factor that performs an ordinary least-squares
@@ -554,7 +549,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             mask=mask,
         )
 
-    #@float64_only
+    # @float64_only
     def winsorize(
             self, min_percentile: int | float, max_percentile: int | float,
             mask: Filter | None = None, groupby: Classifier | None = None
@@ -832,7 +827,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             mask=mask,
         )
 
-    #@if_not_float64_tell_caller_to_use_isnull
+    # @if_not_float64_tell_caller_to_use_isnull
     def isnan(self):
         """
         A Filter producing True for all values where this Factor is NaN.
@@ -843,7 +838,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         """
         return self != self
 
-    #@if_not_float64_tell_caller_to_use_isnull
+    # @if_not_float64_tell_caller_to_use_isnull
     def notnan(self):
         """
         A Filter producing True for values where this Factor is not NaN.
@@ -854,7 +849,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         """
         return ~self.isnan()
 
-    #@if_not_float64_tell_caller_to_use_isnull
+    # @if_not_float64_tell_caller_to_use_isnull
     def isfinite(self):
         """
         A Filter producing True for values where this Factor is anything but
@@ -904,8 +899,3 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
     @classmethod
     def _principal_computable_term_type(cls):
         return Factor
-
-
-
-
-

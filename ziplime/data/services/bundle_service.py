@@ -1,11 +1,17 @@
 import datetime
 import time
-from typing import Any
+from typing import Any, AsyncIterator
 
 import polars as pl
 import structlog
-from exchange_calendars import ExchangeCalendar, get_calendar
+from exchange_calendars import ExchangeCalendar
 
+# Imported for its side effect: a bundle is ingested and checked for gaps against the calendar's
+# sessions, so it has to be the same corrected calendar the simulation will run on.
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from typing import Sequence
+
+from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.constants.data_type import DataType
 from ziplime.constants.period import Period
@@ -14,9 +20,18 @@ from ziplime.data.services.data_bundle_source import DataBundleSource
 from ziplime.data.services.bundle_registry import BundleRegistry
 from ziplime.data.services.bundle_storage import BundleStorage
 from ziplime.utils.class_utils import load_class
-from ziplime.utils.date_utils import period_to_timedelta
-from ziplime.utils.data_utils import backfill_sid_data
+from ziplime.utils.date_utils import normalize_datetime, period_to_timedelta
+from ziplime.utils.data_utils import _backfill_symbol_data, backfill_sid_data
 from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.utils.calendar_utils import get_calendar
+
+
+def _asset_type_names(asset_type: "AssetType | Sequence[AssetType]") -> str:
+    """Render one or several asset types for an error message."""
+    if isinstance(asset_type, AssetType):
+        return asset_type.value
+    return " / ".join(candidate.value for candidate in asset_type)
+
 
 class BundleService:
     """
@@ -37,7 +52,6 @@ class BundleService:
         self._logger = structlog.get_logger(__name__)
 
     async def list_bundles(self) -> list[dict[str, Any]]:
-
         """Retrieves a list of bundles available in the bundle registry.
 
         Returns:
@@ -46,6 +60,140 @@ class BundleService:
                 metadata.
         """
         return await self._bundle_registry.list_bundles()
+
+    async def load_bundle_definition(
+            self,
+            bundle_name: str,
+            bundle_version: str | None = None,
+    ) -> tuple[DataBundle, BundleStorage]:
+        metadata = await self._bundle_registry.load_bundle_metadata(
+            bundle_name=bundle_name, bundle_version=bundle_version
+        )
+        if metadata is None:
+            raise ValueError(f"Bundle {bundle_name} not found.")
+
+        storage_class: type[BundleStorage] = load_class(
+            module_name=".".join(metadata["bundle_storage_class"].split(".")[:-1]),
+            class_name=metadata["bundle_storage_class"].split(".")[-1],
+        )
+        storage = await storage_class.from_json(metadata["bundle_storage_data"])
+        # Bounded by the bundle's own span, as *dates*. Two things were wrong here and both are
+        # silent until a bundle is actually loaded: the stored values are bar timestamps, so a
+        # daily bundle's first one is a session close (16:00) and `exchange_calendars` rejects any
+        # bound whose time is not midnight; and `end` read `start_date`, which bounds the calendar
+        # to a single instant and leaves every later session outside it.
+        calendar = get_calendar(
+            metadata["trading_calendar_name"],
+            start=metadata["start_date"].date(),
+            end=metadata["end_date"].date(),
+        )
+        frequency = (
+            datetime.timedelta(seconds=int(metadata["frequency_seconds"]))
+            if metadata["frequency_seconds"] is not None
+            else metadata["frequency_text"]
+        )
+        bundle = DataBundle(
+            name=bundle_name,
+            version=metadata["version"],
+            start_date=normalize_datetime(metadata["start_date"], calendar.tz),
+            end_date=normalize_datetime(metadata["end_date"], calendar.tz),
+            trading_calendar=calendar,
+            frequency=frequency,
+            original_frequency=frequency,
+            data_type=DataType(metadata["data_type"]),
+            timestamp=normalize_datetime(metadata["timestamp"], calendar.tz),
+        )
+        if bundle.data_type != DataType.MARKET_DATA:
+            raise ValueError(f"Bundle {bundle_name} is not MARKET_DATA.")
+        return bundle, storage
+
+    async def iter_bundle_batches(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+            batch_days: int | None = 30,
+            batch_assets: int | None = 100,
+            sids: list[int] | None = None,
+    ) -> AsyncIterator[pl.DataFrame]:
+        async for batch in bundle_storage.iter_data_bundle_batches(
+                data_bundle=data_bundle,
+                batch_days=batch_days,
+                batch_assets=batch_assets,
+                sids=sids,
+        ):
+            yield batch
+
+    async def get_bundle_sids(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+    ) -> list[int]:
+        return await bundle_storage.get_data_bundle_sids(data_bundle)
+
+    async def load_bundle_before(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+            sid: int,
+            date: datetime.datetime | datetime.date,
+            columns: list[str],
+    ) -> pl.DataFrame:
+        return await bundle_storage.load_data_bundle_before(
+            data_bundle=data_bundle,
+            sid=sid,
+            date=date,
+            columns=columns,
+        )
+
+    async def initialize_adjustment_columns(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+            adjusted_columns: dict[str, str],
+            adjusted_flag_column: str = "adjusted",
+            sids: list[int] | None = None,
+    ) -> None:
+        await bundle_storage.initialize_adjustment_columns(
+            data_bundle=data_bundle,
+            adjusted_columns=adjusted_columns,
+            adjusted_flag_column=adjusted_flag_column,
+            sids=sids,
+        )
+
+    async def register_bundle(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+            merge: bool = False,
+    ) -> None:
+        await self._bundle_registry.register_bundle(
+            data_bundle=data_bundle,
+            bundle_storage=bundle_storage,
+            merge=merge,
+        )
+
+    async def store_bundle(
+            self,
+            data_bundle: DataBundle,
+            bundle_storage: BundleStorage,
+            merge: bool,
+            merge_columns: list[str] | None = None,
+    ) -> None:
+        await bundle_storage.store_bundle(
+            data_bundle=data_bundle,
+            merge=merge,
+            merge_columns=merge_columns,
+        )
+
+    async def load_bundle_metadata(
+            self,
+            bundle_name: str,
+            bundle_version: str | None = None,
+    ) -> dict[str, Any] | None:
+        return await self._bundle_registry.load_bundle_metadata(
+            bundle_name=bundle_name,
+            bundle_version=bundle_version,
+        )
 
     async def ingest_custom_data_bundle(self, name: str,
                                         bundle_version: str,
@@ -58,9 +206,13 @@ class BundleService:
                                         data_frequency_use_window_end: bool,
                                         bundle_storage: BundleStorage,
                                         asset_service: AssetService,
+                                        merge: bool,
+                                        merge_columns: list[str]
                                         ):
-        """Ingests a custom data bundle into the specified storage. This function processes and validates the provided data,
-        ensures it aligns with the given trading calendar and frequency, and stores it using the provided storage system.
+        """Ingests a custom data bundle into the specified storage.
+
+        Processes and validates the provided data, ensures it aligns with the given trading calendar and frequency,
+        and stores it using the provided storage system.
 
         Args:
             name: str
@@ -98,8 +250,9 @@ class BundleService:
 
         Raises:
             ValueError:
-                - Raised when date_start is before the first session of the trading calendar or when date_end is past the last session.
-                - Also raised when required data columns are missing or when neither a symbol nor sid column is provided.
+                - Raised when date_start is before the first session of the trading calendar or when date_end is
+                  past the last session.
+                - Also raised when required columns are missing or when neither a symbol nor sid column is provided.
 
         Returns:
             DataBundle:
@@ -165,19 +318,17 @@ class BundleService:
         if missing:
             raise ValueError(f"Ingested data is missing required columns: {missing}. Cannot ingest bundle.")
         if "symbol" not in data.columns and "sid" not in data.columns:
-            raise ValueError(f"When ingesting custom bundle you must supply either a symbol or a sid column.")
+            raise ValueError("When ingesting custom bundle you must supply either a symbol or a sid column.")
 
         sid_id = "sid" in data.columns
-        symbol_id = "symbol" in data.columns
-
-        asset_identifiers = list(data["sid"].unique()) if sid_id else list(data["symbol"].unique())
+        # _ = list(data["sid"].unique()) if sid_id else list(data["symbol"].unique())
 
         if sid_id:
-            data = await self._backfill_symbol_data(data=data, asset_service=asset_service,
-                                                    required_sessions=required_sessions)
+            data = await _backfill_symbol_data(data=data, asset_service=asset_service,
+                                               required_sessions=required_sessions)
         else:
             data = await backfill_sid_data(data=data, asset_service=asset_service,
-                                                 required_sessions=required_sessions)
+                                           required_sessions=required_sessions)
 
         data_bundle = DataBundle(name=name,
                                  start_date=date_start,
@@ -190,16 +341,26 @@ class BundleService:
                                  version=bundle_version,
                                  data_type=DataType.CUSTOM
                                  )
-
-        await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage)
-        await bundle_storage.store_bundle(data_bundle=data_bundle)
-
+        existing_bundle_metadata = await self._bundle_registry.load_bundle_metadata(bundle_name=name,
+                                                                                    bundle_version=bundle_version)
+        if not existing_bundle_metadata:
+            await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage,
+                                                        merge=merge)
+        await bundle_storage.store_bundle(data_bundle=data_bundle, merge=merge,
+                                          merge_columns=merge_columns)
+        if existing_bundle_metadata:
+            # We need to update start/end date
+            new_start_date = min(date_start, existing_bundle_metadata["start_date"].replace(tzinfo=trading_calendar.tz))
+            new_end_date = max(date_end, existing_bundle_metadata["end_date"].replace(tzinfo=trading_calendar.tz))
+            data_bundle.start_date = new_start_date
+            data_bundle.end_date = new_end_date
+            await self._bundle_registry.register_bundle(
+                data_bundle=data_bundle, bundle_storage=bundle_storage,
+                merge=merge
+            )
         self._logger.info(f"Finished ingesting custom bundle_name={name}, bundle_version={bundle_version}")
 
         return data_bundle
-
-    async def _backfill_symbol_data(self):
-        pass
 
     async def ingest_market_data_bundle(self, name: str,
                                         bundle_version: str,
@@ -212,8 +373,10 @@ class BundleService:
                                         bundle_storage: BundleStorage,
                                         asset_service: AssetService,
                                         forward_fill_missing_ohlcv_data: bool,
+                                        merge: bool,
+                                        asset_type: AssetType | Sequence[AssetType] = AssetType.EQUITY,
+                                        assets: list[ExchangeAsset] | None = None,
                                         ):
-
         """
         Asynchronously ingests a market data bundle based on provided parameters and performs validation, repair,
         and transformation of data before storing it and registering the bundle.
@@ -231,9 +394,22 @@ class BundleService:
             symbols (list[str]): The list of symbols for the equities to be included in the data bundle.
             data_bundle_source (DataBundleSource): The source from which market data will be retrieved.
             frequency (datetime.timedelta): The frequency of the market data bars (e.g., 1m, 1d etc.).
-            bundle_storage (BundleStorage): The storage component to persist the ingested and processed market data bundle.
-            asset_service (AssetService): The service to retrieve asset metadata such as equities by symbols and exchange mapping.
+            bundle_storage (BundleStorage): Storage for the ingested and processed market data bundle.
+            asset_service (AssetService): Retrieves asset metadata such as equities by symbols and exchange mapping.
             forward_fill_missing_ohlcv_data (bool): If True, fills missing OHLCV data forward.
+            assets (list[ExchangeAsset] | None): Listings the symbols refer to, already resolved.
+                Preferred over ``asset_type``, and required in practice for a bundle spanning
+                asset classes: a ticker is unique only within a class, and 168 of them in a
+                database holding both equities and futures exist under two. Passing the listings
+                says exactly which instrument each symbol is instead of asking the database to
+                guess.
+            asset_type (AssetType | Sequence[AssetType]): Which kind of asset the symbols name,
+                used only when ``assets`` is not given. Several may be passed, but a symbol that
+                resolves under more than one raises rather than being guessed at. Symbol lookup is
+                type-scoped because the same ticker on the same exchange can belong to more than
+                one asset -- the same ticker can be both an equity row and a futures
+                contract, and resolving futures bars as equities silently files them under the
+                wrong sid.
 
         Raises:
             ValueError:
@@ -269,7 +445,9 @@ class BundleService:
 
         if data.is_empty():
             self._logger.warning(
-                f"No data for symbols={symbols}, frequency={frequency}, date_from={date_start}, date_end={date_end} found. Skipping ingestion.")
+                f"No data for symbols={symbols}, frequency={frequency}, date_from={date_start}, "
+                f"date_end={date_end} found. Skipping ingestion."
+            )
             return
 
         required_columns = [
@@ -295,21 +473,30 @@ class BundleService:
             index_column="date", every=frequency
         ).agg()
 
-        equities_by_exchange = data.select(
+        assets_by_exchange = data.select(
             "symbol", "mic"
         ).group_by("mic").agg(pl.col("symbol").unique())
-        for row in equities_by_exchange.iter_rows(named=True):
+        for row in assets_by_exchange.iter_rows(named=True):
             exchange_mic = row["mic"]
             symbols = row["symbol"]
-            equities = await asset_service.get_exchange_equities_by_symbols(symbols=[AssetSymbol(mic=exchange_mic, symbol=symbol) for symbol in symbols])
-            symbol_to_sid = {e.symbol: e.sid for e in equities}
+            if assets is not None:
+                # The caller already knows which instrument each symbol is. Nothing to resolve,
+                # and nothing to get wrong.
+                symbol_to_sid = {a.symbol: a.sid for a in assets if a.mic == exchange_mic}
+            else:
+                exchange_assets = await asset_service.get_exchange_assets_by_symbols(
+                    symbols=[AssetSymbol(mic=exchange_mic, symbol=symbol) for symbol in symbols],
+                    asset_type=asset_type)
+                symbol_to_sid = {a.symbol: a.sid for a in exchange_assets if a is not None}
 
             for symbol in symbols:
                 symbol_data = data.filter(symbol=symbol).with_columns(pl.col("date"))
                 missing_sessions = sorted(set(required_sessions["date"]) - set(symbol_data["date"]))
                 if len(missing_sessions) > 0:
                     self._logger.warning(
-                        f"Data for symbol {symbol} is missing on ticks ({len(missing_sessions)}): {[missing_session.isoformat() for missing_session in missing_sessions]}")
+                        f"Data for symbol {symbol} is missing on ticks ({len(missing_sessions)}): "
+                        f"{[missing_session.isoformat() for missing_session in missing_sessions]}"
+                    )
                     new_rows_df = pl.DataFrame({"date": missing_sessions, "symbol": symbol, "mic": exchange_mic},
                                                schema_overrides={"date": data.schema["date"]})
 
@@ -317,7 +504,9 @@ class BundleService:
                     data = pl.concat([data, new_rows_df], how="diagonal")
             missing_symbols = set(symbols) - set(symbol_to_sid)
             if missing_symbols:
-                raise ValueError(f"Symbols are missing in asset database: {missing_symbols}")
+                raise ValueError(
+                    f"Symbols are missing in asset database as "
+                    f"{_asset_type_names(asset_type)}: {missing_symbols}@{exchange_mic}")
 
             data = data.with_columns(
                 pl.when(
@@ -328,11 +517,14 @@ class BundleService:
                     pl.col("sid")
                 )
                 .alias("sid")
-            ).sort(["mic","sid", "date"])
+            ).sort(["mic", "sid", "date"])
         if forward_fill_missing_ohlcv_data:
             data = data.with_columns(pl.col("close", "price").fill_null(strategy="forward"))
             data = data.with_columns(pl.col("high", "low", "open").fill_null(pl.col("price")))
             data = data.with_columns(pl.col("volume").fill_null(pl.lit(0.0)))
+            # check
+            data = data.with_columns(pl.col("low", "open", "close", "high", "price").fill_null(pl.lit(0.0)))
+            data = data.with_columns(pl.col("backfilled").fill_null(pl.lit(False)))
 
         data_bundle = DataBundle(name=name,
                                  start_date=date_start,
@@ -345,8 +537,25 @@ class BundleService:
                                  version=bundle_version,
                                  data_type=DataType.MARKET_DATA
                                  )
-        await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage)
-        await bundle_storage.store_bundle(data_bundle=data_bundle)
+
+        existing_bundle_metadata = await self._bundle_registry.load_bundle_metadata(bundle_name=name,
+                                                                                    bundle_version=bundle_version)
+        if not existing_bundle_metadata:
+            await self._bundle_registry.register_bundle(data_bundle=data_bundle, bundle_storage=bundle_storage,
+                                                        merge=merge)
+        await bundle_storage.store_bundle(data_bundle=data_bundle,
+                                          merge=merge, merge_columns=["sid", "date"])
+        if existing_bundle_metadata:
+            # We need to update start/end date
+            new_start_date = min(date_start, existing_bundle_metadata["start_date"].replace(tzinfo=trading_calendar.tz))
+            new_end_date = max(date_end, existing_bundle_metadata["end_date"].replace(tzinfo=trading_calendar.tz))
+            data_bundle.start_date = new_start_date
+            data_bundle.end_date = new_end_date
+            await self._bundle_registry.register_bundle(
+                data_bundle=data_bundle, bundle_storage=bundle_storage,
+                merge=merge
+            )
+
         duration = time.time() - start_duration
         self._logger.info(f"Finished ingesting market data bundle_name={name}, bundle_version={bundle_version}."
                           f"Total duration: {duration:.2f} seconds", duration=duration)
@@ -354,14 +563,16 @@ class BundleService:
         return data_bundle
 
     async def load_bundle(self, bundle_name: str, bundle_version: str | None,
-                          symbols: list[str] | None = None,
+                          assets: list[ExchangeAsset] | None = None,
                           start_date: datetime.datetime | None = None,
                           end_date: datetime.datetime | None = None,
                           frequency: datetime.timedelta | Period | None = None,
                           start_auction_delta: datetime.timedelta = None,
                           end_auction_delta: datetime.timedelta = None,
-                          aggregations: list[pl.Expr] = None
-                          ) -> DataBundle:
+                          aggregations: list[pl.Expr] = None,
+                          asset_service: AssetService | None = None,
+                          roll_finder_settings: dict[str, dict] | None = None
+                          ) -> tuple[DataBundle, dict[ExchangeAsset, tuple[datetime.datetime, datetime.datetime]]]:
         """
         Asynchronously loads a data bundle based on specified parameters and validates the configuration
         including time ranges, frequencies, and auction deltas. Retrieves necessary metadata, dependencies,
@@ -370,13 +581,14 @@ class BundleService:
         Args:
             bundle_name (str): Name of the data bundle to load.
             bundle_version (str | None): Version of the bundle to load. Optional if not version-specific.
-            symbols (list[str] | None):
+            assets (list[ExchangeAsset] | None):
               Filter data bundle to include only specific symbols. Defaults to None (includes all symbols).
             start_date (datetime.datetime | None):
               Filter data bundle to include only data starting with specific date. Defaults to None.
             end_date (datetime.datetime | None):
               Filter data bundle to include only data till specific date. Defaults to None.
-            frequency (datetime.timedelta | Period | None): Desired frequency for data. Defaults to None (frequency in which bundle was ingested will be used).
+            frequency (datetime.timedelta | Period | None): Desired frequency for data. Defaults to None
+              (the frequency in which the bundle was ingested).
             start_auction_delta (datetime.timedelta):
                Used when requested frequency is greater than ingested frequency.
                It allows defining custom start time for each frequency group.
@@ -397,6 +609,12 @@ class BundleService:
                   1 hour before closing time
             aggregations (list[pl.Expr]):
                 List of aggregations to apply on the data. If not specified default aggregations will be used.
+            asset_service (AssetService | None):
+                Required only to trade continuous futures: the bundle needs it to resolve a
+                continuous future to the contract it held on a given date.
+            roll_finder_settings (dict[str, dict] | None):
+                Per-roll-style overrides, e.g. ``{"calendar": {"roll_offset_days": 10}}`` to roll
+                ten days before auto close, or ``{"volume": {"grace_period_days": 3}}``.
 
         Returns:
             DataBundle: An initialized `DataBundle` instance containing data and metadata for the specified
@@ -422,25 +640,25 @@ class BundleService:
             class_name=bundle_metadata["bundle_storage_class"].split(".")[-1])
 
         bundle_storage = await bundle_storage_class.from_json(bundle_metadata["bundle_storage_data"])
+        # Dates, and the real end -- see the note on the same call in `load_bundle`.
+        tc = get_calendar(bundle_metadata["trading_calendar_name"],
+                          start=bundle_metadata["start_date"].date(),
+                          end=bundle_metadata["end_date"].date())
+        if start_date is None:
+            start_date = bundle_metadata["start_date"].replace(tzinfo=tc.tz)
+        if end_date is None:
+            end_date = bundle_metadata["end_date"].replace(tzinfo=tc.tz)
 
-        bundle_start_date = datetime.datetime.strptime(bundle_metadata["start_date"], "%Y-%m-%dT%H:%M:%SZ")
         trading_calendar = get_calendar(bundle_metadata["trading_calendar_name"],
-                                        start=bundle_start_date - datetime.timedelta(days=30))
-        bundle_start_date = bundle_start_date.replace(tzinfo=trading_calendar.tz)
-        bundle_end_date = datetime.datetime.strptime(bundle_metadata["end_date"], "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=trading_calendar.tz)
+                                        start=start_date.date() - datetime.timedelta(days=30))
+
         frequency_timedelta = datetime.timedelta(seconds=int(bundle_metadata["frequency_seconds"])) if bundle_metadata[
-                                                                                                           "frequency_seconds"] is not None else None
+            "frequency_seconds"] is not None else None
         frequency_text = bundle_metadata.get("frequency_text", None)
-        timestamp = datetime.datetime.strptime(bundle_metadata["timestamp"], "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=trading_calendar.tz)
+        timestamp = bundle_metadata["timestamp"].replace(tzinfo=trading_calendar.tz)
         data_type = DataType(bundle_metadata["data_type"])
         bundle_frequency = frequency_timedelta or frequency_text
 
-        if start_date is not None and start_date < bundle_start_date:
-            raise ValueError(f"Start date {start_date} is before bundle start date {bundle_start_date}")
-        if end_date is not None and end_date > bundle_end_date:
-            raise ValueError(f"End date {end_date} is after bundle end date {bundle_end_date}")
         if frequency is not None and period_to_timedelta(frequency) < period_to_timedelta(bundle_frequency):
             raise ValueError(f"Requested frequency {frequency} is less than bundle frequency {bundle_frequency}")
 
@@ -455,26 +673,35 @@ class BundleService:
                 f"Requested end auction delta frequency {frequency} is less than bundle frequency {bundle_frequency}")
 
         data_bundle = DataBundle(name=bundle_name,
-                                 start_date=start_date or bundle_start_date,
-                                 end_date=end_date or bundle_end_date,
+                                 start_date=start_date,
+                                 end_date=end_date,
                                  trading_calendar=trading_calendar,
                                  frequency=frequency or bundle_frequency,
                                  original_frequency=bundle_frequency,
                                  timestamp=timestamp,
                                  version=bundle_metadata["version"],
-                                 data_type=data_type
+                                 data_type=data_type,
+                                 asset_service=asset_service,
+                                 roll_finder_settings=roll_finder_settings
                                  )
         bundle_data_load_start = time.time()
 
         data = await bundle_storage.load_data_bundle(data_bundle=data_bundle,
-                                                     symbols=symbols,
+                                                     assets=assets,
                                                      start_date=start_date,
-                                                     end_date=end_date,
-                                                     frequency=frequency,
+                                                     end_date=end_date + datetime.timedelta(days=1),
+                                                     frequency=frequency or bundle_frequency,
                                                      start_auction_delta=start_auction_delta,
                                                      end_auction_delta=end_auction_delta,
                                                      aggregations=aggregations
                                                      )
+
+        missing_data = await self.check_for_missing_data(data=data,
+                                                         assets=assets,
+                                                         frequency=frequency or bundle_frequency,
+                                                         trading_calendar=trading_calendar,
+                                                         start_date=start_date, end_date=end_date)
+
         load_duration = time.time() - bundle_data_load_start
 
         sid_indexes = data.with_row_index().group_by("sid", maintain_order=True).agg([
@@ -493,25 +720,133 @@ class BundleService:
         #     for row in data.with_row_index().iter_rows(named=True)
         # }
 
-        return data_bundle
+        return data_bundle, missing_data
 
-    async def clean(self, bundle_name: str, before: datetime.datetime = None, after: datetime.datetime = None,
-                    keep_last: bool = None):
-        """
-        Cleans up bundles based on the specified criteria.
+    async def check_for_missing_data(self,
+                                     data: pl.DataFrame,
+                                     trading_calendar: ExchangeCalendar,
+                                     frequency: datetime.timedelta | Period,
+                                     start_date: datetime.datetime,
+                                     end_date: datetime.datetime,
+                                     assets: list[ExchangeAsset] | None,
+                                     ) -> dict[ExchangeAsset, tuple[datetime.datetime, datetime.datetime]]:
+        if assets is None:
+            return {}
+        all_bars = [
+            s for s in pl.from_pandas(
+                trading_calendar.sessions_minutes(start=start_date.replace(tzinfo=None).date(),
+                                                  end=end_date.replace(tzinfo=None).date()).tz_convert(
+                    trading_calendar.tz)
+            ) if s >= start_date and s <= end_date
+        ]
+        required_sessions = pl.DataFrame({"date": all_bars, "close": 0.00}).group_by_dynamic(
+            index_column="date", every=frequency
+        ).agg()
+        missing_data_per_symbol = {}
 
-        This method iterates through the bundles in the registry and removes
-        those that match the given parameters.
+        for asset in assets:
+            symbol_data = data.filter(sid=asset.sid).with_columns(pl.col("date"))
+            missing_sessions = sorted(set(required_sessions["date"]) - set(symbol_data["date"]))
+            if len(missing_sessions) > 0:
+                missing_data_per_symbol[asset] = (missing_sessions[0], missing_sessions[-1])
+                self._logger.warning(
+                    f"Data for symbol {asset.symbol}@{asset.mic} is missing on ticks ({len(missing_sessions)}): "
+                    f"{[missing_session.isoformat() for missing_session in missing_sessions]}"
+                )
+        missing_sids = set([asset.sid for asset in assets]) - set(data["sid"].unique())
+        if missing_sids:
+            missing_assets = [asset for asset in assets if asset.sid in missing_sids]
+            # _ = [f'{asset.symbol}@{asset.mic}' for asset in missing_assets]
+            for asset in missing_assets:
+                missing_data_per_symbol[asset] = (start_date, end_date)
+
+        return missing_data_per_symbol
+
+    async def clean(self, bundle_name: str, before: datetime.datetime = None,
+                    after: datetime.datetime = None, keep_last: int = None) -> list[str]:
+        """Delete stored versions of one bundle.
+
+        The previous version of this method took the same four arguments, ignored all of them,
+        iterated **every** bundle in the registry rather than the one named, and called
+        ``self._delete_bundle``, which does not exist -- so it raised ``AttributeError`` before
+        touching anything. That is the only reason it never destroyed anyone's data. Both halves
+        are fixed here: the selectors are honoured, and the deletion is real.
+
+        Exactly one selector applies. They pick versions in incompatible ways, and silently
+        applying whichever was checked first is not a behaviour a deleting operation should have.
 
         Args:
-            bundle_name (str): The name of the bundle to clean.
-            before (datetime.datetime, optional): A datetime to filter bundles created before
-                this date. Defaults to None.
-            after (datetime.datetime, optional): A datetime to filter bundles created after
-                this date. Defaults to None.
-            keep_last (bool, optional): A flag to indicate whether to keep the most recent
-                bundle. Defaults to None.
-        """
+            bundle_name: Which bundle. Only versions of this one are considered.
+            before: Delete versions ingested strictly before this instant.
+            after: Delete versions ingested strictly after this instant.
+            keep_last: Keep this many newest versions and delete the rest.
 
-        for bundle in await self._bundle_registry.list_bundles():
-            self._delete_bundle(bundle)
+        Returns:
+            The versions deleted, newest first.
+
+        Raises:
+            ValueError: If no selector is given, or more than one, or the bundle is unknown.
+        """
+        selectors = [before is not None, after is not None, keep_last is not None]
+        if not any(selectors):
+            raise ValueError(
+                "Nothing selected, so nothing would be deleted. Pass before, after or keep_last.")
+        if sum(selectors) > 1:
+            raise ValueError(
+                "before, after and keep_last select versions in different ways; pass one.")
+        if keep_last is not None and keep_last < 0:
+            raise ValueError(f"keep_last cannot be negative, got {keep_last}")
+
+        versions = await self._bundle_registry.list_bundles_by_name(bundle_name=bundle_name)
+        if not versions:
+            raise ValueError(f"Bundle {bundle_name} not found.")
+
+        # `list_bundles_by_name` returns newest first, which is the order `keep_last` counts in.
+        if keep_last is not None:
+            doomed = versions[keep_last:]
+        else:
+            bound = before if before is not None else after
+            doomed = []
+            for entry in versions:
+                ingested = self._ingested_at(entry, bound)
+                if ingested is None:
+                    continue          # an entry with no readable timestamp is never selected
+                if before is not None and ingested < before:
+                    doomed.append(entry)
+                elif after is not None and ingested > after:
+                    doomed.append(entry)
+
+        deleted = []
+        for entry in doomed:
+            version = entry["version"]
+            storage_class: BundleStorage = load_class(
+                module_name='.'.join(entry["bundle_storage_class"].split(".")[:-1]),
+                class_name=entry["bundle_storage_class"].split(".")[-1])
+            storage = await storage_class.from_json(entry["bundle_storage_data"])
+            # Data first. The other order can leave bars on disk that nothing points at, which is
+            # worse than a registry entry whose data is already gone -- that one at least reports.
+            await storage.delete_bundle_data(bundle_name=bundle_name, bundle_version=version)
+            await self._bundle_registry.delete_bundle(bundle_name=bundle_name,
+                                                      bundle_version=version)
+            deleted.append(version)
+            self._logger.info(f"Deleted bundle version {bundle_name}/{version}")
+        return deleted
+
+    @staticmethod
+    def _ingested_at(entry: dict[str, Any], reference: datetime.datetime):
+        """A registry entry's ingest time, made comparable with `reference`.
+
+        Registry timestamps are stored as ``%Y-%m-%dT%H:%M:%SZ`` -- naive text. Comparing that
+        against an aware bound raises `TypeError`, and against a naive one is fine, so the entry is
+        made to match whichever the caller passed rather than assuming a zone.
+        """
+        raw = entry.get("timestamp")
+        if not raw:
+            return None
+        try:
+            stamp = datetime.datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ")
+        except (TypeError, ValueError):
+            return None
+        if reference.tzinfo is not None:
+            return stamp.replace(tzinfo=datetime.timezone.utc)
+        return stamp

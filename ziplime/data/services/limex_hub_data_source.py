@@ -11,13 +11,14 @@ from joblib import Parallel, delayed
 
 import polars as pl
 from ziplime.data.services.data_bundle_source import DataBundleSource
+from ziplime.constants.period import Period
 
 
 def fetch_historical_limex_data_task(date_from: datetime.datetime,
                                      date_to: datetime.datetime,
                                      limex_api_key: str,
                                      symbol: str,
-                                     frequency: datetime.timedelta
+                                     frequency: datetime.timedelta | Period
                                      ) -> pl.DataFrame:
     limex_client = limexhub.RestAPI(token=limex_api_key)
     timeframe = 3
@@ -48,7 +49,7 @@ def fetch_historical_limex_data_task(date_from: datetime.datetime,
         )
         df = df.with_columns(
             pl.lit(symbol).alias("symbol"),
-            pl.lit("XNGS").alias("mic"), # TODO: return mic from LimexHub
+            pl.lit("XNGS").alias("mic"),  # TODO: return mic from LimexHub
             pl.col("close").alias("price"),
             date=pl.col("date").dt.replace_time_zone(str(date_from.tzinfo)),
         ).filter(pl.col("date") >= date_from, pl.col("date") <= date_to)
@@ -58,7 +59,6 @@ def fetch_historical_limex_data_task(date_from: datetime.datetime,
 
 class LimexHubDataSource(DataBundleSource):
     def __init__(self, limex_api_key: str, maximum_threads: int | None = None):
-        super().__init__()
         self._limex_api_key = limex_api_key
         self._logger = structlog.get_logger(__name__)
         self._limex_client = limexhub.RestAPI(token=limex_api_key)
@@ -68,7 +68,7 @@ class LimexHubDataSource(DataBundleSource):
             self._maximum_threads = multiprocessing.cpu_count() * 2
 
     async def get_data(self, symbols: list[str],
-                       frequency: datetime.timedelta,
+                       frequency: datetime.timedelta | Period,
                        date_from: datetime.datetime,
                        date_to: datetime.datetime,
                        **kwargs
@@ -81,9 +81,10 @@ class LimexHubDataSource(DataBundleSource):
                                                           symbol=symbol,
                                                           frequency=frequency)
                 return result
-            except Exception as e:
+            except Exception:
                 self._logger.exception(
-                    f"Exception fetching historical data for symbol {symbol}, date_from={date_from}, date_to={date_to}. Skipping."
+                    f"Exception fetching historical data for symbol {symbol}, "
+                    f"date_from={date_from}, date_to={date_to}. Skipping."
                 )
                 return None
 
