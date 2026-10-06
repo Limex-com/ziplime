@@ -1,6 +1,6 @@
 """Backtest the vectorised 0DTE straddle on real OPRA data, minute by minute.
 
-    python examples/options/run_0dte_straddle.py
+    python -m examples.options.run_0dte_straddle
 
 Needs `GRPC_TOKEN` and `GRPC_SERVER_URL` in the repository's `.env`: the prices here are real.
 
@@ -23,30 +23,27 @@ import asyncio
 import datetime
 import os
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
 import polars as pl
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
-from ziplime.assets.domain.exercise_style import ExerciseStyle  # noqa: E402
-from ziplime.assets.domain.option_type import OptionType  # noqa: E402
-from ziplime.assets.domain.premium_style import PremiumStyle  # noqa: E402
-from ziplime.assets.domain.settlement_type import SettlementType  # noqa: E402
-from ziplime.assets.entities.asset_symbol import AssetSymbol  # noqa: E402
-from ziplime.constants.data_type import DataType  # noqa: E402
-from ziplime.core.ingest_data import get_asset_service  # noqa: E402
-from ziplime.data.data_sources.options.grpc_chain import ExpiredAwareFeed  # noqa: E402
-from ziplime.data.data_sources.options.ingest import register_contracts  # noqa: E402
-from ziplime.data.data_sources.options.source import ContractSpec  # noqa: E402
-from ziplime.data.domain.data_bundle import DataBundle  # noqa: E402
-from ziplime.data.services.bar_alignment import clock_minutes  # noqa: E402
-from ziplime.finance.commission.no_commission import NoCommission  # noqa: E402
-from ziplime.finance.slippage.no_slippage import NoSlippage  # noqa: E402
-from ziplime.utils.calendar_utils import get_calendar  # noqa: E402
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.domain.exercise_style import ExerciseStyle
+from ziplime.assets.domain.option_type import OptionType
+from ziplime.assets.domain.premium_style import PremiumStyle
+from ziplime.assets.domain.settlement_type import SettlementType
+from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.constants.data_type import DataType
+from ziplime.core.ingest_data import get_asset_service
+from ziplime.data.data_sources.options.grpc_chain import ExpiredAwareFeed
+from ziplime.data.data_sources.options.ingest import register_contracts
+from ziplime.data.data_sources.options.source import ContractSpec
+from ziplime.data.domain.data_bundle import DataBundle
+from ziplime.data.services.bar_alignment import clock_minutes
+from ziplime.finance.commission.no_commission import NoCommission
+from ziplime.finance.slippage.no_slippage import NoSlippage
+from ziplime.utils.calendar_utils import get_calendar
 
 REPO = Path(__file__).parent.parent.parent
 CALENDAR = "XNYS"

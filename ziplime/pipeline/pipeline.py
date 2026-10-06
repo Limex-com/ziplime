@@ -2,12 +2,12 @@ from typing import Literal
 
 from ziplime.errors import UnsupportedPipelineOutput
 
-from .domain import Domain, GENERIC, infer_domain
-from .graph import ExecutionPlan, TermGraph, SCREEN_NAME
-from .terms.asset_exists import AssetExists
-from .terms.computable_term import ComputableTerm
-from .terms.filters import Filter
-from .terms.term import Term
+from ziplime.pipeline.domain import Domain, GENERIC, infer_domain
+from ziplime.pipeline.graph import ExecutionPlan, TermGraph, SCREEN_NAME
+from ziplime.pipeline.terms.asset_exists import AssetExists
+from ziplime.pipeline.terms.computable_term import ComputableTerm
+from ziplime.pipeline.terms.filters import Filter
+from ziplime.pipeline.terms.term import Term
 
 
 class Pipeline:

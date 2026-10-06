@@ -13,7 +13,7 @@ from ziplime.assets.entities.asset_symbol import AssetSymbol
 
 from pathlib import Path
 
-from providers_config import ASSET_DB_PATH
+from examples.providers_config import ASSET_DB_PATH
 
 from ziplime.core.ingest_data import get_asset_service
 from ziplime.core.run_simulation import run_simulation

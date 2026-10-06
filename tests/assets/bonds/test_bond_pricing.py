@@ -7,7 +7,7 @@ any of the three wrong and every bond figure downstream is wrong by a constant f
 import datetime
 import unittest
 
-from bond_fixtures import (
+from tests.bond_fixtures import (
     book_with, make_amortization_events, make_bond, make_coupon_events, make_zero_coupon_bond,
 )
 

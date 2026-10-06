@@ -8,17 +8,17 @@ rather than trying to make money.
 The repository ships a small **demo bond universe** already seeded into `data/assets.sqlite`, so
 the examples run with no vendor token and no network:
 
-```bash
-cd examples/bonds
+Run these commands from the repository root with ziplime installed:
 
+```bash
 # only if you have cleared the database: re-seed the demo issues
-python seed_demo_bonds.py
+python -m examples.bonds.seed_demo_bonds
 
 # all six, with a summary table
-python run_all.py
+python -m examples.bonds.run_all
 
 # or a few by name
-python run_all.py --only b01 b02
+python -m examples.bonds.run_all --only b01 b02
 ```
 
 For **real bonds**, a connector that supplies bond reference data writes its issues into the same

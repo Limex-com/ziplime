@@ -15,25 +15,23 @@ import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-sys.path.insert(0, str(Path(__file__).parent))
+import polars as pl
 
-import polars as pl  # noqa: E402
-
-from cross_asset_config import (  # noqa: E402
+from examples.cross_asset.cross_asset_config import (
     ASSET_DB_PATH, BOND_MIC, END, EQUITY_MIC, START, STARTING_CASH, TRADING_CALENDAR,
 )
 
-from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
-from ziplime.assets.entities.asset_symbol import AssetSymbol  # noqa: E402
-from ziplime.constants.data_type import DataType  # noqa: E402
-from ziplime.core.ingest_data import get_asset_service  # noqa: E402
-from ziplime.core.run_simulation import run_simulation  # noqa: E402
-from ziplime.data.data_sources.demo_bonds import build_demo_bond_bars  # noqa: E402
-from ziplime.data.domain.data_bundle import DataBundle  # noqa: E402
-from ziplime.finance.commission import PerBondTurnover, PerShare  # noqa: E402
-from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage  # noqa: E402
-from ziplime.utils.bundle_utils import get_market_data_source  # noqa: E402
-from ziplime.utils.calendar_utils import get_calendar  # noqa: E402
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.constants.data_type import DataType
+from ziplime.core.ingest_data import get_asset_service
+from ziplime.core.run_simulation import run_simulation
+from ziplime.data.data_sources.demo_bonds import build_demo_bond_bars
+from ziplime.data.domain.data_bundle import DataBundle
+from ziplime.finance.commission import PerBondTurnover, PerShare
+from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
+from ziplime.utils.bundle_utils import get_market_data_source
+from ziplime.utils.calendar_utils import get_calendar
 
 TZ = ZoneInfo("America/New_York")
 STRATEGY_DIR = Path(__file__).parent / "strategies"

@@ -14,16 +14,13 @@ Twenty sessions of five-minute bars is a demonstration, not evidence, and Yahoo 
 history as it ages so the window moves with the calendar. Read the pair against each other, and
 read neither against zero.
 """
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from intraday import INTRADAY_UNIVERSE, mount_sales, note_sales, unblocked  # noqa: E402
-from playbook import equities, hold  # noqa: E402
+from examples.huggingface.intraday import INTRADAY_UNIVERSE, mount_sales, note_sales, unblocked
+from examples.huggingface.playbook import equities, hold
 
-from ziplime.api import date_rules, time_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules, time_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {"window": "intraday-5m",
                  "description": "Avoid names insiders sold, acting 30 minutes after the open"}

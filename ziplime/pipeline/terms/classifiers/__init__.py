@@ -1,8 +1,8 @@
-from .classifier import Classifier
-from .custom_classifier import CustomClassifier
-from .everything import Everything
-from .latest import Latest
-from .quantiles import Quantiles
+from ziplime.pipeline.terms.classifiers.classifier import Classifier
+from ziplime.pipeline.terms.classifiers.custom_classifier import CustomClassifier
+from ziplime.pipeline.terms.classifiers.everything import Everything
+from ziplime.pipeline.terms.classifiers.latest import Latest
+from ziplime.pipeline.terms.classifiers.quantiles import Quantiles
 
 __all__ = [
     "Classifier",

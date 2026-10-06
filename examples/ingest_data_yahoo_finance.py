@@ -3,7 +3,7 @@ import asyncio
 import datetime
 import logging
 
-from providers_config import ASSET_DB_PATH
+from examples.providers_config import ASSET_DB_PATH
 
 from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.entities.asset_symbol import AssetSymbol

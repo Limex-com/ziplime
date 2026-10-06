@@ -21,8 +21,8 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import code_rules, docs, engine, formatting, workspace
-from .errors import InvalidArguments, ZiplimeMcpError
+from ziplime.mcp import code_rules, docs, engine, formatting, workspace
+from ziplime.mcp.errors import InvalidArguments, ZiplimeMcpError
 
 VERSION = "0.1.0"
 

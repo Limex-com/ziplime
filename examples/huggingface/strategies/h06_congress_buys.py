@@ -18,20 +18,16 @@ trading days after the COVID low; any long equity book started there quintuples,
 own contribution is invisible inside that. This one starts in 2016 and is reported against
 `h05_universe_benchmark`, which holds the same sixty names and reads nothing.
 """
-import sys
-from pathlib import Path
 
 import polars as pl
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from examples.huggingface.congress import load_disclosures, mount_disclosures
+from examples.huggingface.hf_config import CONGRESS_REVISION, CONGRESS_UNIVERSE
 
-from congress import load_disclosures, mount_disclosures  # noqa: E402
-from hf_config import CONGRESS_REVISION, CONGRESS_UNIVERSE  # noqa: E402
-
-from ziplime.api import date_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.finance.execution import MarketOrder  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.finance.execution import MarketOrder
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {
     "window": "congress",

@@ -8,13 +8,10 @@ import argparse
 import asyncio
 import logging
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+from examples.cross_asset._harness import list_strategies, run_strategy, summarise
 
-from _harness import list_strategies, run_strategy, summarise  # noqa: E402
-
-from ziplime.utils.logging_utils import configure_logging  # noqa: E402
+from ziplime.utils.logging_utils import configure_logging
 
 
 def classes_traded(result) -> set[str]:

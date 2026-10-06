@@ -1,6 +1,6 @@
 """Ingest real Yahoo Finance futures chains: the contracts, their specifications, then the bars.
 
-    python examples/futures/ingest_futures_data_yahoo.py
+    python -m examples.futures.ingest_futures_data_yahoo
 
 No credentials. Yahoo carries **individual dated contracts** -- ``ESZ26.CME``, ``CLX26.NYM`` --
 each with its own expiration date and its own three-year price history, so what gets ingested here
@@ -19,20 +19,16 @@ transcribed from the exchanges' published terms.
 import asyncio
 import datetime
 import logging
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from futures_config import (  # noqa: E402
+from examples.futures.futures_config import (
     ASSET_DB_PATH, END, MONTHS_AHEAD, ROOT_SYMBOLS, START, TRADING_CALENDAR,
 )
 
-from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
-from ziplime.assets.entities.asset_symbol import AssetSymbol  # noqa: E402
-from ziplime.core.ingest_data import get_asset_service, ingest_market_data  # noqa: E402
-from ziplime.utils.bundle_utils import get_asset_data_source, get_market_data_source  # noqa: E402
-from ziplime.utils.logging_utils import configure_logging  # noqa: E402
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.core.ingest_data import get_asset_service, ingest_market_data
+from ziplime.utils.bundle_utils import get_asset_data_source, get_market_data_source
+from ziplime.utils.logging_utils import configure_logging
 
 BUNDLE_NAME = "yahoo_futures_daily"
 

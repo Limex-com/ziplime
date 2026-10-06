@@ -28,7 +28,7 @@ from ziplime.utils.context_tricks import nop_context
 from ziplime.utils.numpy_utils import bool_dtype
 from ziplime.utils.pandas_utils import nearest_unequal_elements
 
-from .downsample_helpers import (
+from ziplime.pipeline.downsample_helpers import (
     select_sampling_indices, SUPPORTED_DOWNSAMPLE_FREQUENCIES,
 )
 from ziplime.pipeline.terms.term import Term

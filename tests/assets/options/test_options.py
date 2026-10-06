@@ -18,7 +18,7 @@ import unittest
 
 import polars as pl
 
-from options_fixtures import (
+from tests.options_fixtures import (
     EXPIRY, SESSION_CLOSE, SPOT, TZ, make_chain, make_option, underlying,
 )
 

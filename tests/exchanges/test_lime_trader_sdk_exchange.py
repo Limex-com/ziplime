@@ -48,7 +48,7 @@ from ziplime.finance.domain.order_status import OrderStatus  # noqa: E402
 from ziplime.finance.execution import LimitOrder, MarketOrder  # noqa: E402
 from ziplime.utils.calendar_utils import get_calendar  # noqa: E402
 
-from cross_asset_fixtures import USD  # noqa: E402
+from tests.cross_asset_fixtures import USD  # noqa: E402
 
 from ziplime.exchanges.lime_trader_sdk.lime_trader_sdk_exchange import (  # noqa: E402
     LimeTraderSdkExchange,

@@ -13,17 +13,14 @@ diversification rule, a scheduled plan. The dataset cannot separate those from t
 because the 10b5-1 flag that would identify pre-scheduled trades is never populated (see the README
 notes). So this necessarily treats all selling alike.
 """
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from hf_config import INSIDER10_UNIVERSE  # noqa: E402
-from insider import mount_features  # noqa: E402
-from portfolio import priced, rebalance_to  # noqa: E402
+from examples.huggingface.hf_config import INSIDER10_UNIVERSE
+from examples.huggingface.insider import mount_features
+from examples.huggingface.portfolio import priced, rebalance_to
 
-from ziplime.api import date_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {"window": "insider10",
                  "description": "Hold the whole universe except names insiders have been selling"}

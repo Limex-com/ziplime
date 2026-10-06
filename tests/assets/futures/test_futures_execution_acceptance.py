@@ -5,7 +5,7 @@ Numbered to match the acceptance checklist.
 import datetime
 import unittest
 
-from futures_fixtures import ACCOUNT, EXCHANGE, make_future, make_ledger, settle, trade
+from tests.futures_fixtures import ACCOUNT, EXCHANGE, make_future, make_ledger, settle, trade
 
 from ziplime.finance.commission import PerContract
 from ziplime.finance.slippage.volatility_volume_share import VolatilityVolumeShare
@@ -220,7 +220,7 @@ class MarginModelTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_equity_only_backtest_does_not_warn(self):
         from ziplime.finance.margin import NoFuturesMarginModel
-        from futures_fixtures import make_equity
+        from tests.futures_fixtures import make_equity
         model = NoFuturesMarginModel()
         ledger = make_ledger()
         ledger.futures_margin_model = model

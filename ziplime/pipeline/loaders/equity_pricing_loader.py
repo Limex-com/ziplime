@@ -19,12 +19,12 @@ from ziplime.data.fx import ExplodingFXRateReader
 from ziplime.lib.adjusted_array import AdjustedArray
 from ziplime.utils.numpy_utils import repeat_first_axis
 
-from .pipeline_loader import PipelineLoader
-from .utils import shift_dates
-from .. import Domain
-from ..data.equity_pricing import EquityPricing
-from ...assets.services.asset_service import AssetService
-from ...data.services.data_source import DataSource
+from ziplime.pipeline.loaders.pipeline_loader import PipelineLoader
+from ziplime.pipeline.loaders.utils import shift_dates
+from ziplime.pipeline import Domain
+from ziplime.pipeline.data.equity_pricing import EquityPricing
+from ziplime.assets.services.asset_service import AssetService
+from ziplime.data.services.data_source import DataSource
 
 UINT32_MAX = iinfo(uint32).max
 

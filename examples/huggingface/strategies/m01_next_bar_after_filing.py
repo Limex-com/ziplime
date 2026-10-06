@@ -22,16 +22,13 @@ about a week of one-minute history and deletes the rest, so the window moves and
 not reproduce. What reproduces is the timing.
 """
 import datetime
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from intraday import INTRADAY_UNIVERSE  # noqa: E402
-from playbook import equities, hold  # noqa: E402
+from examples.huggingface.intraday import INTRADAY_UNIVERSE
+from examples.huggingface.playbook import equities, hold
 
-from ziplime.api import date_rules, time_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules, time_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {"window": "intraday-1m",
                  "description": "Drop a name the first minute an insider sale of it is public"}

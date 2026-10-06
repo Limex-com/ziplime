@@ -4,12 +4,14 @@ Holding more than one asset class in one portfolio: equities from Yahoo Finance 
 
 ## Running them
 
+Run these commands from the repository root with ziplime installed:
+
 ```bash
 # once: the equity reference data, and the synthetic bond universe
-python examples/ingest_assets_data_yahoo_finance.py
-python examples/bonds/seed_demo_bonds.py
+python -m examples.ingest_assets_data_yahoo_finance
+python -m examples.bonds.seed_demo_bonds
 
-cd examples/cross_asset && python run_all.py
+python -m examples.cross_asset.run_all
 ```
 
 No credentials are needed. Equity bars come from Yahoo Finance, which is free; the bonds are

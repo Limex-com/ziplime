@@ -10,20 +10,18 @@ import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from futures_config import (  # noqa: E402
+from examples.futures.futures_config import (
     ASSET_DB_PATH, END, INITIAL_MARGIN_RATE, MAINTENANCE_MARGIN_RATE, ROLL_END, ROLL_START, START,
     STARTING_CASH, TRADING_CALENDAR,
 )
 
-from ziplime.core.ingest_data import get_asset_service  # noqa: E402
-from ziplime.core.run_simulation import run_simulation  # noqa: E402
-from ziplime.finance.commission import PerContract  # noqa: E402
-from ziplime.finance.constants import FUTURE_EXCHANGE_FEES_BY_SYMBOL  # noqa: E402
-from ziplime.finance.margin import FixedRateFuturesMarginModel, NoFuturesMarginModel  # noqa: E402
-from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage  # noqa: E402
-from ziplime.utils.bundle_utils import get_bundle_service  # noqa: E402
+from ziplime.core.ingest_data import get_asset_service
+from ziplime.core.run_simulation import run_simulation
+from ziplime.finance.commission import PerContract
+from ziplime.finance.constants import FUTURE_EXCHANGE_FEES_BY_SYMBOL
+from ziplime.finance.margin import FixedRateFuturesMarginModel, NoFuturesMarginModel
+from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
+from ziplime.utils.bundle_utils import get_bundle_service
 
 TZ = ZoneInfo("America/New_York")
 STRATEGY_DIR = Path(__file__).parent / "strategies"

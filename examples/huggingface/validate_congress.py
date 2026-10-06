@@ -1,6 +1,6 @@
 """Check the congressional dataset against itself, one legislator at a time.
 
-    python examples/huggingface/validate_congress.py
+    python -m examples.huggingface.validate_congress
 
 A dataset assembled by parsing scanned PDFs is going to contain mistakes, and the useful question
 is not whether it has any but whether they are findable and bounded. This runs the checks that its
@@ -28,16 +28,13 @@ Nothing here needs the simulation engine; it reads the Hub and prints.
 import asyncio
 import datetime
 import sys
-from pathlib import Path
 
 import polars as pl
 
-sys.path.insert(0, str(Path(__file__).parent))
+from examples.huggingface.congress import CLEAN, DATASET
+from examples.huggingface.hf_config import CONGRESS_REVISION
 
-from congress import CLEAN, DATASET  # noqa: E402
-from hf_config import CONGRESS_REVISION  # noqa: E402
-
-from ziplime.data.data_sources.huggingface.huggingface_data_source import load_table  # noqa: E402
+from ziplime.data.data_sources.huggingface.huggingface_data_source import load_table
 
 #: A transaction this far before a member took office is not a candidate-period trade or a term
 #: boundary; it is a date that did not survive the parser.

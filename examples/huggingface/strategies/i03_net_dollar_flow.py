@@ -13,17 +13,14 @@ filing". For a company whose insiders file weekly those are the same; for a quie
 reaches back a year.
 """
 import datetime
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from hf_config import INSIDER10_UNIVERSE  # noqa: E402
-from insider import mount_features  # noqa: E402
-from portfolio import rebalance_to  # noqa: E402
+from examples.huggingface.hf_config import INSIDER10_UNIVERSE
+from examples.huggingface.insider import mount_features
+from examples.huggingface.portfolio import rebalance_to
 
-from ziplime.api import date_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {
     "window": "insider10",

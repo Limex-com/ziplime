@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from providers_config import ASSET_DB_PATH
+from examples.providers_config import ASSET_DB_PATH
 
 from ziplime.core.ingest_data import get_asset_service, ingest_assets
 from ziplime.utils.bundle_utils import get_asset_data_source

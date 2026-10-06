@@ -6,7 +6,7 @@ checked directly rather than inferred from results.
 import datetime
 import unittest
 
-from futures_fixtures import make_bundle, make_future
+from tests.futures_fixtures import make_bundle, make_future
 
 from ziplime.assets.domain.roll_finder import CalendarRollFinder, VolumeRollFinder
 

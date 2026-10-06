@@ -10,7 +10,7 @@ import pandas as pd
 from ziplime.lib.adjusted_array import AdjustedArray
 from ziplime.lib.adjustment import make_adjustment_from_labels
 from ziplime.utils.numpy_utils import as_column
-from .pipeline_loader import PipelineLoader
+from ziplime.pipeline.loaders.pipeline_loader import PipelineLoader
 
 ADJUSTMENT_COLUMNS = pd.Index(
     [

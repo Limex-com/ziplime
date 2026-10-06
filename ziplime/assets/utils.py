@@ -14,7 +14,7 @@ from toolz import (
 
 import numpy as np
 
-from .domain.continuous_future import ContinuousFuture
+from ziplime.assets.domain.continuous_future import ContinuousFuture
 
 log = structlog.get_logger("assets.py")
 

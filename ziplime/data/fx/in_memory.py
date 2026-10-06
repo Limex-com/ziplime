@@ -2,8 +2,8 @@
 
 import numpy as np
 
-from .base import FXRateReader, DEFAULT_FX_RATE
-from .utils import check_dts
+from ziplime.data.fx.base import FXRateReader, DEFAULT_FX_RATE
+from ziplime.data.fx.utils import check_dts
 
 
 class InMemoryFXRateReader(FXRateReader):

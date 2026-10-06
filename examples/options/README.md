@@ -10,13 +10,15 @@ the engine does with them.
 | `run_yahoo_spread.py` (o05) | **real** OPRA, over Yahoo | real | ~a month daily, a session intraday | nothing |
 | `run_structures.py` (o05–o09) | **real** OPRA, over Yahoo, built once and shared | real | ~a month daily | nothing |
 
-```
-python examples/options/run_all.py              # synthetic 0DTE chain
-python examples/options/run_all.py --only o01
-python examples/options/run_0dte_straddle.py    # real 0DTE, needs the gRPC feed
-python examples/options/run_yahoo_spread.py     # real chain, free, no credentials
-python examples/options/run_structures.py       # five structures over one chain, side by side
-python examples/options/run_structures.py --only o06
+Run these commands from the repository root with ziplime installed:
+
+```bash
+python -m examples.options.run_all              # synthetic 0DTE chain
+python -m examples.options.run_all --only o01
+python -m examples.options.run_0dte_straddle      # real 0DTE, needs the gRPC feed
+python -m examples.options.run_yahoo_spread      # real chain, free, no credentials
+python -m examples.options.run_structures        # five structures over one chain, side by side
+python -m examples.options.run_structures --only o06
 ```
 
 The synthetic source marks itself `is_real_market_data = False`, and

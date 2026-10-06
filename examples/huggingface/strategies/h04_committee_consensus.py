@@ -33,19 +33,20 @@ What weakens it, stated plainly
 
 The result is a demonstration of the mechanism and of the join, not evidence about the signal.
 """
-import sys
-from pathlib import Path
 
 import polars as pl
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from examples.huggingface.congress import (
+    committee_roster,
+    committees,
+    load_disclosures,
+    mount_disclosures,
+)
+from examples.huggingface.hf_config import COMMITTEE_ID, CONGRESS_REVISION, CONGRESS_UNIVERSE
 
-from congress import committee_roster, committees, load_disclosures, mount_disclosures  # noqa: E402
-from hf_config import COMMITTEE_ID, CONGRESS_REVISION, CONGRESS_UNIVERSE  # noqa: E402
-
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.finance.execution import MarketOrder  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.domain.bar_data import BarData
+from ziplime.finance.execution import MarketOrder
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {
     "window": "congress",

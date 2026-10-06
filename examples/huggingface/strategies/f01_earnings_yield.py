@@ -20,19 +20,16 @@ The earnings are annual and as reported, never restated -- which for this corpus
 between a backtest and a description of the present.
 """
 import datetime
-import sys
 
 import polars as pl
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from fundamentals import FIELDS, mount, rank_and_hold  # noqa: E402
-from hf_config import FUNDAMENTALS_UNIVERSE  # noqa: E402
-from portfolio import priced, rebalance_to  # noqa: E402
+from examples.huggingface.fundamentals import FIELDS, mount, rank_and_hold
+from examples.huggingface.hf_config import FUNDAMENTALS_UNIVERSE
+from examples.huggingface.portfolio import priced, rebalance_to
 
-from ziplime.api import date_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {
     "window": "fundamentals",

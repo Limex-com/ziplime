@@ -80,7 +80,7 @@ tickers, `DEMOBOND` identifiers — covering a plain coupon bond, a zero-coupon 
 bond, one with a put window, and one that matures inside the example window. Re-seed with:
 
 ```bash
-python examples/bonds/seed_demo_bonds.py
+python -m examples.bonds.seed_demo_bonds
 ```
 
 ## Writing a bond strategy

@@ -1,7 +1,7 @@
 """Every option structure, over one chain, side by side.
 
-    python examples/options/run_structures.py
-    python examples/options/run_structures.py --only o06
+    python -m examples.options.run_structures
+    python -m examples.options.run_structures --only o06
 
 Real AAPL option prices from Yahoo Finance -- no credentials, no paid feed. Each strategy is run
 over the *same* window and the *same* chain, so the table at the end compares structures rather
@@ -19,22 +19,19 @@ import asyncio
 import datetime
 import importlib.util
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
 import polars as pl
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
-from ziplime.assets.entities.asset_symbol import AssetSymbol  # noqa: E402
-from ziplime.core.ingest_data import get_asset_service  # noqa: E402
-from ziplime.data.data_sources.options.ingest import build_option_bundle  # noqa: E402
-from ziplime.data.data_sources.options.yahoo_chain import YahooOptionChainSource  # noqa: E402
-from ziplime.finance.commission.no_commission import NoCommission  # noqa: E402
-from ziplime.finance.slippage.no_slippage import NoSlippage  # noqa: E402
-from ziplime.utils.calendar_utils import get_calendar  # noqa: E402
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.core.ingest_data import get_asset_service
+from ziplime.data.data_sources.options.ingest import build_option_bundle
+from ziplime.data.data_sources.options.yahoo_chain import YahooOptionChainSource
+from ziplime.finance.commission.no_commission import NoCommission
+from ziplime.finance.slippage.no_slippage import NoSlippage
+from ziplime.utils.calendar_utils import get_calendar
 
 REPO = Path(__file__).parent.parent.parent
 STRATEGY_DIR = Path(__file__).parent / "strategies"

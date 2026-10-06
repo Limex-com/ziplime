@@ -3,7 +3,7 @@ import pandas as pd
 
 from toolz import groupby, merge
 
-from .pipeline_loader import PipelineLoader
+from ziplime.pipeline.loaders.pipeline_loader import PipelineLoader
 from ziplime.pipeline.common import (
     EVENT_DATE_FIELD_NAME,
     SID_FIELD_NAME,

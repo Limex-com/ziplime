@@ -11,7 +11,7 @@ Organised around the cases a bond backtest has to get right:
 import datetime
 import unittest
 
-from bond_fixtures import (
+from tests.bond_fixtures import (
     ACCOUNT, EXCHANGE, StubBondService, load_schedule, make_amortization_events, make_bond,
     make_coupon_events, make_ledger, make_zero_coupon_bond, mark, settle, trade,
 )
