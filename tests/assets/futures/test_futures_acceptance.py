@@ -6,7 +6,7 @@ futures backtest can run cleanly end to end and still be financially meaningless
 import datetime
 import unittest
 
-from futures_fixtures import ACCOUNT, EXCHANGE, make_equity, make_future, make_ledger, mark, settle, trade
+from tests.futures_fixtures import ACCOUNT, EXCHANGE, make_equity, make_future, make_ledger, mark, settle, trade
 
 
 class MultiplierAndExposureTests(unittest.IsolatedAsyncioTestCase):

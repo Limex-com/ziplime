@@ -7,7 +7,7 @@ import unittest
 
 import polars as pl
 
-from futures_fixtures import make_bundle, make_future, session
+from tests.futures_fixtures import make_bundle, make_future, session
 
 from ziplime.assets.domain.roll_finder import VolumeRollFinder
 
@@ -222,7 +222,7 @@ class PerformanceRecordIntegrityTests(unittest.IsolatedAsyncioTestCase):
     """#16: a recorded session must not change as the simulation continues."""
 
     async def test_recorded_positions_are_snapshots_not_live_objects(self):
-        from futures_fixtures import make_ledger, settle, trade
+        from tests.futures_fixtures import make_ledger, settle, trade
         ledger = make_ledger()
         contract = make_future(sid=1, expiration=datetime.date(2023, 9, 21))
         trade(ledger, contract, amount=5, price=70.0)

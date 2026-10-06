@@ -17,30 +17,27 @@ Execution timing is now stated rather than hidden in a `.shift()` on the signals
 
 Run:
 
-    python examples/vectorized/sweep_then_report.py
+    python -m examples.vectorized.sweep_then_report
 
 Prices for SPY and QQQ come from Yahoo. Nothing extra needs installing.
 """
 import asyncio
 import datetime
 import itertools
-import sys
 from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
-from ziplime.assets.entities.asset_symbol import AssetSymbol  # noqa: E402
-from ziplime.core.ingest_data import get_asset_service  # noqa: E402
-from ziplime.exchanges.simulation_exchange import SimulationExchange  # noqa: E402
-from ziplime.finance.commission.no_commission import NoCommission  # noqa: E402
-from ziplime.finance.slippage.no_slippage import NoSlippage  # noqa: E402
-from ziplime.utils.bundle_utils import get_market_data_source  # noqa: E402
-from ziplime.utils.calendar_utils import get_calendar  # noqa: E402
-from ziplime.vectorized import to_execution_result  # noqa: E402
-from ziplime.vectorized.kernel import ExecutionTiming, simulate_signals  # noqa: E402
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.core.ingest_data import get_asset_service
+from ziplime.exchanges.simulation_exchange import SimulationExchange
+from ziplime.finance.commission.no_commission import NoCommission
+from ziplime.finance.slippage.no_slippage import NoSlippage
+from ziplime.utils.bundle_utils import get_market_data_source
+from ziplime.utils.calendar_utils import get_calendar
+from ziplime.vectorized import to_execution_result
+from ziplime.vectorized.kernel import ExecutionTiming, simulate_signals
 
 ASSET_DB = str(Path(Path(__file__).parent.parent.parent, "data", "assets.sqlite").absolute())
 UNIVERSE = [("SPY", "ARCX"), ("QQQ", "XNMS")]

@@ -40,20 +40,18 @@ that touches a per-share figure discards absurd values explicitly. Ranking alone
 a rank puts the wrong number at the top of the book rather than in the middle of it.
 """
 import datetime
-import sys
 from pathlib import Path
 
 import polars as pl
 from huggingface_hub import HfApi, snapshot_download
 
-sys.path.insert(0, str(Path(__file__).parent))
-from hf_config import CIK_TO_TICKER, EARNINGS_DATASET  # noqa: E402
+from examples.huggingface.hf_config import CIK_TO_TICKER, EARNINGS_DATASET
 
-from ziplime.data.data_sources.huggingface import hub  # noqa: E402
-from ziplime.data.data_sources.huggingface.huggingface_data_source import (  # noqa: E402
+from ziplime.data.data_sources.huggingface import hub
+from ziplime.data.data_sources.huggingface.huggingface_data_source import (
     HuggingFaceDataSource, Resolution,
 )
-from ziplime.data.data_sources.huggingface.manifest import parse_manifest  # noqa: E402
+from ziplime.data.data_sources.huggingface.manifest import parse_manifest
 
 #: Columns a strategy may read. `session` says where in the trading day the release landed, which
 #: is the column this dataset exists for.

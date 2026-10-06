@@ -30,8 +30,8 @@ from ziplime.assets.domain.exercise_style import ExerciseStyle
 from ziplime.assets.domain.option_type import OptionType
 from ziplime.assets.domain.settlement_type import SettlementType
 
-from .source import BAR_COLUMNS, ContractSpec, OptionChainSource
-from .venues import VENUES
+from ziplime.data.data_sources.options.source import BAR_COLUMNS, ContractSpec, OptionChainSource
+from ziplime.data.data_sources.options.venues import VENUES
 
 _logger = structlog.get_logger(__name__)
 

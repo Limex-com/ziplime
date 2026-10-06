@@ -8,7 +8,7 @@ import unittest
 import pandas as pd
 import polars as pl
 
-from futures_fixtures import make_bundle, make_future, session
+from tests.futures_fixtures import make_bundle, make_future, session
 
 from ziplime.assets.domain.roll_finder import CalendarRollFinder
 from ziplime.utils.calendar_utils import get_calendar

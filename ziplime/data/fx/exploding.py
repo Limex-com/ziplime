@@ -1,4 +1,4 @@
-from .base import FXRateReader
+from ziplime.data.fx.base import FXRateReader
 
 
 class ExplodingFXRateReader(FXRateReader):

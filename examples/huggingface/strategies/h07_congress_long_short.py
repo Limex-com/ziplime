@@ -23,20 +23,16 @@ Two caveats the numbers cannot fix:
   agreement, or because a fund manager they never speak to decided to. Treating every disclosed
   sale as a short signal takes a position on that interpretation, and it is a strong one.
 """
-import sys
-from pathlib import Path
 
 import polars as pl
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from examples.huggingface.congress import SALES, load_disclosures, mount_disclosures
+from examples.huggingface.hf_config import CONGRESS_REVISION, CONGRESS_UNIVERSE
 
-from congress import SALES, load_disclosures, mount_disclosures  # noqa: E402
-from hf_config import CONGRESS_REVISION, CONGRESS_UNIVERSE  # noqa: E402
-
-from ziplime.api import date_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.finance.execution import MarketOrder  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.finance.execution import MarketOrder
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {
     "window": "congress",

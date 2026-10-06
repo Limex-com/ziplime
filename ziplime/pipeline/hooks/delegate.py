@@ -1,6 +1,6 @@
 
-from .iface import PipelineHooks
-from .no import NoHooks
+from ziplime.pipeline.hooks.iface import PipelineHooks
+from ziplime.pipeline.hooks.no import NoHooks
 
 
 class DelegatingHooks(PipelineHooks):

@@ -268,7 +268,7 @@ class ComputableTerm(Term):
         ----------
         {frequency}
         """
-        from ..mixins import DownsampledMixin
+        from ziplime.pipeline.mixins import DownsampledMixin
         if frequency not in SUPPORTED_DOWNSAMPLE_FREQUENCIES:
             raise ValueError(
                 "Invalid downsampling frequency: {frequency}.\n\n"
@@ -299,7 +299,7 @@ class ComputableTerm(Term):
         -----
         This is useful for giving a name to a numerical or boolean expression.
         """
-        from ..mixins import AliasedMixin
+        from ziplime.pipeline.mixins import AliasedMixin
 
         aliased_type = type(self)._with_mixin(AliasedMixin)
         return aliased_type(term=self, name=name)
@@ -318,7 +318,7 @@ class ComputableTerm(Term):
         if self.dtype == bool_dtype:
             raise TypeError("isnull() is not supported for Filters")
 
-        from .filters import NullFilter
+        from ziplime.pipeline.terms.filters import NullFilter
 
         if self.dtype == float64_dtype:
             # Using isnan is more efficient when possible because we can fold
@@ -341,7 +341,7 @@ class ComputableTerm(Term):
         if self.dtype == bool_dtype:
             raise TypeError("notnull() is not supported for Filters")
 
-        from .filters import NotNullFilter
+        from ziplime.pipeline.terms.filters import NotNullFilter
 
         return NotNullFilter(self)
 
@@ -437,14 +437,14 @@ class ComputableTerm(Term):
     # @classlazyval
     @property
     def _constant_type(cls):
-        from ..mixins import ConstantMixin
+        from ziplime.pipeline.mixins import ConstantMixin
 
         return cls._with_mixin(ConstantMixin)
 
     # @classlazyval
     @property
     def _if_else_type(cls):
-        from ..mixins import IfElseMixin
+        from ziplime.pipeline.mixins import IfElseMixin
 
         return cls._with_mixin(IfElseMixin)
 

@@ -39,8 +39,8 @@ import structlog
 from ziplime.finance.commission.commission_model import CommissionModel
 from ziplime.finance.slippage.slippage_model import SlippageModel
 
-from . import _core, costs
-from .models import (
+from ziplime.vectorized.kernel import _core, costs
+from ziplime.vectorized.kernel.models import (
     VECTOR_KERNEL_VERSION, ExecutionTiming, VectorFill, VectorKernelError, VectorReject,
     VectorSimulationResult,
 )

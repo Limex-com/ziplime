@@ -5,9 +5,11 @@ expiration dates and a real term structure. No credentials.
 
 ## Running them
 
+Run these commands from the repository root with ziplime installed:
+
 ```bash
-python examples/futures/ingest_futures_data_yahoo.py   # discover the chains, then the bars
-cd examples/futures && python run_all.py
+python -m examples.futures.ingest_futures_data_yahoo   # discover the chains, then the bars
+python -m examples.futures.run_all
 ```
 
 ## What Yahoo gives, and what it does not

@@ -34,19 +34,15 @@ The result is not a recommendation and not evidence. It is one book over ten yea
 for the fact that the names in it are large-cap technology shares that rose a great deal anyway --
 which `h04` exists partly to put in perspective.
 """
-import sys
-from pathlib import Path
 
 import polars as pl
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from examples.huggingface.congress import load_disclosures, mount_disclosures
+from examples.huggingface.hf_config import CONGRESS_REVISION, CONGRESS_UNIVERSE
 
-from congress import load_disclosures, mount_disclosures  # noqa: E402
-from hf_config import CONGRESS_REVISION, CONGRESS_UNIVERSE  # noqa: E402
-
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.finance.execution import MarketOrder  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.domain.bar_data import BarData
+from ziplime.finance.execution import MarketOrder
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {
     "window": "congress",

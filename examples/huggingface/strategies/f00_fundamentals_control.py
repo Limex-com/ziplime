@@ -4,16 +4,13 @@ Same universe, same survivorship, no fundamentals. Every number in the suite is 
 against this one: these companies were selected for reporting completely *and* still having a price
 in 2026, and both conditions favour the survivors.
 """
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from hf_config import FUNDAMENTALS_UNIVERSE  # noqa: E402
-from portfolio import priced, rebalance_to  # noqa: E402
+from examples.huggingface.hf_config import FUNDAMENTALS_UNIVERSE
+from examples.huggingface.portfolio import priced, rebalance_to
 
-from ziplime.api import date_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {"window": "fundamentals",
                  "description": "Equal-weight all 230 names, reading no filing -- the control"}

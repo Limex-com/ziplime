@@ -22,17 +22,14 @@ strategy doing anything: the name is bought at the next session instead. On dail
 close to the release as it is possible to get.
 """
 import datetime
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from earnings import growers, mount  # noqa: E402
-from hf_config import EARNINGS_UNIVERSE  # noqa: E402
-from playbook import equities, hold  # noqa: E402
+from examples.huggingface.earnings import growers, mount
+from examples.huggingface.hf_config import EARNINGS_UNIVERSE
+from examples.huggingface.playbook import equities, hold
 
-from ziplime.api import date_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {"window": "earnings",
                  "description": "Hold names whose latest results grew revenue year on year"}

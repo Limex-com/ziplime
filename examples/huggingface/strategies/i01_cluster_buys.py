@@ -10,17 +10,14 @@ trailing 14 calendar-day window, judged by knowledge time. It fires on about 3% 
 the book is concentrated and turns over slowly.
 """
 import datetime
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from insider import mount_features  # noqa: E402
-from hf_config import INSIDER10_UNIVERSE  # noqa: E402
-from playbook import any_of, equities, hold, show_once  # noqa: E402
+from examples.huggingface.insider import mount_features
+from examples.huggingface.hf_config import INSIDER10_UNIVERSE
+from examples.huggingface.playbook import any_of, equities, hold, show_once
 
-from ziplime.api import date_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {"window": "insider10",
                  "description": "Hold names where three or more insiders bought within a fortnight"}

@@ -8,9 +8,11 @@ opposite situations.
 | **Signals inside a run** | the strategy's arithmetic | **ziplime**, bar by bar | ziplime's models | yes | one strategy that has to run faster |
 | **Sweep, then report** | the whole run | **ziplime's kernel** | ziplime's models | **no, refused** | hundreds of parameter combinations |
 
-```
-python examples/vectorized/signals_in_run.py      # the first
-python examples/vectorized/sweep_then_report.py   # the second
+Run these commands from the repository root with ziplime installed:
+
+```bash
+python -m examples.vectorized.signals_in_run      # the first
+python -m examples.vectorized.sweep_then_report   # the second
 ```
 
 Both are ziplime all the way down. Neither needs an outside engine: the sweep is computed by

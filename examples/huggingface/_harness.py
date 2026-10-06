@@ -13,27 +13,25 @@ from zoneinfo import ZoneInfo
 import polars as pl
 from exchange_calendars import get_calendar
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from hf_config import (  # noqa: E402
+from examples.huggingface.hf_config import (
     ASSET_DB_PATH, CONGRESS_END, CONGRESS_START, CONGRESS_UNIVERSE, EARNINGS_END, EARNINGS_START,
     EARNINGS_UNIVERSE, END, EQUITY_MIC, EQUITY_TICKERS, FUNDAMENTALS_END, FUNDAMENTALS_START,
     FUNDAMENTALS_UNIVERSE, INSIDER10_END, INSIDER10_START, INSIDER10_UNIVERSE, INSIDER_END,
     INSIDER_START, START, STARTING_CASH, TRADING_CALENDAR,
 )
 
-from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
-from ziplime.assets.entities.asset_symbol import AssetSymbol  # noqa: E402
-from ziplime.constants.data_type import DataType  # noqa: E402
-from ziplime.core.ingest_data import get_asset_service  # noqa: E402
-from ziplime.core.run_simulation import run_simulation  # noqa: E402
-from ziplime.data.domain.data_bundle import DataBundle  # noqa: E402
-from ziplime.data.services import frame_cache  # noqa: E402
-from ziplime.finance.commission import PerShare  # noqa: E402
-from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage  # noqa: E402
-from ziplime.utils.bundle_utils import get_market_data_source  # noqa: E402
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.constants.data_type import DataType
+from ziplime.core.ingest_data import get_asset_service
+from ziplime.core.run_simulation import run_simulation
+from ziplime.data.domain.data_bundle import DataBundle
+from ziplime.data.services import frame_cache
+from ziplime.finance.commission import PerShare
+from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
+from ziplime.utils.bundle_utils import get_market_data_source
 
-from intraday import (  # noqa: E402
+from examples.huggingface.intraday import (
     INTRADAY_UNIVERSE, build_intraday_bundle, recent_window,
 )
 

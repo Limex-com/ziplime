@@ -17,29 +17,27 @@ from pathlib import Path
 
 import polars as pl
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-from options_config import (  # noqa: E402
+from examples.options.options_config import (
     ASSET_DB_PATH, EMISSION_RATE, FAR_REACH, FAR_STEP, NEAR_REACH, NEAR_STEP, SESSIONS,
     STARTING_CASH, TRADING_CALENDAR, UNDERLYING,
 )
 
-from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
-from ziplime.assets.entities.asset_symbol import AssetSymbol  # noqa: E402
-from ziplime.core.ingest_data import get_asset_service  # noqa: E402
-from ziplime.core.run_simulation import run_simulation  # noqa: E402
-from ziplime.data.data_sources.options.ingest import build_option_bundle  # noqa: E402
-from ziplime.data.data_sources.options.synthetic import (  # noqa: E402
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.core.ingest_data import get_asset_service
+from ziplime.core.run_simulation import run_simulation
+from ziplime.data.data_sources.options.ingest import build_option_bundle
+from ziplime.data.data_sources.options.synthetic import (
     ChainSpec, SyntheticOptionChainSource, refuse_performance_claims,
 )
-from ziplime.data.services import frame_cache  # noqa: E402
-from ziplime.data.services.bar_alignment import align_to_clock, clock_minutes  # noqa: E402
-from ziplime.finance.commission import PerOptionContract, PerShare  # noqa: E402
-from ziplime.finance.slippage.fixed_basis_points_slippage import (  # noqa: E402
+from ziplime.data.services import frame_cache
+from ziplime.data.services.bar_alignment import align_to_clock, clock_minutes
+from ziplime.finance.commission import PerOptionContract, PerShare
+from ziplime.finance.slippage.fixed_basis_points_slippage import (
     FixedBasisPointsSlippage,
 )
-from ziplime.utils.bundle_utils import get_market_data_source  # noqa: E402
-from ziplime.utils.calendar_utils import get_calendar  # noqa: E402
+from ziplime.utils.bundle_utils import get_market_data_source
+from ziplime.utils.calendar_utils import get_calendar
 
 STRATEGY_DIR = Path(__file__).parent / "strategies"
 

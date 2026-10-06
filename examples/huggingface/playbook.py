@@ -29,7 +29,7 @@ import datetime
 
 import polars as pl
 
-from portfolio import priced, rebalance_to
+from examples.huggingface.portfolio import priced, rebalance_to
 
 #: Skip a row rather than fail when its inputs are missing. Sparse fundamentals make this the
 #: normal case: a company that did not report gross profit is not an error, it is a company that

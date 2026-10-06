@@ -5,11 +5,11 @@ import numpy as np
 from pandas import DataFrame, Timestamp
 from sqlite3 import connect as sqlite3_connect
 
-from .pipeline_loader import PipelineLoader  # noqa: F401 - compatibility re-export
-from .data_frame_loader import DataFrameLoader  # noqa: F401 - compatibility re-export
+from ziplime.pipeline.loaders.pipeline_loader import PipelineLoader  # noqa: F401 - compatibility re-export
+from ziplime.pipeline.loaders.data_frame_loader import DataFrameLoader  # noqa: F401 - compatibility re-export
 
 
-from ...assets.repositories.sqlalchemy_adjustments_repository import SqlAlchemyAdjustmentRepository
+from ziplime.assets.repositories.sqlalchemy_adjustments_repository import SqlAlchemyAdjustmentRepository
 
 US_EQUITY_PRICING_BCOLZ_COLUMNS = (
     "open",

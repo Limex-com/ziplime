@@ -4,16 +4,13 @@ Bought once at the first bar and never touched again, so it carries no timing de
 -- which is the point, since the pair it exists for differ only in when they trade. Any return
 this makes is what twenty sessions of these particular names gave away for free.
 """
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from intraday import INTRADAY_UNIVERSE  # noqa: E402
-from playbook import equities, hold  # noqa: E402
+from examples.huggingface.intraday import INTRADAY_UNIVERSE
+from examples.huggingface.playbook import equities, hold
 
-from ziplime.api import date_rules, time_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules, time_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {"window": "intraday-5m",
                  "description": "Equal-weight all 19 names, reading no filing -- the control"}

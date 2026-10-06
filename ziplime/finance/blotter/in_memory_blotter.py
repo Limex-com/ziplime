@@ -3,11 +3,11 @@ from copy import copy
 
 import structlog
 
-from .blotter import Blotter
+from ziplime.finance.blotter.blotter import Blotter
 
 from ziplime.finance.domain.order import Order
 from ziplime.exchanges.exchange import Exchange
-from ...assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 
 class InMemoryBlotter(Blotter):

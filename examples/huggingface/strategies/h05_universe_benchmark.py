@@ -12,17 +12,13 @@ two against it, not against zero.
 This is the cheapest honest thing an example suite can include, and its absence is how a
 backtest on an alternative dataset ends up looking like a discovery.
 """
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from examples.huggingface.hf_config import CONGRESS_UNIVERSE
 
-from hf_config import CONGRESS_UNIVERSE  # noqa: E402
-
-from ziplime.api import date_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.finance.execution import MarketOrder  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.finance.execution import MarketOrder
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {
     "window": "congress",

@@ -9,9 +9,9 @@ from weakref import WeakValueDictionary
 
 from ziplime.errors import NonSliceableTerm
 
-from ..domain import GENERIC
+from ziplime.pipeline.domain import GENERIC
 from ziplime.assets.entities.asset import Asset
-from .utils import validate_dtype
+from ziplime.pipeline.terms.utils import validate_dtype
 
 
 class Term(ABC):
@@ -212,7 +212,7 @@ class Term(ABC):
         if isinstance(self, LoadableTerm):
             raise NonSliceableTerm(term=self)
 
-        from ..mixins import SliceMixin
+        from ziplime.pipeline.mixins import SliceMixin
 
         slice_type = type(self)._with_mixin(SliceMixin)
         return slice_type(self, key)

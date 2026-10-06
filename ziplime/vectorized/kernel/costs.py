@@ -31,7 +31,7 @@ from ziplime.finance.slippage.fixed_slippage import FixedSlippage
 from ziplime.finance.slippage.no_slippage import NoSlippage
 from ziplime.finance.slippage.slippage_model import SlippageModel
 
-from .models import VectorKernelError
+from ziplime.vectorized.kernel.models import VectorKernelError
 
 
 @dataclasses.dataclass(frozen=True)

@@ -2,7 +2,7 @@
 
 Run this once before the bond examples:
 
-    python examples/bonds/seed_demo_bonds.py
+    python -m examples.bonds.seed_demo_bonds
 
 The issues it writes are synthetic and marked as such -- ``ZL`` tickers, ``DEMOBOND`` identifiers.
 They exist so the examples and the end-to-end tests can exercise a whole bond life (coupons,
@@ -16,7 +16,7 @@ Re-running is safe: bonds are identified by ``(identifier, ticker)`` and events 
 import asyncio
 import logging
 
-from bond_config import ASSET_DB_PATH
+from examples.bonds.bond_config import ASSET_DB_PATH
 
 from ziplime.core.ingest_data import get_asset_service
 from ziplime.data.data_sources.demo_bonds import build_demo_bond_universe, demo_exchange

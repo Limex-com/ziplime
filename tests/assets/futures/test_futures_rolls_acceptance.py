@@ -7,7 +7,7 @@ import unittest
 
 import polars as pl
 
-from futures_fixtures import (
+from tests.futures_fixtures import (
     StubAssetService, make_bundle, make_future, make_ledger, session, settle, trade,
 )
 

@@ -100,8 +100,8 @@ import structlog
 
 from ziplime.utils.numpy_utils import bytes_array_to_native_str_object_array
 
-from .base import FXRateReader, DEFAULT_FX_RATE
-from .utils import check_dts, is_sorted_ascending
+from ziplime.data.fx.base import FXRateReader, DEFAULT_FX_RATE
+from ziplime.data.fx.utils import check_dts, is_sorted_ascending
 
 HDF5_FX_VERSION = 0
 HDF5_FX_DEFAULT_CHUNK_SIZE = 75

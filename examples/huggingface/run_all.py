@@ -14,13 +14,10 @@ import argparse
 import asyncio
 import logging
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+from examples.huggingface._harness import list_strategies, run_strategy, summarise
 
-from _harness import list_strategies, run_strategy, summarise  # noqa: E402
-
-from ziplime.utils.logging_utils import configure_logging  # noqa: E402
+from ziplime.utils.logging_utils import configure_logging
 
 
 async def main(only: list[str] | None = None, verbose: bool = False):

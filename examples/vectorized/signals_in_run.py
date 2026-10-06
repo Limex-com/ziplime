@@ -4,7 +4,7 @@ Runs `strategies/v01_vectorised.py` and `strategies/v01_bar_by_bar.py` over the 
 checks them against each other trade for trade, and times both. The agreement is the point: if
 lifting the arithmetic out of the loop changes the result, the speed-up is worth nothing.
 
-    python examples/vectorized/signals_in_run.py
+    python -m examples.vectorized.signals_in_run
 
 SPY and QQQ bars come from Yahoo. vectorbt is not needed for any of this.
 """
@@ -12,25 +12,22 @@ import asyncio
 import cProfile
 import datetime
 import pstats
-import sys
 import time
 from pathlib import Path
 
 import pandas as pd
 import polars as pl
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from ziplime.assets.domain.asset_type import AssetType  # noqa: E402
-from ziplime.assets.entities.asset_symbol import AssetSymbol  # noqa: E402
-from ziplime.constants.data_type import DataType  # noqa: E402
-from ziplime.core.ingest_data import get_asset_service  # noqa: E402
-from ziplime.core.run_simulation import run_simulation  # noqa: E402
-from ziplime.data.domain.data_bundle import DataBundle  # noqa: E402
-from ziplime.finance.commission.no_commission import NoCommission  # noqa: E402
-from ziplime.finance.slippage.no_slippage import NoSlippage  # noqa: E402
-from ziplime.utils.bundle_utils import get_market_data_source  # noqa: E402
-from ziplime.utils.calendar_utils import get_calendar  # noqa: E402
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.assets.entities.asset_symbol import AssetSymbol
+from ziplime.constants.data_type import DataType
+from ziplime.core.ingest_data import get_asset_service
+from ziplime.core.run_simulation import run_simulation
+from ziplime.data.domain.data_bundle import DataBundle
+from ziplime.finance.commission.no_commission import NoCommission
+from ziplime.finance.slippage.no_slippage import NoSlippage
+from ziplime.utils.bundle_utils import get_market_data_source
+from ziplime.utils.calendar_utils import get_calendar
 
 HERE = Path(__file__).parent
 ROOT = HERE.parent.parent

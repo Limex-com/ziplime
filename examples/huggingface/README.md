@@ -16,8 +16,10 @@ cache.
 
 ## Running them
 
+Run these commands from the repository root with ziplime installed:
+
 ```bash
-cd examples/huggingface && python run_all.py
+python -m examples.huggingface.run_all
 ```
 
 The equities are priced from Yahoo Finance. The datasets come from the Hub.
@@ -564,7 +566,7 @@ to read at any frequency coarser than daily, since ziplime downsamples with `.la
 ## Checking the data before trusting it
 
 ```bash
-python examples/huggingface/validate_congress.py
+python -m examples.huggingface.validate_congress
 ```
 
 A dataset built by parsing scanned PDFs will contain mistakes. The useful question is whether they

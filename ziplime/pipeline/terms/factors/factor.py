@@ -419,7 +419,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         :class:`ziplime.pipeline.factors.RollingPearsonOfReturns`
         :meth:`Factor.spearmanr`
         """
-        from .statistical.rolling_pearson import RollingPearson
+        from ziplime.pipeline.terms.factors.statistical.rolling_pearson import RollingPearson
 
         return RollingPearson(
             base_factor=self,
@@ -481,7 +481,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         :func:`scipy.stats.spearmanr`
         :meth:`Factor.pearsonr`
         """
-        from .statistical.rolling_spearman import RollingSpearman
+        from ziplime.pipeline.terms.factors.statistical.rolling_spearman import RollingSpearman
 
         return RollingSpearman(
             base_factor=self,
@@ -540,7 +540,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         --------
         :func:`scipy.stats.linregress`
         """
-        from .statistical.rolling_linear_regression import RollingLinearRegression
+        from ziplime.pipeline.terms.factors.statistical.rolling_linear_regression import RollingLinearRegression
 
         return RollingLinearRegression(
             dependent=self,
@@ -888,7 +888,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         --------
         numpy.clip
         """
-        from .basic.clip import Clip
+        from ziplime.pipeline.terms.factors.basic.clip import Clip
 
         return Clip(
             inputs=[self],

@@ -1,6 +1,6 @@
 from ziplime.utils.compat import contextmanager
 
-from .iface import PipelineHooks
+from ziplime.pipeline.hooks.iface import PipelineHooks
 
 
 class NoHooks(PipelineHooks):

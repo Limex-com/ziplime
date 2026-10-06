@@ -18,7 +18,7 @@ check that each keeps its own rules.
 import datetime
 import unittest
 
-from cross_asset_fixtures import (
+from tests.cross_asset_fixtures import (
     EXCHANGE, SESSION, StubService, make_bond, make_equity, make_future, make_ledger, mark, settle,
     trade,
 )

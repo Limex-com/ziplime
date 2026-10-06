@@ -10,7 +10,7 @@ from ziplime.utils.numpy_utils import (
     int64_dtype,
     object_dtype,
 )
-from .precomputed_loader import PrecomputedLoader
+from ziplime.pipeline.loaders.precomputed_loader import PrecomputedLoader
 
 
 class SeededRandomLoader(PrecomputedLoader):

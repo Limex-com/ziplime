@@ -7,8 +7,8 @@ import time
 from ziplime.utils.compat import contextmanager, escape_html
 from ziplime.utils.string_formatting import bulleted_list
 
-from .iface import PipelineHooks
-from .. import Term
+from ziplime.pipeline.hooks.iface import PipelineHooks
+from ziplime.pipeline import Term
 
 
 class ProgressHooks(PipelineHooks):

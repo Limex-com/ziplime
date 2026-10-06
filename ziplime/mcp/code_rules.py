@@ -127,7 +127,7 @@ def check(code: str) -> dict:
     Returns the problems, whether any of them blocks, and the rules text, so a
     caller that finds a problem also has what it needs to fix it.
     """
-    from . import docs
+    from ziplime.mcp import docs
 
     try:
         tree = ast.parse(code)

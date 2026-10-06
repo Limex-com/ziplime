@@ -22,17 +22,14 @@ causality check passes. A z-score against the whole period's mean would not, and
 before the first order rather than quietly inflating the result.
 """
 import datetime
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from fundamentals import mount  # noqa: E402
-from hf_config import FUNDAMENTALS_UNIVERSE  # noqa: E402
-from portfolio import priced, rebalance_to  # noqa: E402
+from examples.huggingface.fundamentals import mount
+from examples.huggingface.hf_config import FUNDAMENTALS_UNIVERSE
+from examples.huggingface.portfolio import priced, rebalance_to
 
-from ziplime.api import date_rules  # noqa: E402
-from ziplime.domain.bar_data import BarData  # noqa: E402
-from ziplime.trading.trading_algorithm import TradingAlgorithm  # noqa: E402
+from ziplime.api import date_rules
+from ziplime.domain.bar_data import BarData
+from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 STRATEGY_INFO = {"window": "fundamentals",
                  "description": "Gross profitability, ranked vectorised over the whole history"}
