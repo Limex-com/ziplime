@@ -4,7 +4,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="img/ziplime-mcp-demo-dark.gif">
     <source media="(prefers-color-scheme: light)" srcset="img/ziplime-mcp-demo-light.gif">
-    <img src="img/ziplime-mcp-demo-light.gif" width="320" alt="Ziplime">
+    <img src="img/ziplime-mcp-demo-light.gif" width="100%" alt="Ziplime">
   </picture>
 </p>
 
