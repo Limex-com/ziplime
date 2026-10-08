@@ -8,13 +8,13 @@
   </picture>
 </p>
 
-<h1 align="center">The backtester your AI can't fool.</h1>
+<h1 align="center">ZIPLIME <br> The backtester your AI can't fool.</h1>
 
 <p align="center">
-  <b>Ziplime is an open-source Python backtesting engine built to catch what AI-written strategies get wrong:<br>
+  <b>ZIPLIME is an open-source Python backtesting engine built to catch what AI-written strategies get wrong:<br>
   look-ahead, fills that never happened, costs that quietly disappear.</b><br><br>
   Claude Code or Codex will write you a strategy in a minute, and it will sound convincing either way.<br>
-  Ziplime checks whether the backtest behind it is honest.
+  ZIPLIME checks whether the backtest behind it is honest.
 </p>
 
 <p align="center">
