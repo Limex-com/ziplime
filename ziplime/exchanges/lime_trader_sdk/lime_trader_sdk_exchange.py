@@ -705,10 +705,17 @@ class LimeTraderSdkExchange(Exchange):
         if quantity == 0:
             skipped = self._skip_order(order)
             if self.dry_run:
-                self._write_dry_run_record(
-                    {"event": "skip", **self._dry_run_order_fields(order),
-                     "reason": self.skipped_orders[-1]["reason"]}
-                )
+                # The order is already rejected; raising would only abort the
+                # rest of handle_data. Recording the failure fails the tick.
+                try:
+                    self._write_dry_run_record(
+                        {"event": "skip", **self._dry_run_order_fields(order),
+                         "reason": self.skipped_orders[-1]["reason"]}
+                    )
+                except OSError as exc:
+                    self.order_failures.append(
+                        f"{order.asset.symbol}: {type(exc).__name__}: {exc}"
+                    )
             return skipped
         if quantity != order.amount:
             self._logger.info(
@@ -933,11 +940,10 @@ class LimeTraderSdkExchange(Exchange):
                 order_id,
             )
             ids.append(external_id)
-        # A ziplime id and its broker id resolve to the same order.
-        ids = list(dict.fromkeys(ids))
+        # A ziplime id and its dry-run id resolve to the same order.
         local = [
             self._orders_by_external_id[order_id]
-            for order_id in ids
+            for order_id in dict.fromkeys(ids)
             if self._is_dry_run_id(order_id) and order_id in self._orders_by_external_id
         ]
         ids = [order_id for order_id in ids if not self._is_dry_run_id(order_id)]

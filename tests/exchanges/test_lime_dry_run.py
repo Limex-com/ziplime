@@ -31,7 +31,9 @@ from tests.exchanges.test_lime_trader_sdk_exchange import (  # noqa: E402
     FakeAssetService,
     FakeAsyncLimeClient,
     _asset,
+    _details,
     _dt,
+    _exchange,
     _ziplime_order,
 )
 
@@ -257,3 +259,35 @@ def test_every_event_is_one_complete_json_line(tmp_path):
     records = _lines(path)
     assert [r["ziplime_order_id"] for r in records] == ["o0", "o1", "o2"]
     assert len({r["dry_run_id"] for r in records}) == 3
+
+
+def test_dry_run_support_leaves_live_get_orders_by_ids_as_it_was():
+    # Not a dry run. Asking for one order by both of its ids made one broker
+    # lookup per id before dry run existed, and still must.
+    asset = _asset()
+    client = FakeAsyncLimeClient()
+    client.trading.details_by_id["broker-order-1"] = _details(
+        client_order_id="strategy-order-1"
+    )
+    exchange = _exchange(client, FakeAssetService(asset))
+    order = _ziplime_order(asset, order_id="strategy-order-1")
+    asyncio.run(exchange.submit_order(order))
+
+    by_id = asyncio.run(exchange.get_orders_by_ids([order.id, order.exchange_order_id]))
+
+    assert client.trading.details_calls == ["broker-order-1", "broker-order-1"]
+    assert by_id == [order, order]
+
+
+def test_a_skip_that_cannot_be_written_fails_the_tick_without_raising(tmp_path):
+    asset = _asset()
+    path = tmp_path / "orders.jsonl"
+    exchange = _dry_exchange(FakeAsyncLimeClient(), FakeAssetService(asset), path)
+    path.mkdir()  # the file can no longer be opened for appending
+
+    order = _ziplime_order(asset, amount=0.4)
+    result = asyncio.run(exchange.submit_order(order))
+
+    assert result is order and order.status == OrderStatus.REJECTED
+    assert exchange.skipped_orders, "still a skip, as live"
+    assert exchange.order_failures, "a lost record must not look like a quiet tick"
