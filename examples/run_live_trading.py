@@ -14,5 +14,8 @@ if __name__ == "__main__":
         bundle_name=None,
         config_file=str(Path("algorithms/test_algo/test_algo_config.json").absolute()),
         emission_rate=datetime.timedelta(seconds=5),
+        # Dry run: validate every order with Lime, then write it to this file
+        # instead of placing it. Remove the line to trade for real.
+        dry_run_file=str(Path("dry_run_orders.jsonl").absolute()),
     )
     print(res.head(n=10))

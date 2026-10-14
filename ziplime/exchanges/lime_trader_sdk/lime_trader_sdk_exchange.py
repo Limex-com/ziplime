@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import hashlib
+import json
 import logging
 import math
 import os
@@ -87,7 +88,18 @@ class LimeTraderSdkExchange(Exchange):
       ``ZIPLIME_MAX_ORDER_QUANTITY``, ``ZIPLIME_MAX_ORDER_NOTIONAL_USD``,
       ``ZIPLIME_MAX_ORDERS_PER_INVOCATION`` and optionally
       ``ZIPLIME_ALLOWED_SYMBOLS`` -- a fail-closed per-invocation risk profile.
+
+    Dry run (``dry_run_file``): the strategy runs against the live account and
+    live quotes, every order goes through the same rounding, risk limits,
+    deadline and broker ``validate_order`` call, and is then appended to a JSON
+    Lines file instead of being placed. Nothing reaches ``place_order`` or
+    ``cancel_order``. A dry-run order never fills, so positions and cash stay
+    whatever the broker reports.
     """
+
+    #: Prefix of the ids given to orders that were written, not placed. The
+    #: broker never issued them, so it must never be asked about them.
+    DRY_RUN_ID_PREFIX = "dryrun-"
 
     live = True
 
@@ -124,6 +136,7 @@ class LimeTraderSdkExchange(Exchange):
         client: AsyncLimeClient | None = None,
         logger: Any = None,
         capital_limit: float | None = None,
+        dry_run_file: str | Path | None = None,
     ):
         super().__init__(
             name=name,
@@ -166,6 +179,14 @@ class LimeTraderSdkExchange(Exchange):
         # limit midway through the invocation.
         self._order_risk_limits = self._load_order_risk_limits()
         self._order_attempt_count = 0
+
+        # Dry run writes orders here instead of placing them. Resolve and create
+        # the directory now: a typo should fail at startup, not on the first
+        # signal of the day.
+        self._dry_run_file: Path | None = None
+        if dry_run_file is not None:
+            self._dry_run_file = Path(dry_run_file).expanduser().resolve()
+            self._dry_run_file.parent.mkdir(parents=True, exist_ok=True)
 
         if client is not None:
             self._client = client
@@ -682,7 +703,20 @@ class LimeTraderSdkExchange(Exchange):
         """
         quantity = round_to_lots(order.amount, self.LOT_SIZE)
         if quantity == 0:
-            return self._skip_order(order)
+            skipped = self._skip_order(order)
+            if self.dry_run:
+                # The order is already rejected; raising would only abort the
+                # rest of handle_data. Recording the failure fails the tick.
+                try:
+                    self._write_dry_run_record(
+                        {"event": "skip", **self._dry_run_order_fields(order),
+                         "reason": self.skipped_orders[-1]["reason"]}
+                    )
+                except OSError as exc:
+                    self.order_failures.append(
+                        f"{order.asset.symbol}: {type(exc).__name__}: {exc}"
+                    )
+            return skipped
         if quantity != order.amount:
             self._logger.info(
                 "Order rounded to whole lots",
@@ -698,6 +732,11 @@ class LimeTraderSdkExchange(Exchange):
             self.order_failures.append(
                 f"{order.asset.symbol}: {type(exc).__name__}: {exc}"
             )
+            if self.dry_run:
+                self._write_dry_run_record(
+                    {"event": "refuse", **self._dry_run_order_fields(order),
+                     "reason": f"{type(exc).__name__}: {exc}"}
+                )
             raise
 
     def _skip_order(self, order: Order) -> Order:
@@ -774,6 +813,8 @@ class LimeTraderSdkExchange(Exchange):
                 raise ValueError(f"Lime rejected order during validation: {reason}")
 
         self._assert_order_deadline()
+        if self.dry_run:
+            return self._record_dry_run_order(order, sdk_order)
         response = await self._client.trading.place_order(order=sdk_order)
         self._last_api_call_ok = True
         if not response.success or not response.order_id:
@@ -795,6 +836,79 @@ class LimeTraderSdkExchange(Exchange):
         )
         return order
 
+    # ------------------------------------------------------------------
+    # Dry run
+    # ------------------------------------------------------------------
+    @property
+    def dry_run(self) -> bool:
+        return self._dry_run_file is not None
+
+    @property
+    def dry_run_file(self) -> Path | None:
+        return self._dry_run_file
+
+    def _is_dry_run_id(self, external_id: str | None) -> bool:
+        return bool(external_id) and str(external_id).startswith(self.DRY_RUN_ID_PREFIX)
+
+    def _write_dry_run_record(self, record: dict[str, Any]) -> None:
+        """Append one event as a JSON line, flushed before returning.
+
+        One line per event and a sync per write: a run that dies mid-session
+        leaves a file that is complete up to the last order, never half a line.
+        """
+        record = {
+            "recorded_at": datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+            "account": self._masked_account_id(self.account_id) if self.account_id else None,
+            **record,
+        }
+        with self._dry_run_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, default=str, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    @staticmethod
+    def _dry_run_order_fields(order: Order) -> dict[str, Any]:
+        """The order as ziplime holds it, before it is mapped to a Lime order."""
+        return {
+            "ziplime_order_id": str(order.id),
+            "order_dt": order.dt.isoformat() if order.dt is not None else None,
+            "symbol": str(order.asset.symbol),
+            "requested_amount": float(order.amount),
+        }
+
+    def _record_dry_run_order(self, order: Order, sdk_order: LimeOrder) -> Order:
+        """Write the order the broker would have received, and track it locally."""
+        dry_run_id = f"{self.DRY_RUN_ID_PREFIX}{sdk_order.client_order_id}"
+        self._write_dry_run_record(
+            {
+                "event": "place",
+                "dry_run_id": dry_run_id,
+                **self._dry_run_order_fields(order),
+                "client_order_id": sdk_order.client_order_id,
+                "side": sdk_order.side.value,
+                "quantity": str(sdk_order.quantity),
+                "order_type": sdk_order.order_type.value,
+                "limit_price": None if sdk_order.price is None else str(sdk_order.price),
+                "time_in_force": sdk_order.time_in_force.value,
+                "route": sdk_order.exchange,
+                "broker_validated": self._validate_orders,
+            }
+        )
+        order.exchange_order_id = dry_run_id
+        order.trading_account_id = self.account_id
+        self._orders_by_external_id[dry_run_id] = order
+        self._submitted_order_ids.add(dry_run_id)
+        self._logger.info(
+            "Dry run: Lime order recorded, not placed",
+            dry_run_id=dry_run_id,
+            symbol=sdk_order.symbol,
+            quantity=str(sdk_order.quantity),
+            side=sdk_order.side.value,
+            order_type=sdk_order.order_type.value,
+            file=str(self._dry_run_file),
+        )
+        return order
+
     async def get_orders(self) -> dict[str, Order]:
         await self._get_account_balance()
         active = await self._client.trading.get_active_orders(
@@ -804,6 +918,9 @@ class LimeTraderSdkExchange(Exchange):
         for details in active:
             order = await self._order_from_sdk(details)
             result[order.id] = order
+        for external_id, order in self._orders_by_external_id.items():
+            if self._is_dry_run_id(external_id) and order.open:
+                result[order.id] = order
         return result
 
     async def get_orders_by_ids(self, order_ids: list[str]) -> list[Order]:
@@ -823,15 +940,22 @@ class LimeTraderSdkExchange(Exchange):
                 order_id,
             )
             ids.append(external_id)
+        # A ziplime id and its dry-run id resolve to the same order.
+        local = [
+            self._orders_by_external_id[order_id]
+            for order_id in dict.fromkeys(ids)
+            if self._is_dry_run_id(order_id) and order_id in self._orders_by_external_id
+        ]
+        ids = [order_id for order_id in ids if not self._is_dry_run_id(order_id)]
         if not ids:
-            return []
+            return local
         details = await asyncio.gather(
             *(
                 self._client.trading.get_order_details(order_id=order_id)
                 for order_id in ids
             )
         )
-        return [await self._order_from_sdk(item) for item in details]
+        return local + [await self._order_from_sdk(item) for item in details]
 
     @staticmethod
     def _as_datetime(value: datetime.datetime | int | float) -> datetime.datetime:
@@ -874,6 +998,7 @@ class LimeTraderSdkExchange(Exchange):
             for asset_orders in orders.values()
             for order in asset_orders.values()
             if order.exchange_order_id
+            and not self._is_dry_run_id(order.exchange_order_id)
         ]
         if not open_orders:
             return [], [], []
@@ -1034,6 +1159,19 @@ class LimeTraderSdkExchange(Exchange):
                 )
 
         self._assert_order_deadline()
+        if self.dry_run:
+            tracked = self._orders_by_external_id.get(external_id)
+            self._write_dry_run_record(
+                {
+                    "event": "cancel",
+                    "dry_run_id": external_id,
+                    "known_order": tracked is not None,
+                    "symbol": None if tracked is None else str(tracked.asset.symbol),
+                }
+            )
+            if tracked is not None:
+                tracked.cancel()
+            return
         response = await self._client.trading.cancel_order(
             order_id=external_id,
             message="Cancelled by ziplime",

@@ -29,7 +29,7 @@ async def _run_live_trading(
         algorithm_file: str,
         exchange: Exchange = None,
         config_file: str | None = None,
-
+        dry_run_file: str | None = None,
 ):
     calendar = get_calendar(trading_calendar)
 
@@ -68,6 +68,12 @@ async def _run_live_trading(
             asset_service=asset_service,
             is_default=True,
             data_source=data_bundle,
+            dry_run_file=dry_run_file,
+        )
+    elif dry_run_file is not None:
+        raise ValueError(
+            "dry_run_file applies to the default Lime exchange; pass dry_run_file "
+            "to your own exchange instead of to run_live_trading."
         )
 
     return await run_algorithm(
@@ -91,10 +97,17 @@ def run_live_trading(
         end_date: datetime.datetime | None = None,
         bundle_name: str | None = None,
         config_file: str | None = None,
-        exchange: Exchange | None = None
+        exchange: Exchange | None = None,
+        dry_run_file: str | None = None,
 ):
+    """Run a strategy against the live Lime account.
+
+    With ``dry_run_file`` set, orders are checked by the same risk limits and by
+    Lime's order validation, then written to that JSON Lines file instead of
+    being placed. Nothing is sent to ``place_order`` or ``cancel_order``.
+    """
     return asyncio.run(_run_live_trading(start_date=start_date, end_date=end_date, trading_calendar=trading_calendar,
                                          cash_balance=total_cash,
                                          algorithm_file=algorithm_file,
                                          config_file=config_file, bundle_name=bundle_name, exchange=exchange,
-                                         emission_rate=emission_rate))
+                                         emission_rate=emission_rate, dry_run_file=dry_run_file))
