@@ -8,6 +8,7 @@ from ziplime.trading.trading_algorithm import TradingAlgorithm
 from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 from ziplime.trading.trading_algorithm_execution_status import TradingAlgorithmExecutionStatus
 from ziplime.utils.api_support import ZiplineAPI
+from ziplime.trading.currency_results import currency_performance
 
 
 class TradingAlgorithmExecutor:
@@ -48,6 +49,7 @@ class TradingAlgorithmExecutor:
 
             # convert perf dict to pandas dataframe
             daily_stats, risk_report = self._create_daily_stats(perfs)
+            perf_by_currency = currency_performance(packets=perfs)
 
             self.analyze(trading_algorithm=trading_algorithm, perf=daily_stats)
         finally:
@@ -58,7 +60,9 @@ class TradingAlgorithmExecutor:
             trading_algorithm=trading_algorithm,
             perf=daily_stats,
             risk_report=risk_report,
-            errors=errors
+            errors=errors,
+            perf_by_currency=perf_by_currency,
+            risk_report_by_currency=risk_report.get("risk_report_by_currency", {}),
         )
 
     async def run_algorithm_iter(self, trading_algorithm: TradingAlgorithm) -> AsyncIterator[
@@ -92,6 +96,7 @@ class TradingAlgorithmExecutor:
 
             # convert perf dict to pandas dataframe
             daily_stats, risk_report = self._create_daily_stats(perfs)
+            perf_by_currency = currency_performance(packets=perfs)
 
             self.analyze(trading_algorithm=trading_algorithm, perf=daily_stats)
         finally:
@@ -101,7 +106,9 @@ class TradingAlgorithmExecutor:
             trading_algorithm=trading_algorithm,
             perf=daily_stats,
             risk_report=risk_report,
-            errors=errors
+            errors=errors,
+            perf_by_currency=perf_by_currency,
+            risk_report_by_currency=risk_report.get("risk_report_by_currency", {}),
         )
         yield status
 

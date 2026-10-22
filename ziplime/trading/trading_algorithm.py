@@ -13,6 +13,7 @@ from pygments.styles import default
 
 import ziplime
 from itertools import chain, repeat
+from dataclasses import replace
 
 from exchange_calendars import ExchangeCalendar
 
@@ -110,6 +111,15 @@ from ziplime.utils.math_utils import (
     round_if_near_integer,
 )
 from ziplime.sources.benchmark_source import BenchmarkSource
+from ziplime.finance.domain.currency_reporting import CurrencyReporting
+from ziplime.data.services.currency_conversion_service import CurrencyConversionService
+from ziplime.finance.domain.investment_snapshot import InvestmentSnapshot
+from ziplime.finance.domain.investment_history import InvestmentHistory
+from ziplime.finance.domain.order_valuation import OrderValuation
+from ziplime.finance.domain.order_valuations import OrderValuations
+from ziplime.finance.domain.order_price_basis import OrderPriceBasis
+from ziplime.finance.domain.order_quantity_basis import OrderQuantityBasis
+from ziplime.finance.monetary_valuation_service import MonetaryValuationService
 from ziplime.vectorized.signals import (
     PricePanel, SignalPanel, as_of_panel, normalise_signals, verify_causality,
 )
@@ -228,6 +238,24 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         The type of history container to use. default: HistoryContainer
     adjustment_reader : AdjustmentReader
         The interface to the adjustments.
+    currency_reporting : CurrencyReporting or None, optional
+        Independent reporting currencies and optional native-cash/historical
+        investment accounting. ``None`` leaves legacy execution/reporting unchanged.
+    currency_conversion : CurrencyConversionService or None, optional
+        As-of FX service for monetary/order estimates without enabling currency
+        metrics. Defaults to ``currency_reporting.conversion`` when configured;
+        explicitly supplying a different service instance raises ``ValueError``.
+
+    Attributes
+    ----------
+    currency_reporting : CurrencyReporting or None
+        Reporting configuration used by the execution ledger and metric trackers.
+    currency_conversion : CurrencyConversionService or None
+        Shared converter used by order/position valuation and converted value sizing.
+    _monetary_valuation_service : MonetaryValuationService or None
+        Initialized once with the configured converter and the execution ledger's
+        live bond book. Reused for order estimates and converted value sizing;
+        absent when currency conversion is not configured.
     """
 
     def __init__(
@@ -248,6 +276,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             same_bar_execution: bool = True,
             futures_margin_model: FuturesMarginModel | None = None,
             intraday_metrics: bool = False,
+            currency_reporting: CurrencyReporting | None = None,
+            currency_conversion: CurrencyConversionService | None = None,
 
     ):
         self.algorithm = algorithm
@@ -364,6 +394,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.same_bar_execution = same_bar_execution
         #: See MetricsTracker: the whole metric set on every intraday bar, or only at the close.
         self.intraday_metrics = intraday_metrics
+        self.currency_reporting = currency_reporting
+        self.currency_conversion = (currency_conversion if currency_conversion is not None
+                                    else currency_reporting.conversion if currency_reporting is not None else None)
+        if (currency_conversion is not None and currency_reporting is not None
+                and currency_conversion is not currency_reporting.conversion):
+            raise ValueError("Trading and reporting must share the same currency conversion service.")
+        self._monetary_valuation_service = (
+            MonetaryValuationService(conversion=self.currency_conversion, bond_book=self._ledger.bond_book)
+            if self.currency_conversion is not None else None)
         self._logger = structlog.get_logger(__name__)
         self._session_count = 0
         #: Listings whose bars ran out mid-run, see `data_delistings`.
@@ -463,6 +502,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             metrics=self._metrics_set,
             benchmark_source=self.benchmark_source,
             intraday_metrics=self.intraday_metrics,
+            currency_reporting=self.currency_reporting,
         )
 
         # Set the dt initially to the period start by forcing it to change.
@@ -697,6 +737,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             return
 
         self.capital_change_deltas.update({dt: capital_change_amount})
+        self._ledger.set_reporting_datetime(
+            dt=_as_datetime(value=dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session),
+        )
         await self._ledger.capital_change(change_amount=capital_change_amount)
 
         yield {
@@ -825,6 +868,303 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         positionals = zip(*args)
         for name, value in chain(positionals, kwargs.items()):
             self._recorded_vars[name] = value
+
+    def _get_monetary_valuation_service(self) -> MonetaryValuationService:
+        """Return the initialized service sharing the algorithm's FX and live bond book.
+
+        Raises
+        ------
+        ValueError
+            If neither independent conversion nor currency reporting is configured.
+        """
+        if self._monetary_valuation_service is None:
+            raise ValueError("Configure currency_conversion or CurrencyReporting before requesting valuations.")
+        return self._monetary_valuation_service
+
+    @api_method
+    async def value_orders(
+            self, orders: list[Order], currency: str,
+            price_basis: OrderPriceBasis = OrderPriceBasis.MARKET,
+            quantity_basis: OrderQuantityBasis = OrderQuantityBasis.SUBMITTED,
+    ) -> OrderValuations:
+        """Compare order amounts in one currency using this bar's prices and FX.
+
+        Parameters
+        ----------
+        orders : list[Order]
+            Orders to estimate in the supplied order, across exchanges/accounts.
+            Order amounts remain signed quantities, not native money values.
+        currency : str
+            Destination ISO currency code.
+        price_basis : OrderPriceBasis, optional
+            ``MARKET`` uses an available current close quote with its timestamp;
+            ``LIMIT`` uses each order's limit price and requires one to exist.
+        quantity_basis : OrderQuantityBasis, optional
+            ``SUBMITTED`` values the entire original ``order.amount``;
+            ``REMAINING`` values ``order.amount - order.filled``. Filled
+            quantities retain their buy/sell sign. Statuses are not filtered.
+
+        Returns
+        -------
+        OrderValuations
+            Immutable estimates in input order, with native/current converted
+            values, price/FX provenance, and gross/net totals. Instrument monetary
+            rules include option multipliers and bond dirty values.
+
+        Raises
+        ------
+        ValueError
+            If conversion is not configured, a required
+            price/limit or fresh FX is unavailable, or an instrument is unsupported.
+
+        Notes
+        -----
+        Both quantity bases are revalued now, not at submission/fill time. For
+        the frozen submission estimate use ``order.submitted_valuations[currency]``.
+        No fees, slippage, cash reservations, or FX executions are implied. This
+        API also works with ``currency_conversion`` and no currency metric reporting.
+        """
+        service = self._get_monetary_valuation_service()
+        dt = _as_datetime(value=self.simulation_dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session)
+        by_exchange: dict[str, set[ExchangeAsset]] = {}
+        for order in orders:
+            if isinstance(order.asset.asset, Bond):
+                await self._ledger.bond_book.load(asset_service=self.asset_service, bonds=[order.asset.asset])
+            by_exchange.setdefault(order.exchange_name, set()).add(order.asset)
+        marks = {}
+        if price_basis is OrderPriceBasis.MARKET:
+            for name, assets in by_exchange.items():
+                exchange = await self.exchange_repository.get_exchange_by_mic(mic=name)
+                data = await exchange.get_spot_value(
+                    assets=frozenset(assets), fields=frozenset({"close"}), dt=dt)
+                for row in data.sort("date").iter_rows(named=True):
+                    marks[(name, row["sid"])] = (row["close"], row["date"])
+        results = []
+        for order in orders:
+            quantity = order.amount if quantity_basis is OrderQuantityBasis.SUBMITTED else order.amount - order.filled
+            if price_basis is OrderPriceBasis.LIMIT:
+                if order.limit is None:
+                    raise ValueError(f"Order {order.id} has no limit price.")
+                price, price_at = order.limit, dt
+            else:
+                mark = marks.get((order.exchange_name, order.asset.sid))
+                if mark is None or mark[0] is None:
+                    raise ValueError(f"No timestamped market price for order {order.id}.")
+                price, price_at = mark
+            monetary = service.value(
+                asset=order.asset,
+                quantity=quantity,
+                price=price,
+                price_at=price_at,
+                dt=dt,
+                currency=currency,
+            )
+            results.append(OrderValuation(
+                order_id=order.id, exchange_name=order.exchange_name, trading_account_id=order.trading_account_id,
+                quantity_basis=quantity_basis, price_basis=price_basis, monetary=monetary))
+        return OrderValuations(currency=currency, valuation_at=dt, orders=tuple(results))
+
+    @api_method
+    async def investment_pnl(
+            self, currency: str, exchange_name: str | None = None,
+            trading_account_id: str | None = None,
+    ) -> InvestmentSnapshot:
+        """Read current security values against historical FIFO costs before metrics run.
+
+        Parameters
+        ----------
+        currency : str
+            Reporting ISO currency code.
+        exchange_name : str or None, optional
+            Restrict returned positions to this execution exchange; ``None`` includes all.
+        trading_account_id : str or None, optional
+            Restrict returned positions to this account; ``None`` includes all.
+            Exchange and account filters are applied independently after valuation.
+
+        Returns
+        -------
+        InvestmentSnapshot
+            Immutable open/closed position records and lifetime realized/unrealized
+            PNL, paid income, and fees. Current marks/FX value open holdings;
+            historical event-time FX determines costs and realized amounts.
+
+        Raises
+        ------
+        ValueError
+            If investment accounting is disabled or required marks, instrument
+            support, or historical/current FX are missing or invalid.
+
+        Notes
+        -----
+        Includes only booked fills, not submitted unfilled orders. Security PNL
+        excludes uninvested cash FX and external funding. Fees are already included
+        in basis/realized PNL and must not be subtracted from ``total_pnl`` again.
+        """
+        if self._ledger.investments is None:
+            raise ValueError("Enable investment_pnl in CurrencyReporting to request investment PNL.")
+        dt = _as_datetime(value=self.simulation_dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session)
+        marks = {}
+        by_exchange: dict[str, set[ExchangeAsset]] = {}
+        for key, quantity in self._ledger.investments.quantities.items():
+            if quantity:
+                by_exchange.setdefault(key[0], set()).add(key[2])
+        for name, assets in by_exchange.items():
+            exchange = await self.exchange_repository.get_exchange_by_mic(mic=name)
+            data = await exchange.get_spot_value(
+                assets=frozenset(assets), fields=frozenset({"close"}), dt=dt)
+            by_sid = {row["sid"]: (row["close"], row["date"])
+                      for row in data.sort("date").iter_rows(named=True) if row["close"] is not None}
+            for key in self._ledger.investments.quantities:
+                if key[0] == name and key[2].sid in by_sid:
+                    marks[key] = by_sid[key[2].sid]
+        snapshot = self._ledger.investments.snapshot(currency=currency, dt=dt, marks=marks)
+        return InvestmentSnapshot(currency=currency, valuation_at=dt, positions=tuple(
+            position for position in snapshot.positions
+            if (exchange_name is None or position.key[0] == exchange_name)
+            and (trading_account_id is None or position.key[1] == trading_account_id)))
+
+    @api_method
+    async def value_positions(self, currency: str) -> InvestmentSnapshot:
+        """Return this bar's position values and historical investment costs.
+
+        Parameters
+        ----------
+        currency : str
+            Destination ISO currency code.
+
+        Returns
+        -------
+        InvestmentSnapshot
+            The same unfiltered security-accounting snapshot as
+            ``await investment_pnl(currency)``.
+
+        Raises
+        ------
+        ValueError
+            Under the same conditions as ``investment_pnl``, including when
+            investment accounting is disabled.
+        """
+        return await self.investment_pnl(currency=currency)
+
+    @api_method
+    def investment_history(self) -> InvestmentHistory:
+        """Export native postings and unpaid income for caller-managed storage.
+
+        Returns
+        -------
+        InvestmentHistory
+            Immutable investment events, opening/external/FX cash events, and
+            unpaid account-scoped income entitlements. Execution positions,
+            market marks, and serialization are not included.
+
+        Raises
+        ------
+        ValueError
+            If investment accounting is disabled.
+
+        Notes
+        -----
+        Restore through ``CurrencyReporting.investment_history`` with matching
+        execution positions and timestamped marks; native average cost alone
+        cannot reconstruct historical reporting-currency acquisition costs.
+        """
+        return self._ledger.investment_history()
+
+    @api_method
+    async def exchange_currency(
+            self, source_currency: str, currency: str, sold: float, received: float,
+            exchange_name: str | None = None, trading_account_id: str | None = None,
+            execution_id: str | None = None,
+    ) -> None:
+        """Book actual FX execution amounts as two cash legs, not a broker order.
+
+        Parameters
+        ----------
+        source_currency, currency : str
+            Distinct ISO currency codes for the amount sold and amount received.
+        sold, received : float
+            Positive finite actual native executed amounts, not a rate or estimate.
+        exchange_name : str or None, optional
+            Execution exchange; ``None`` selects the default exchange.
+        trading_account_id : str or None, optional
+            Account for both cash legs; ``None`` selects the exchange's account.
+        execution_id : str or None, optional
+            Stable ID for idempotent replay. Identical postings do nothing;
+            conflicting or incomplete existing executions raise. Defaults to a UUID.
+
+        Raises
+        ------
+        ValueError
+            If investment mode is disabled, execution inputs conflict/are invalid,
+            or the portfolio cannot be valued with available prices/FX.
+
+        Notes
+        -----
+        Revalues the execution portfolio/account around the posting. Does not
+        change security acquisition cost or enforce available native funding.
+        Actual execution differences from valuation FX affect portfolio PNL.
+        """
+        book = self._ledger.investments
+        if book is None:
+            raise ValueError("Enable investment_pnl before posting multi-currency cash executions.")
+        exchange = (await self.exchange_repository.get_default_exchange() if exchange_name is None
+                    else await self.exchange_repository.get_exchange_by_mic(mic=exchange_name))
+        dt = _as_datetime(value=self.simulation_dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session)
+        self._ledger.set_reporting_datetime(dt=dt)
+        await self._ledger.update_portfolio()
+        book.exchange_cash(
+            identity=execution_id if execution_id is not None else uuid.uuid4().hex,
+            dt=dt,
+            exchange=exchange.name,
+            account=trading_account_id if trading_account_id is not None else exchange.account_id,
+            source_currency=source_currency,
+            currency=currency,
+            sold=sold,
+            received=received,
+        )
+        await self._ledger.update_portfolio()
+        self._ledger.update_account()
+
+    @api_method
+    async def fund_account(
+            self, amount: float, currency: str, exchange_name: str, trading_account_id: str,
+            event_id: str | None = None,
+    ) -> None:
+        """Post account-scoped external funding without treating the flow as PNL.
+
+        Parameters
+        ----------
+        amount : float
+            Finite native contribution (positive) or withdrawal (negative).
+        currency : str
+            ISO code of the actual cash transferred.
+        exchange_name : str
+            Execution exchange owning the cash balance.
+        trading_account_id : str
+            Account receiving or paying the transfer.
+        event_id : str or None, optional
+            Stable posting ID for idempotent replay; generated when omitted.
+            A conflicting posting with the same scoped ID raises.
+
+        Raises
+        ------
+        ValueError
+            If investment mode is disabled, the posting is invalid/conflicting,
+            or required price/FX observations are unavailable.
+
+        Notes
+        -----
+        Uses the current simulation time. Contributions are excluded from PNL at
+        posting-time FX; holding the resulting native cash still creates FX exposure.
+        """
+        if self._ledger.investments is None:
+            raise ValueError("Enable investment_pnl before posting scoped funding.")
+        dt = _as_datetime(value=self.simulation_dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session)
+        self._ledger.set_reporting_datetime(dt=dt)
+        await self._ledger.capital_change(
+            change_amount=amount, currency=currency, exchange_name=exchange_name,
+            trading_account_id=trading_account_id, event_id=event_id)
+        self._ledger.update_account()
 
     @api_method
     def futures_margin_requirement(self, maintenance: bool = False,
@@ -1592,6 +1932,14 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             self._logger.debug(f"Price of 0 for {asset}; can't infer value")
             # Don't place any order
             return 0
+        if self._ledger.investments is not None:
+            service = self._get_monetary_valuation_service()
+            if isinstance(asset.asset, Bond):
+                await self._ledger.bond_book.load(asset_service=self.asset_service, bonds=[asset.asset])
+            unit = service.unit_value(asset=asset, price=last_price, dt=self.simulation_dt)
+            unit *= service.conversion.rate(
+                base=asset.quote.asset_name, quote=self.currency_reporting.base_currency, dt=self.simulation_dt)
+            return value / unit if unit else 0
         if type(asset.asset) is FuturesContract:
             return value / (last_price * asset.asset.multiplier)
         elif type(asset.asset) is Bond:
@@ -1766,6 +2114,12 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             self._logger.warning("Not executing order for zero shares.")
             return None
 
+        if self._ledger.investments is not None:
+            self._ledger.validate_reporting_asset(asset=asset)
+            for currency in self.currency_reporting.currencies:
+                valued = await self.value_orders(orders=[order], currency=currency)
+                order.submitted_valuations[currency] = valued.orders[0]
+
         # quote_asset = await self.asset_service.get_currency_by_symbol(symbol="USD",
         #                                                               exchange_name=exchange_name)
 
@@ -1774,6 +2128,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                           simulation_dt=self.simulation_dt)
 
         submitted_order = await exchange.submit_order(order=order)
+        if submitted_order.id != order_id:
+            submitted_order.submitted_valuations = {
+                currency: replace(valuation, order_id=submitted_order.id)
+                for currency, valuation in order.submitted_valuations.items()
+            }
         # quote_asset = await self.asset_service.get_currency_by_symbol(symbol="USD",
         #                                                               exchange_name=exchange_name)
 
@@ -2206,6 +2565,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         slippage = exchange.get_slippage_model(asset=asset)
         projected_commission = commission.calculate_for_asset(asset=asset, quantity=requested_quantity,
                                                               transaction_amount=value)
+        if self._ledger.investments is not None and asset.quote.asset_name != self.currency_reporting.base_currency:
+            raise ValueError(
+                "Percentage sizing with foreign-currency commission/slippage requires explicit quantity orders. "
+                "Use value_orders to compare their reporting-currency values.")
         new_quantity = await self._calculate_order_value_amount(asset=asset, value=value - projected_commission,
                                                                 exchange=exchange)
         self._logger.info(
@@ -3097,6 +3460,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             errors = []
             for dt, action in self.clock:
                 try:
+                    self._ledger.set_reporting_datetime(
+                        dt=_as_datetime(value=dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session))
                     if action == SimulationEvent.BAR:
                         await self._sync_last_sale_prices(dt=dt)
                         await self._ledger.update_portfolio()
@@ -3362,6 +3727,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             dt=dt,
         )
         perf_message["daily_perf"]["recorded_vars"] = self.recorded_vars
+        for packet in perf_message.get("metrics_by_currency", {}).values():
+            packet["daily_perf"]["recorded_vars"] = self.recorded_vars
         return perf_message
 
     def _get_minute_message(self, dt: datetime.datetime):
@@ -3375,4 +3742,6 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         )
 
         minute_message["minute_perf"]["recorded_vars"] = rvars
+        for packet in minute_message.get("metrics_by_currency", {}).values():
+            packet["minute_perf"]["recorded_vars"] = rvars
         return minute_message

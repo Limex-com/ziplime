@@ -18,6 +18,8 @@ from ziplime.finance.constants import DEFAULT_BOND_COMMISSION_RATE
 from ziplime.finance.constants import FUTURE_EXCHANGE_FEES_BY_SYMBOL
 from ziplime.finance.margin import FuturesMarginModel
 from ziplime.finance.metrics import default_metrics
+from ziplime.finance.domain.currency_reporting import CurrencyReporting
+from ziplime.data.services.currency_conversion_service import CurrencyConversionService
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
 from ziplime.finance.slippage.slippage_model import (
     DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT, SlippageModel,
@@ -66,6 +68,8 @@ async def run_simulation(
         print_algo: bool = True,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
         intraday_metrics: bool = False,
+        currency_reporting: CurrencyReporting | None = None,
+        currency_conversion: CurrencyConversionService | None = None,
 ) -> TradingAlgorithmExecutionResult:
     """
     Run a trading algorithm simulation within a defined time period and trading environment.
@@ -80,7 +84,8 @@ async def run_simulation(
         end_date (datetime.datetime): The datetime marking the end of the simulation.
         trading_calendar (str): The identifier for the trading calendar to use.
         emission_rate (datetime.timedelta): The frequency of emission for simulation data.
-        total_cash (float): The starting cash balance for the simulation account.
+        total_cash (float): Starting scalar cash in the execution base currency.
+            Explicit investment-mode opening balances/history take precedence for accounting.
         market_data_source (DataSource): The primary market data source to use in the simulation.
         custom_data_sources (list[DataSource]): List of custom data sources for additional data.
         algorithm_file (str): Path to the Python file containing the trading algorithm.
@@ -106,9 +111,18 @@ async def run_simulation(
                           beta recomputed every minute and then thrown away, measured at 86% of a
                           run over minute bars. Turn it on only for something that consumes the
                           intraday packets themselves.
+        currency_reporting (CurrencyReporting | None): Independent reporting currencies and
+            optional historical investment PNL. Plain reporting requires a single-base execution
+            book; investment mode supports native mixed-currency cash and supported holdings.
+            Metric names are unchanged in ``result.perf_by_currency`` and execution records stay
+            native. Opening balances are scoped by execution exchange/account/currency.
+        currency_conversion (CurrencyConversionService | None): Independent FX service for
+            order valuations without currency metrics. Defaults to the reporting converter
+            when configured. Passing a different service alongside reporting raises ValueError.
 
     Returns:
-        Coroutine: The coroutine to execute the simulation and produce output results.
+        TradingAlgorithmExecutionResult: Native/default performance plus configured
+            ``perf_by_currency`` and ``risk_report_by_currency`` mappings.
     """
     calendar = get_calendar(trading_calendar)
 
@@ -185,6 +199,8 @@ async def run_simulation(
         price_used_in_order_execution=price_used_in_order_execution,
         exchange_repository=exchange_repository,
         intraday_metrics=intraday_metrics,
+        currency_reporting=currency_reporting,
+        currency_conversion=currency_conversion,
     )
 
 
@@ -217,7 +233,10 @@ async def run_simulation_iter(
         same_bar_execution: bool = True,
         futures_margin_model: FuturesMarginModel | None = None,
         print_algo: bool = True,
-        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
+        price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
+        intraday_metrics: bool = False,
+        currency_reporting: CurrencyReporting | None = None,
+        currency_conversion: CurrencyConversionService | None = None,
 ) -> AsyncIterator[TradingAlgorithmExecutionStatus]:
     """
     Run a trading algorithm simulation within a defined time period and trading environment.
@@ -232,7 +251,8 @@ async def run_simulation_iter(
         end_date (datetime.datetime): The datetime marking the end of the simulation.
         trading_calendar (str): The identifier for the trading calendar to use.
         emission_rate (datetime.timedelta): The frequency of emission for simulation data.
-        total_cash (float): The starting cash balance for the simulation account.
+        total_cash (float): Starting scalar cash in the execution base currency.
+            Explicit investment-mode opening balances/history take precedence for accounting.
         market_data_source (DataSource): The primary market data source to use in the simulation.
         custom_data_sources (list[DataSource]): List of custom data sources for additional data.
         algorithm_file (str): Path to the Python file containing the trading algorithm.
@@ -249,9 +269,21 @@ async def run_simulation_iter(
                           If not specified, ziplime.finance.commission.PerContract model is used with a default
                           cost per contract of 0.85 and minimum cost of trade 0.00
 
+        price_used_in_order_execution: Native quote field used for fills. With same-bar
+            execution, only ``"close"`` avoids using an earlier price from the decision bar.
+        intraday_metrics (bool): Compute full minute metric packets rather than only the
+            bar hooks that maintain state. Defaults to False.
+        currency_reporting (CurrencyReporting | None): Independent currency metric histories
+            and optional native-cash/historical investment accounting. Streaming performance
+            packets expose ``metrics_by_currency`` in configured currency order.
+        currency_conversion (CurrencyConversionService | None): Independent FX service for
+            monetary/order estimates. Defaults to the reporting service if configured;
+            explicitly supplying a different instance raises ValueError.
 
-    Returns:
-        Coroutine: The coroutine to execute the simulation and produce output results.
+    Yields:
+        TradingAlgorithmExecutionStatus: Progress and native performance packets, with optional
+            ``metrics_by_currency``. The final status also contains the execution result and its
+            ``perf_by_currency`` / ``risk_report_by_currency`` mappings.
     """
     calendar = get_calendar(trading_calendar)
 
@@ -332,6 +364,9 @@ async def run_simulation_iter(
             same_bar_execution=same_bar_execution,
             futures_margin_model=futures_margin_model,
             price_used_in_order_execution=price_used_in_order_execution,
-            exchange_repository=exchange_repository
+            exchange_repository=exchange_repository,
+            intraday_metrics=intraday_metrics,
+            currency_reporting=currency_reporting,
+            currency_conversion=currency_conversion,
     ):
         yield status

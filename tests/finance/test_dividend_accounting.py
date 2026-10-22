@@ -195,7 +195,6 @@ class PositionTrackerDividendTests(unittest.IsolatedAsyncioTestCase):
 
 
 class LedgerDividendTests(unittest.IsolatedAsyncioTestCase):
-    @unittest.expectedFailure
     async def test_short_dividend_is_applied_as_negative_cash_flow(self):
         ex_date = dt.date(2025, 1, 6)
         pay_date = dt.date(2025, 1, 10)

@@ -47,12 +47,14 @@ from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.finance.commission.no_commission import NoCommission
 from ziplime.finance.domain.commission import Commission
 from ziplime.finance.domain.ledger import Ledger
+from ziplime.finance.domain.currency_reporting import CurrencyReporting
 from ziplime.finance.domain.transaction import Transaction
 from ziplime.finance.metrics import default_metrics
 from ziplime.finance.metrics_tracker import MetricsTracker
 from ziplime.finance.slippage.no_slippage import NoSlippage
 from ziplime.sources.benchmark_source import BenchmarkSource
 from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
+from ziplime.trading.currency_results import currency_performance
 
 _logger = structlog.get_logger(__name__)
 
@@ -307,6 +309,7 @@ async def to_execution_result(
         tolerance: float = DEFAULT_TOLERANCE,
         reconcile: bool = True,
         ignore_exchange_costs: bool = False,
+        currency_reporting: CurrencyReporting | None = None,
 ) -> TradingAlgorithmExecutionResult:
     """Replay a vectorbt portfolio through ziplime's ledger and return its execution result.
 
@@ -332,10 +335,18 @@ async def to_execution_result(
             divergence, not for living with one.
         ignore_exchange_costs: Proceed even though the exchange carries commission or slippage
             models that this path cannot run. See :func:`_reject_ignored_cost_models`.
+        currency_reporting: Optional independent reporting currencies. Replay and reconciliation
+            remain in the declared base currency; raw execution records retain their native units.
+            With ``investment_pnl=True``, fills and linked fees also reconstruct historical FIFO
+            costs and native cash. Explicit opening balances must use this execution exchange and
+            ``trading_account_id``. The source portfolio must still model values compatible with
+            base-currency reconciliation; reporting does not make a single-currency kernel model
+            mixed-currency buying power.
 
     Returns:
         The same result type an event-driven run produces, with ``trading_algorithm`` set to a
-        :class:`VectorizedRun`.
+        :class:`VectorizedRun`. Currency tables and independent risk packets are exposed through
+        ``perf_by_currency`` and ``risk_report_by_currency`` in configured currency order.
 
     Raises:
         ReconciliationError: if the replayed book and vectorbt disagree by more than ``tolerance``.
@@ -400,6 +411,7 @@ async def to_execution_result(
         ledger=ledger,
         metrics=metrics if metrics is not None else default_metrics(),
         benchmark_source=benchmark_source,
+        currency_reporting=currency_reporting,
     )
     await tracker.handle_start_of_simulation()
 
@@ -410,8 +422,10 @@ async def to_execution_result(
     material.update(position for position, stamp in enumerate(index) if stamp in by_stamp)
 
     packets = []
+    reporting_packets = []
     session_ix = 0
     for bar_ix, stamp in enumerate(index):
+        ledger.set_reporting_datetime(dt=stamp.to_pydatetime())
         # The event-driven path opens each session with this and so must the replay. It clears the
         # session's transaction list and, more consequentially, snapshots the running return so
         # that `todays_returns` is the day's rather than the whole run's. Skipping it leaves the
@@ -419,7 +433,7 @@ async def to_execution_result(
         # from daily returns is silently wrong: Sharpe, volatility, sortino, drawdown.
         if bar_ix in opens_at:
             ledger.start_of_session(session_label=stamp.to_pydatetime())
-            if intraday:
+            if intraday or currency_reporting is not None:
                 # Sets the session the minute packets belong to and runs the start-of-session
                 # metrics. At a daily rate the existing path reaches the same state without it,
                 # and is left alone rather than changed to match a rate it never runs at.
@@ -434,7 +448,8 @@ async def to_execution_result(
             if transaction.commission:
                 ledger.process_commission(
                     commission=Commission(asset=transaction.asset, order=None,
-                                          amount=transaction.commission),
+                                          amount=transaction.commission, transaction_id=transaction.id,
+                                          dt=transaction.dt),
                     tr=None)
 
         # Revaluing the book is the expensive part -- it re-derives every position's statistics --
@@ -488,6 +503,7 @@ async def to_execution_result(
             packet = tracker.handle_market_close(dt=stamp.to_pydatetime())
             packet["daily_perf"]["recorded_vars"] = {}
             packet["daily_perf"].update(packet["cumulative_risk_metrics"])
+            reporting_packets.append(packet)
             packets.append(packet["daily_perf"])
 
     risk_report = tracker.handle_simulation_end()
@@ -499,6 +515,8 @@ async def to_execution_result(
         perf=perf,
         risk_report=risk_report,
         errors=[],
+        perf_by_currency=currency_performance(packets=reporting_packets),
+        risk_report_by_currency=risk_report.get("risk_report_by_currency", {}),
     )
 
 

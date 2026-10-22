@@ -1,5 +1,6 @@
 import datetime
 import math
+import uuid
 from collections import OrderedDict, deque
 from dataclasses import replace
 
@@ -20,12 +21,21 @@ from ziplime.domain.account import Account
 from ziplime.domain.position import Position
 from ziplime.domain.portfolio import Portfolio
 from ziplime.exchanges.exchange import Exchange
-from ziplime.finance.commission import CommissionModel
+from ziplime.finance.domain.commission import Commission
 
 from ziplime.finance.domain.order import Order
 from ziplime.finance.domain.position_tracker import PositionTracker
 from ziplime.finance.domain.transaction import Transaction
 from ziplime.trading.domain.lot import Lot
+from ziplime.finance.domain.cash_event import CashEvent
+from ziplime.finance.domain.cash_event_kind import CashEventKind
+from ziplime.finance.domain.currency_reporting import CurrencyReporting
+from ziplime.finance.domain.investment_event import InvestmentEvent
+from ziplime.finance.domain.investment_history import InvestmentHistory
+from ziplime.finance.domain.investment_snapshot import InvestmentSnapshot
+from ziplime.finance.investment_book import InvestmentBook
+from ziplime.finance.monetary_valuation_service import MonetaryValuationService
+from ziplime.assets.domain.bond_event_type import BondEventType
 
 
 def _is_margined_option(instrument) -> bool:
@@ -60,6 +70,20 @@ class Ledger:
     daily_returns_array : np.ndarray
         The daily returns as an ndarray. Days that have not yet finished will
         hold a value of ``np.nan``.
+    reporting_base_currency : str or None
+        ISO code for execution-book money when currency reporting is enabled.
+    reporting_events : list[tuple[datetime.datetime, float, bool]]
+        Aware posting time, base-currency cash-flow amount, and external-capital
+        flag. Reporting ledgers translate flows at event-time FX, not today's rate.
+    investments : InvestmentBook or None
+        Native-cash and historical security-accounting book, present only in
+        investment mode. Native positions keep their execution average-cost fields.
+    _reporting_dt : datetime.datetime or None
+        Current aware posting/valuation time while reporting is enabled.
+    _investment_base : str or None
+        Accounting currency for aggregating investment-mode portfolio/account totals.
+    _investment_income_due : dict[datetime.date, list[InvestmentEvent]]
+        Account-scoped unpaid entitlements keyed by payment date, retained after sale.
     """
 
     def __init__(self, trading_sessions: pd.DatetimeIndex,
@@ -148,7 +172,7 @@ class Ledger:
         # start, or when the price at execution.
         self._payout_last_sale_prices = {}
 
-        self._buy_lots_by_asset: dict[Asset, deque[Lot]] = {}
+        self._buy_lots_by_asset: dict[tuple[str, str, ExchangeAsset], deque[Lot]] = {}
 
         #: Bonds already redeemed, so a matured position is never repaid twice.
         self._redeemed_bonds: set[int] = set()
@@ -159,6 +183,289 @@ class Ledger:
 
         # Always present, so "margin is not modelled" is a stated choice rather than an omission.
         self.futures_margin_model = futures_margin_model or NoFuturesMarginModel()
+        self.reporting_base_currency: str | None = None
+        self.reporting_events: list[tuple[datetime.datetime, float, bool]] = []
+        self._reporting_dt: datetime.datetime | None = None
+        self.investments: InvestmentBook | None = None
+        self._investment_base: str | None = None
+        self._investment_income_due: dict[datetime.date, list[InvestmentEvent]] = {}
+
+    def enable_investment_accounting(
+            self, reporting: CurrencyReporting, dt: datetime.datetime,
+            opening_cash: dict[tuple[str, str, str], float],
+    ) -> None:
+        """Initialize native cash/FIFO history and reset simulation-period portfolio baselines.
+
+        Parameters
+        ----------
+        reporting : CurrencyReporting
+            Base currency, shared FX service, and optional opening native history.
+        dt : datetime.datetime
+            Aware simulation start time for opening equity and conversion rates.
+        opening_cash : dict[tuple[str, str, str], float]
+            Explicit native balances by ``(exchange, account, currency)``. Used only
+            without ``reporting.investment_history``; supplied history takes precedence.
+
+        Raises
+        ------
+        ValueError
+            If already initialized, opening positions lack history, historical
+            quantities/marks fail reconciliation, events post after ``dt``, or
+            required monetary values/FX are invalid or missing.
+
+        Notes
+        -----
+        Restores unpaid income but not execution positions. Existing execution
+        positions and marks must be populated separately. Portfolio PNL/returns
+        start at zero while investment snapshots retain lifetime security PNL.
+        """
+        if self.investments is not None:
+            raise ValueError("Investment accounting has already been initialized.")
+        if self.position_tracker.get_position_list() and reporting.investment_history is None:
+            raise ValueError("Opening positions require historical investment events; average cost is not enough.")
+        valuation = MonetaryValuationService(conversion=reporting.conversion, bond_book=self.bond_book)
+        income_due: dict[datetime.date, list[InvestmentEvent]] = {}
+        if reporting.investment_history is None:
+            investments = InvestmentBook(valuation=valuation)
+        else:
+            history = reporting.investment_history
+            if any(event.dt > dt for event in (*history.events, *history.cash_events)):
+                raise ValueError("Opening investment history contains events after the simulation start.")
+            identities = set()
+            for date, event in history.income_due:
+                if event.dt > dt or event.kind != "income" or not math.isfinite(event.amount):
+                    raise ValueError("Opening income entitlements must be finite historical income events.")
+                if (event.key, event.id) in identities:
+                    raise ValueError("Opening income entitlements must have unique scoped identities.")
+                identities.add((event.key, event.id))
+                income_due.setdefault(date, []).append(event)
+            investments = InvestmentBook.from_history(valuation=valuation, history=history)
+        if reporting.investment_history is None:
+            for key, amount in opening_cash.items():
+                investments.record_cash(
+                    event=CashEvent(id="opening", dt=dt, key=key, amount=amount, kind=CashEventKind.OPENING),
+                )
+        snapshot = self._investment_snapshot(investments=investments, currency=reporting.base_currency, dt=dt)
+        cash = investments.cash_value(currency=reporting.base_currency, dt=dt)
+        value = cash + snapshot.market_value
+        self.investments = investments
+        self._investment_income_due = income_due
+        self._investment_base = reporting.base_currency
+        self.enable_currency_reporting(base_currency=reporting.base_currency, dt=dt)
+        self._portfolio.positions_value = self._portfolio.positions_exposure = snapshot.market_value
+        self._portfolio.cash = cash
+        self._portfolio.starting_cash = self._portfolio.portfolio_value = value
+        self._portfolio.pnl = self._portfolio.returns = 0.0
+        self._dirty_portfolio = self._dirty_account = True
+        self._update_investment_portfolio()
+        self.update_account()
+
+    def investment_snapshot(self, currency: str, dt: datetime.datetime) -> InvestmentSnapshot:
+        """Value reconciled investment lots using execution positions' existing marks.
+
+        Parameters
+        ----------
+        currency : str
+            Reporting ISO currency code.
+        dt : datetime.datetime
+            Aware as-of time; stored market marks must be valid at this time.
+
+        Returns
+        -------
+        InvestmentSnapshot
+            Lifetime security accounting, excluding cash FX and external capital.
+
+        Raises
+        ------
+        ValueError
+            If investment mode is disabled, lots differ from execution quantities,
+            marks lack timestamps, or price/FX validation fails.
+
+        Notes
+        -----
+        Does not fetch prices. For strategy-side current market lookups, use
+        ``TradingAlgorithm.investment_pnl`` instead.
+        """
+        if self.investments is None:
+            raise ValueError("Enable investment_pnl in CurrencyReporting before requesting investment PNL.")
+        return self._investment_snapshot(investments=self.investments, currency=currency, dt=dt)
+
+    def investment_history(self) -> InvestmentHistory:
+        """Export posted native history together with unpaid income entitlements.
+
+        Returns
+        -------
+        InvestmentHistory
+            Immutable replay inputs; execution positions, marks, and serialization
+            remain the caller's responsibility.
+
+        Raises
+        ------
+        ValueError
+            If investment accounting is disabled.
+        """
+        if self.investments is None:
+            raise ValueError("Enable investment_pnl before exporting investment history.")
+        return replace(self.investments.history(), income_due=tuple(
+            (date, event) for date, events in self._investment_income_due.items() for event in events))
+
+    def _investment_snapshot(
+            self, investments: InvestmentBook, currency: str, dt: datetime.datetime,
+    ) -> InvestmentSnapshot:
+        """Reconcile ``investments`` to execution quantities and value stored marks.
+
+        Parameters
+        ----------
+        investments : InvestmentBook
+            Current or candidate opening native history to validate.
+        currency : str
+            Destination ISO currency code.
+        dt : datetime.datetime
+            Aware event cutoff/valuation time.
+
+        Returns
+        -------
+        InvestmentSnapshot
+            Currency-specific security accounting after quantity/mark validation.
+
+        Raises
+        ------
+        ValueError
+            If any scoped quantity differs, a mark lacks a timestamp, or snapshot
+            valuation cannot obtain valid prices/FX.
+        """
+        marks = {}
+        for key, position in self.position_tracker.positions.items():
+            if position.last_sale_date is None:
+                raise ValueError(f"No timestamped market mark for {position.asset}.")
+            marks[key] = (position.last_sale_price, position.last_sale_date)
+        expected = investments.quantities
+        actual = {key: position.amount for key, position in self.position_tracker.positions.items()}
+        for key in expected.keys() | actual.keys():
+            if not math.isclose(a=expected.get(key, 0.0), b=actual.get(key, 0.0), abs_tol=1e-9):
+                raise ValueError(f"Investment lots do not reconcile to execution positions for {key}.")
+        return investments.snapshot(currency=currency, dt=dt, marks=marks)
+
+    def _earn_investment_income(
+            self, asset_id: int, date: datetime.date, value: float, currency: str | None, identity: str,
+    ) -> None:
+        """Capture an income entitlement against current account-scoped holdings.
+
+        Parameters
+        ----------
+        asset_id : int
+            Underlying domain asset ID, matching all held listings of that asset.
+        date : datetime.date
+            Payment date under which the entitlement is retained.
+        value : float
+            Native signed income per held unit.
+        currency : str or None
+            Actual payment ISO code; ``None`` uses each holding's quote currency.
+        identity : str
+            Corporate-action identity used with the position key to avoid earning
+            the same entitlement twice, including after history restoration.
+
+        Notes
+        -----
+        No cash or FX conversion is posted yet. A short holding captures a
+        negative payment. Does nothing when investment mode is disabled.
+        """
+        if self.investments is None:
+            return
+        known = {(event.key, event.id) for event in self.investments.events}
+        known.update((event.key, event.id) for events in self._investment_income_due.values() for event in events)
+        for key, position in self.position_tracker.positions.items():
+            if position.asset.asset.id == asset_id and (key, identity) not in known:
+                self._investment_income_due.setdefault(date, []).append(InvestmentEvent(
+                    id=identity, dt=self._reporting_dt, kind="income", key=key,
+                    currency=currency if currency is not None else position.asset.quote.asset_name,
+                    amount=position.amount * value))
+
+    def _pay_investment_income(self, session: datetime.date) -> None:
+        """Post unpaid entitlements due on or before ``session`` exactly once.
+
+        Parameters
+        ----------
+        session : datetime.date
+            Inclusive payment-date cutoff. The current ``_reporting_dt`` supplies
+            the actual posting time and payment-time FX, including holiday delays.
+
+        Notes
+        -----
+        Credits native cash and base-currency cash-flow metrics, then removes paid
+        entitlements. Does nothing without investment accounting; unavailable FX raises.
+        """
+        if self.investments is None:
+            return
+        for date in sorted(date for date in self._investment_income_due if date <= session):
+            for event in self._investment_income_due[date]:
+                payment = replace(event, dt=self._reporting_dt)
+                self.investments.valuation.conversion.rate(
+                    base=payment.currency, quote=self._investment_base, dt=payment.dt)
+                if self.investments.record(event=payment):
+                    self._cash_flow(amount=payment.amount, currency=payment.currency)
+            del self._investment_income_due[date]
+
+    def enable_currency_reporting(self, base_currency: str, dt: datetime.datetime) -> None:
+        """Declare execution-book currency and set the initial aware reporting time.
+
+        Parameters
+        ----------
+        base_currency : str
+            ISO code used by execution-book monetary totals and reporting events.
+        dt : datetime.datetime
+            Aware initial time; a naive timestamp raises ``ValueError``.
+        """
+        self.reporting_base_currency = base_currency
+        self.set_reporting_datetime(dt=dt)
+
+    def set_reporting_datetime(self, dt: datetime.datetime) -> None:
+        """Advance the event/valuation clock when currency reporting is enabled.
+
+        Parameters
+        ----------
+        dt : datetime.datetime
+            Aware posting time. Naive values raise ``ValueError`` in reporting mode;
+            calls outside reporting mode do not change the reporting clock.
+        """
+        if self.reporting_base_currency is not None:
+            if dt.tzinfo is None or dt.utcoffset() is None:
+                raise ValueError("Currency reporting requires timezone-aware event timestamps.")
+            self._reporting_dt = dt
+
+    def validate_reporting_asset(self, asset: ExchangeAsset) -> None:
+        """Reject instruments whose money cannot be accounted for in the configured mode.
+
+        Parameters
+        ----------
+        asset : ExchangeAsset
+            Listing about to enter the book.
+
+        Raises
+        ------
+        ValueError
+            In plain reporting, if quote or margin currency differs from the
+            declared base; in investment mode, if instrument unit valuation is
+            unsupported (including margined futures/options).
+
+        Notes
+        -----
+        Without reporting this is a no-op. Investment mode allows mixed quote
+        currencies but does not substitute principal accounting for margin settlement.
+        """
+        base = self.reporting_base_currency
+        if self.investments is not None:
+            self.investments.valuation.unit_value(asset=asset, price=0.0, dt=self._reporting_dt)
+            return
+        if base is not None and asset.quote.asset_name != base:
+            raise ValueError(
+                f"Currency reporting requires a single {base} book; {asset} is quoted in "
+                f"{asset.quote.asset_name}. Mixed-native-currency accounting is not supported.")
+        if base is not None and (
+            isinstance(asset.asset, FuturesContract) or _is_margined_option(instrument=asset.asset)
+        ):
+            if margin_currency_of(asset=asset) != base:
+                raise ValueError(f"{asset} settles margin outside the reporting book's base currency {base}.")
 
     @property
     def todays_returns(self) -> float:
@@ -205,6 +512,7 @@ class Ledger:
         self.daily_returns_series.iloc[session_ix] = self.todays_returns
 
     def sync_last_sale_prices(self, dt: datetime.datetime, prices: dict[tuple[Asset, Exchange], float]):
+        self.set_reporting_datetime(dt=dt)
         self.position_tracker.sync_last_sale_prices(
             dt=dt,
             prices=prices,
@@ -217,7 +525,31 @@ class Ledger:
     def _calculate_payout(multiplier: float, amount: float, old_price: float, price: float) -> float:
         return (price - old_price) * multiplier * amount
 
-    def _cash_flow(self, amount: float) -> None:
+    def _cash_flow(self, amount: float, currency: str | None = None) -> None:
+        """Apply an internal cash flow and retain its base-currency reporting event.
+
+        Parameters
+        ----------
+        amount : float
+            Signed cash movement: positive credits, negative debits.
+        currency : str or None, optional
+            Native ISO code in investment mode; converts ``amount`` to the
+            accounting base at the current reporting time. ``None`` means the
+            amount is already base/native execution-book money.
+
+        Notes
+        -----
+        Native investment cash is derived from the corresponding investment
+        event; this updates execution aggregates/flow metrics, not a second
+        native cash posting. External funding must use ``capital_change``.
+        """
+        if currency is not None and self.investments is not None:
+            amount *= self.investments.valuation.conversion.rate(
+                base=currency, quote=self._investment_base, dt=self._reporting_dt)
+        if self.reporting_base_currency is not None:
+            if self._reporting_dt is None:
+                raise ValueError("No timestamp set for a reporting cash flow.")
+            self.reporting_events.append((self._reporting_dt, amount, False))
         self._dirty_portfolio = True
         self._portfolio.cash_flow += amount
         self._portfolio.cash += amount
@@ -229,8 +561,27 @@ class Ledger:
         ----------
         transaction : Transaction
             The transaction to execute.
+
+        Notes
+        -----
+        Investment mode first records a scoped native fill with instrument-aware
+        monetary consideration; identical fill repeats do nothing. Historical
+        cost uses fill-time FX. Commissions are posted separately through
+        ``process_commission`` to avoid charging the fill's fee twice.
         """
         asset = transaction.asset
+        self.validate_reporting_asset(asset=asset)
+        self.set_reporting_datetime(dt=transaction.dt)
+        if self.investments is not None:
+            unit = self.investments.valuation.unit_value(asset=asset, price=transaction.price, dt=transaction.dt)
+            self.investments.valuation.conversion.rate(
+                base=asset.quote.asset_name, quote=self._investment_base, dt=transaction.dt)
+            event = InvestmentEvent(
+                id=transaction.id, dt=transaction.dt, kind="trade",
+                key=(transaction.exchange_name, transaction.trading_account_id, asset),
+                currency=asset.quote.asset_name, quantity=transaction.amount, unit_value=unit)
+            if not self.investments.record(event=event):
+                return
         # `asset` is the exchange listing; the instrument itself hangs off `.asset`.
         #
         # A margined option settles the way a future does -- no premium changes hands, variation
@@ -268,16 +619,18 @@ class Ledger:
             # buyer additionally hands the seller the coupon accrued since the last payment. Both
             # corrections are needed -- the first is a factor of ten on a 1000 nominal, the second
             # averages half a coupon on every round trip.
-            self._cash_flow(-(self.bond_price_in_money(asset=asset, quoted_price=transaction.price,
-                                                       dt=transaction.dt) * transaction.amount))
+            self._cash_flow(amount=-(self.bond_price_in_money(asset=asset, quoted_price=transaction.price,
+                                                       dt=transaction.dt) * transaction.amount),
+                            currency=asset.quote.asset_name)
         elif isinstance(asset.asset, OptionContract):
             # A premium-paid option. The premium is quoted per unit of the underlying and one
             # contract covers `multiplier` of them, so buying one 1.20 call costs 120, not 1.20 --
             # a hundredfold error in cash, and one that compounds: it also sets the cost basis
             # every later P&L is measured from.
-            self._cash_flow(-(transaction.price * asset.asset.multiplier * transaction.amount))
+            self._cash_flow(amount=-(transaction.price * asset.asset.multiplier * transaction.amount),
+                            currency=asset.quote.asset_name)
         else:
-            self._cash_flow(-(transaction.price * transaction.amount))
+            self._cash_flow(amount=-(transaction.price * transaction.amount), currency=asset.quote.asset_name)
         # print("LEVERAGE: BEFORE EXCEUTION", self.account.leverage, self.account.net_leverage)
 
         self.position_tracker.execute_transaction(transaction)
@@ -296,13 +649,14 @@ class Ledger:
             # self._processed_transactions[transaction.dt] = [transaction_dict]
             self._processed_transactions[transaction.dt] = [transaction]
 
-        if asset not in self._buy_lots_by_asset:
-            self._buy_lots_by_asset[asset] = deque()
+        lot_key = (transaction.exchange_name, transaction.trading_account_id, asset)
+        if lot_key not in self._buy_lots_by_asset:
+            self._buy_lots_by_asset[lot_key] = deque()
         realized = 0.0
         realized_pnl_percentage = 0.00
 
         if transaction.amount > 0:
-            self._buy_lots_by_asset[asset].append(
+            self._buy_lots_by_asset[lot_key].append(
                 Lot(quantity=transaction.amount, price=transaction.price, commission=transaction.commission or 0.00)
             )
             transaction.average_entry_price = transaction.price
@@ -310,8 +664,8 @@ class Ledger:
             sell_qty = -transaction.amount
             sell_comm = transaction.commission or 0.00
             total_match_price = 0
-            while sell_qty > 0 and self._buy_lots_by_asset[asset]:
-                lot = self._buy_lots_by_asset[asset][0]
+            while sell_qty > 0 and self._buy_lots_by_asset[lot_key]:
+                lot = self._buy_lots_by_asset[lot_key][0]
                 match_qty = min(sell_qty, lot.quantity)
 
                 pnl = (transaction.price - lot.price) * match_qty
@@ -323,7 +677,7 @@ class Ledger:
 
                 # Drop empty lot
                 if lot.quantity == 0:
-                    self._buy_lots_by_asset[asset].popleft()
+                    self._buy_lots_by_asset[lot_key].popleft()
             transaction.average_entry_price = total_match_price / -transaction.amount
             realized -= sell_comm
             if total_match_price > 0:
@@ -338,7 +692,46 @@ class Ledger:
         ----------
         splits: list[(Asset, float)]
             A list of splits. Each split is a tuple of (asset, ratio).
+
+        Notes
+        -----
+        In investment mode, split records must leave whole units. Fractional
+        cash-in-lieu requires an explicit disposal and raises ``ValueError``.
+        Recorded splits preserve historical cost and identical repeats are ignored.
         """
+        splits = list(splits)
+        if self.investments is not None:
+            quantities = self.investments.quantities
+            existing = {(event.key, event.id): event for event in self.investments.events}
+            pending = []
+            applicable = []
+            for split in splits:
+                events = []
+                for key, position in self.position_tracker.positions.items():
+                    if position.asset.asset.id == split.asset.id:
+                        event = InvestmentEvent(
+                            id=f"split-{split.asset.id}-{self._reporting_dt}", dt=self._reporting_dt,
+                            kind="split", key=key, currency=position.asset.quote.asset_name, amount=split.ratio)
+                        prior = existing.get((key, event.id))
+                        if prior is not None:
+                            if prior != event:
+                                raise ValueError(f"Conflicting investment split {event.id}.")
+                            continue
+                        if not math.isfinite(split.ratio) or split.ratio <= 0:
+                            raise ValueError("Split ratio must be positive and finite.")
+                        quantity = quantities[key] / split.ratio
+                        if not math.isclose(a=quantity, b=round(quantity), abs_tol=1e-10):
+                            raise ValueError("Fractional split cash-in-lieu requires an explicit disposal event.")
+                        quantities[key] = quantity
+                        existing[(key, event.id)] = event
+                        events.append(event)
+                if events:
+                    pending.extend(events)
+                    applicable.append(split)
+            for event in pending:
+                self.investments.record(event=event)
+                self.position_tracker.positions[event.key].last_sale_price *= event.amount
+            splits = applicable
         leftover_cash = self.position_tracker.handle_splits(splits)
         if leftover_cash > 0:
             self._cash_flow(leftover_cash)
@@ -367,18 +760,55 @@ class Ledger:
 
         self._orders_by_id.move_to_end(order.id, last=True)
 
-    def process_commission(self, commission: CommissionModel, tr):
+    def process_commission(self, commission: Commission, tr):
         """Process the commission.
 
         Parameters
         ----------
-        commission : CommissionModel
-            The commission being paid.
+        commission : Commission
+            Native quote-currency fee, associated order/fill, stable fee ID, and
+            optional aware posting time. Nonzero investment fees require exactly
+            one matching fill; ambiguous association raises ``ValueError``.
+
+        tr
+            Legacy caller context; retained for API compatibility and not used.
+
+        Notes
+        -----
+        Investment mode charges a scoped fee once, converts at posting-time FX,
+        and allocates it to the referenced fill's remaining basis/realized PNL.
         """
-        # print(f"Commission for {asset.asset_name} is {cost}", tr.account.leverage, tr.account.net_leverage)
-        self.position_tracker.handle_commission(asset=commission.asset, cost=commission.amount)
+        if self.investments is not None and commission.amount:
+            fills = [event for event in self.investments.events
+                     if event.kind == "trade" and event.key[2] == commission.asset
+                     and (commission.order is None or event.key[:2] == (
+                         commission.order.exchange_name, commission.order.trading_account_id))
+                     and (commission.transaction_id == event.id if commission.transaction_id is not None
+                          else commission.order is not None
+                          and event.id in {
+                              txn.id for txn in self.transactions()
+                              if txn.order_id == commission.order.id
+                              and txn.exchange_name == commission.order.exchange_name
+                              and txn.trading_account_id == commission.order.trading_account_id})]
+            if len(fills) != 1:
+                raise ValueError("Investment commissions require an unambiguous transaction_id.")
+            fill = fills[0]
+            stamp = commission.dt if commission.dt is not None else self._reporting_dt
+            self.investments.valuation.conversion.rate(
+                base=commission.asset.quote.asset_name, quote=self._investment_base, dt=stamp)
+            if not self.investments.record(event=InvestmentEvent(
+                    id=commission.id, dt=stamp, kind="fee", key=fill.key, currency=commission.asset.quote.asset_name,
+                    amount=commission.amount, transaction_id=fill.id)):
+                return
+            self.set_reporting_datetime(dt=stamp)
+            position = self.position_tracker.positions.get(fill.key)
+            if position is not None:
+                self.position_tracker.adjust_commission_cost_basis(position=position, cost=commission.amount)
+                self.position_tracker._dirty_stats = True
+        elif self.investments is None:
+            self.position_tracker.handle_commission(asset=commission.asset, cost=commission.amount)
         # print(f"Commission 2 for {asset.asset_name} is {cost}", tr.account.leverage, tr.account.net_leverage)
-        self._cash_flow(-commission.amount)
+        self._cash_flow(amount=-commission.amount, currency=commission.asset.quote.asset_name)
         # print(f"Commission 3 for {asset.asset_name} is {cost}", tr.account.leverage, tr.account.net_leverage)
 
     def close_position(self, asset: ExchangeAsset, dt: datetime.datetime,
@@ -450,10 +880,27 @@ class Ledger:
                       for event in self.bond_book.payments_entitled_between(
                           bond, after=previous, through=session_date)]
             if earned:
+                if self.investments is not None and any(
+                        event.event_type is BondEventType.AMORTIZATION for event in earned):
+                    raise ValueError(
+                        "Investment accounting for bond amortization requires principal-allocation events."
+                    )
+                for event in earned:
+                    self._earn_investment_income(
+                        asset_id=event.asset.id,
+                        date=event.date,
+                        value=event.value,
+                        currency=event.currency,
+                        identity=(
+                            f"bond-{event.asset.id}-{event.event_type}-"
+                            f"{event.record_date}-{event.date}-{event.value}"
+                        ),
+                    )
                 self.position_tracker.earn_bond_payments(earned)
 
         payment = self.position_tracker.pay_bond_payments(session_date)
-        if payment != 0:
+        self._pay_investment_income(session=session_date)
+        if payment != 0 and self.investments is None:
             self._cash_flow(payment)
 
     async def redeem_matured_bonds(self, session, asset_service=None) -> None:
@@ -524,6 +971,20 @@ class Ledger:
             #     assets=held_assets, date=next_session  # self.data_bundle.asset_repository
             # )
             stock_dividends = []
+            if self.investments is not None:
+                for dividend in cash_dividends:
+                    if dividend.currency is None:
+                        raise ValueError("Investment dividend accounting requires an explicit payout currency.")
+                    self._earn_investment_income(
+                        asset_id=dividend.asset.id,
+                        date=dividend.pay_date,
+                        value=dividend.amount,
+                        currency=dividend.currency.value,
+                        identity=(
+                            f"dividend-{dividend.asset.id}-{dividend.ex_date}-"
+                            f"{dividend.pay_date}-{dividend.amount}"
+                        ),
+                    )
 
             # Earning a dividend just marks that we need to get paid out on
             # the dividend's pay-date. This does not affect our cash yet.
@@ -535,14 +996,76 @@ class Ledger:
         # Pay out the dividends whose pay-date is the next session. This does
         # affect out cash.
         dividends = position_tracker.pay_dividends(next_session)
-        if dividends > 0:
+        session_date = next_session.date() if isinstance(next_session, datetime.datetime) else next_session
+        self._pay_investment_income(session=session_date)
+        if dividends != 0 and self.investments is None:
             self._cash_flow(dividends)
 
-    async def capital_change(self, change_amount: float):
+    async def capital_change(
+            self, change_amount: float, currency: str | None = None,
+            exchange_name: str | None = None, trading_account_id: str | None = None,
+            event_id: str | None = None,
+    ):
+        """Apply external capital without counting the transfer itself as PNL.
+
+        Parameters
+        ----------
+        change_amount : float
+            Signed finite deposit/withdrawal. Positive values add cash.
+        currency : str or None, optional
+            Native ISO code in investment mode; defaults to the investment
+            accounting base. Currency-labelled changes require investment mode.
+        exchange_name, trading_account_id : str or None, optional
+            Explicit cash scope. Both may be omitted only when a single scope
+            can be inferred from existing investment cash balances.
+        event_id : str or None, optional
+            Stable external-cash posting ID; generated when omitted. Identical
+            scoped repeats are ignored, conflicting repeats raise.
+
+        Raises
+        ------
+        ValueError
+            If currency/account scope is invalid, duplicate data conflicts, or
+            required price/FX observations are unavailable.
+
+        Notes
+        -----
+        Revalues the book before applying the flow. Contributions are excluded
+        from reporting PNL at the current posting-time FX rate, while subsequent
+        native-cash FX changes remain portfolio gains/losses.
+        """
         # `update_portfolio` is a coroutine. Called without awaiting, the portfolio value a target
         # capital change is measured against was whatever the last bar left behind, so the deposit
         # or withdrawal computed from it was wrong by a bar of profit and loss.
         await self.update_portfolio()
+        if self.investments is not None:
+            scopes = {(key[0], key[1]) for key in self.investments.cash_balances(dt=self._reporting_dt)}
+            if exchange_name is not None and trading_account_id is not None:
+                exchange, account = exchange_name, trading_account_id
+            elif len(scopes) == 1 and exchange_name is None and trading_account_id is None:
+                exchange, account = next(iter(scopes))
+            else:
+                raise ValueError("A capital change in a multi-account book requires an explicit scoped cash event.")
+            native_currency = currency if currency is not None else self._investment_base
+            rate = self.investments.valuation.conversion.rate(
+                base=native_currency, quote=self._investment_base, dt=self._reporting_dt)
+            if not self.investments.record_cash(
+                event=CashEvent(
+                    id=event_id if event_id is not None else uuid.uuid4().hex,
+                    dt=self._reporting_dt,
+                    key=(exchange, account, native_currency),
+                    amount=change_amount,
+                    kind=CashEventKind.EXTERNAL,
+                ),
+            ):
+                return
+            change_amount *= rate
+        elif currency is not None:
+            raise ValueError("Currency-labelled capital changes require investment accounting.")
+        if self.reporting_base_currency is not None:
+            if self._reporting_dt is None:
+                raise ValueError("No timestamp set for a reporting capital change.")
+            self.reporting_events.append((self._reporting_dt, change_amount, True))
         # we update the cash and total value so this is not dirty
         self._portfolio.portfolio_value += change_amount
         self._portfolio.cash += change_amount
@@ -750,6 +1273,9 @@ class Ledger:
 
     async def update_portfolio(self) -> None:
         """Force a computation of the current portfolio state."""
+        if self.investments is not None:
+            self._update_investment_portfolio()
+            return
         if not self._dirty_portfolio:
             return
 
@@ -783,6 +1309,42 @@ class Ledger:
 
         # the portfolio has been fully synced
         self._dirty_portfolio = False
+
+    def _update_investment_portfolio(self) -> None:
+        """Revalue native cash and security snapshots in the accounting base.
+
+        Uses the current reporting timestamp, even without new trades, so FX
+        alone can change portfolio PNL/returns. Updates converted position
+        exposures and marks account aggregates dirty; external capital is
+        handled separately by ``capital_change``. Requires initialized
+        investment accounting and valid timestamped marks/FX.
+        """
+        snapshot = self.investment_snapshot(currency=self._investment_base, dt=self._reporting_dt)
+        stats = self.position_tracker.stats
+        stats.long_value = sum(position.market_value for position in snapshot.positions if position.quantity > 0)
+        stats.short_value = sum(position.market_value for position in snapshot.positions if position.quantity < 0)
+        stats.long_exposure, stats.short_exposure = stats.long_value, stats.short_value
+        stats.net_value = stats.net_exposure = snapshot.market_value
+        stats.gross_value = stats.gross_exposure = stats.long_value - stats.short_value
+        if stats.position_exposure_array is not None:
+            values = {position.key: position.market_value for position in snapshot.positions}
+            stats.position_exposure_array[:] = [
+                values[(position.exchange_name, position.trading_account_id, position.asset)]
+                for position in self.position_tracker.get_position_list()]
+        self._portfolio.positions = self._positions_by_exchange_and_account(
+            position_tracker=self.position_tracker,
+        )
+        self._portfolio.positions_value = self._portfolio.positions_exposure = snapshot.market_value
+        self._portfolio.cash = self.investments.cash_value(currency=self._investment_base, dt=self._reporting_dt)
+        start_value = self._portfolio.portfolio_value
+        end_value = self._portfolio.cash + snapshot.market_value
+        pnl = end_value - start_value
+        self._portfolio.portfolio_value = end_value
+        self._portfolio.pnl += pnl
+        if start_value:
+            self._portfolio.returns = (1 + self._portfolio.returns) * (1 + pnl / start_value) - 1
+        self._dirty_portfolio = False
+        self._dirty_account = True
 
     @property
     def portfolio(self):

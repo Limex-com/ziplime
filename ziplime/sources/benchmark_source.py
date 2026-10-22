@@ -35,6 +35,7 @@ class BenchmarkSource:
         self.exchange = exchange
         self.benchmark_fields = benchmark_fields
         self._precalculated_series = precalculated_series
+        self.benchmark_returns = benchmark_returns
 
     def get_value(self, dt: datetime.datetime) -> pd.Series:
         """Look up the returns for a given dt.
@@ -72,8 +73,10 @@ class BenchmarkSource:
 
         Returns
         -------
-        returns : pd.Series
-            The series of returns.
+        returns : polars.DataFrame
+            Timestamped source columns in the inclusive range. Supplied
+            ``benchmark_returns`` are aligned to session-close timestamps with a
+            ``pct_change`` column instead of being interpreted as price levels.
 
         See Also
         --------
@@ -84,7 +87,16 @@ class BenchmarkSource:
            This method expects minute inputs if ``emission_rate == 'minute'``
            and session labels when ``emission_rate == 'daily``.
         """
-        return self._precalculated_series.filter(pl.col("date").is_between(start_dt, end_dt))
+        if self.benchmark_returns is not None:
+            returns = self.daily_returns_by_session(sessions=self.sessions)
+            stamps = [self.exchange.trading_calendar.session_close(session=session).to_pydatetime()
+                      for session in self.sessions]
+            frame = returns.with_columns(pl.Series(name="date", values=stamps))
+        else:
+            frame = self._precalculated_series
+        dtype = frame.schema["date"]
+        return frame.filter(pl.col("date").is_between(
+            pl.lit(value=start_dt).cast(dtype), pl.lit(value=end_dt).cast(dtype)))
 
     def daily_returns(self, start: datetime.datetime, end: datetime.datetime | None = None) -> pd.Series:
         """Returns the daily returns for the given period.
@@ -94,16 +106,24 @@ class BenchmarkSource:
         start : datetime
             The inclusive starting session label.
         end : datetime, optional
-            The inclusive ending session label. If not provided, treat
-            ``start`` as a scalar key.
+            The inclusive ending session label. If omitted, include all
+            available sessions from ``start`` onward.
 
         Returns
         -------
-        returns : pd.Series or float
-            The returns in the given period. The index will be the trading
-            calendar in the range [start, end]. If just ``start`` is provided,
-            return the scalar value on that day.
+        returns : polars.DataFrame
+            Session dates and fractional ``pct_change`` returns. Supplied
+            returns are used directly after session alignment, not differenced
+            as if they were prices.
         """
+
+        if self.benchmark_returns is not None:
+            daily = self.daily_returns_by_session(sessions=self.sessions)
+            start_date = start.date() if isinstance(start, datetime.datetime) else start
+            if end is None:
+                return daily.filter(pl.col("date") >= start_date)
+            end_date = end.date() if isinstance(end, datetime.datetime) else end
+            return daily.filter(pl.col("date").is_between(start_date, end_date))
 
         # todo : returns for first day
         daily_returns = self._precalculated_series.group_by_dynamic(
@@ -131,11 +151,42 @@ class BenchmarkSource:
         ``operands could not be broadcast together`` out of ``empyrical``. Aligning here makes
         that impossible: the answer always has one row per session, a session the benchmark did
         not trade counts as a flat day, and position *is* session.
+
+        Parameters
+        ----------
+        sessions : iterable of datetime.date or datetime.datetime
+            Requested session labels; their input order is retained.
+
+        Returns
+        -------
+        polars.DataFrame
+            One ``date`` and fractional ``pct_change`` per requested session.
+            Supplied returns are matched to ``self.sessions`` directly; missing
+            price-derived session returns count as flat days.
+
+        Raises
+        ------
+        ValueError
+            If supplied returns are nonfinite/null, differ in length from the
+            source sessions, or do not cover the requested session labels.
         """
         wanted = pl.DataFrame({
             "date": [session.date() if hasattr(session, "date") else session
                      for session in sessions]
         })
+        if self.benchmark_returns is not None:
+            if len(self.benchmark_returns) != len(self.sessions):
+                raise ValueError("benchmark_returns must contain one return per simulation session.")
+            supplied = pl.DataFrame(data={
+                "date": [session.date() if hasattr(session, "date") else session for session in self.sessions],
+                "pct_change": self.benchmark_returns,
+            })
+            if not supplied["pct_change"].is_finite().all() or supplied["pct_change"].null_count():
+                raise ValueError("benchmark_returns must be finite and non-null.")
+            aligned = wanted.join(supplied, on="date", how="left", maintain_order="left")
+            if aligned["pct_change"].null_count():
+                raise ValueError("benchmark_returns does not cover the requested sessions.")
+            return aligned
         if not wanted.height:
             return wanted.with_columns(pl.lit(0.0).alias("pct_change"))
 

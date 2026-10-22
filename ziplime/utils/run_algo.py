@@ -1,4 +1,6 @@
 from ziplime.finance.margin import FuturesMarginModel
+from ziplime.finance.domain.currency_reporting import CurrencyReporting
+from ziplime.data.services.currency_conversion_service import CurrencyConversionService
 import datetime
 import sys
 
@@ -75,9 +77,24 @@ async def run_algorithm(
         intraday_metrics: bool = False,
         futures_margin_model: FuturesMarginModel | None = None,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
+        currency_reporting: CurrencyReporting | None = None,
+        currency_conversion: CurrencyConversionService | None = None,
 ) -> TradingAlgorithmExecutionResult:
-    """Run a backtest for the given algorithm.
-    This is shared between the cli and :func:`ziplime.run_algo`.
+    """Run a backtest for the given algorithm, shared by CLI and simulation entry points.
+
+    Parameters
+    ----------
+    currency_reporting : CurrencyReporting or None, optional
+        Independent reporting currencies and optional investment accounting,
+        forwarded unchanged to ``TradingAlgorithm``.
+    currency_conversion : CurrencyConversionService or None, optional
+        Standalone monetary/order conversion service. Defaults to the reporting
+        service when present; a different simultaneous service is rejected.
+
+    Returns
+    -------
+    TradingAlgorithmExecutionResult
+        Default performance plus configured currency performance/risk mappings.
     """
     tr = await _prepare_algorithm(algorithm=algorithm, asset_service=asset_service, print_algo=print_algo,
                                   metrics_set=metrics_set, custom_loader=custom_loader,
@@ -89,7 +106,8 @@ async def run_algorithm(
                                   futures_margin_model=futures_margin_model,
                                   exchange_repository=exchange_repository,
                                   price_used_in_order_execution=price_used_in_order_execution,
-                                  intraday_metrics=intraday_metrics)
+                                  intraday_metrics=intraday_metrics, currency_reporting=currency_reporting,
+                                  currency_conversion=currency_conversion)
     trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
     result = await trading_algorithm_executor.run_algorithm(trading_algorithm=tr)
@@ -117,9 +135,25 @@ async def run_algorithm_iter(
         futures_margin_model: FuturesMarginModel | None = None,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
         intraday_metrics: bool = False,
+        currency_reporting: CurrencyReporting | None = None,
+        currency_conversion: CurrencyConversionService | None = None,
 ) -> AsyncIterator[TradingAlgorithmExecutionStatus]:
-    """Run a backtest for the given algorithm.
-    This is shared between the cli and :func:`ziplime.run_algo`.
+    """Stream a backtest using the same preparation as ``run_algorithm``.
+
+    Parameters
+    ----------
+    currency_reporting : CurrencyReporting or None, optional
+        Independent currency metrics and optional investment accounting. Child
+        performance packets are attached under ``metrics_by_currency``.
+    currency_conversion : CurrencyConversionService or None, optional
+        Standalone monetary/order converter, or the reporting service when omitted.
+        Supplying a different service alongside reporting raises ``ValueError``.
+
+    Yields
+    ------
+    TradingAlgorithmExecutionStatus
+        Native progress/performance with configured currency packets. The final
+        status contains currency performance/risk mappings on its result.
     """
     tr = await _prepare_algorithm(algorithm=algorithm, asset_service=asset_service, print_algo=print_algo,
                                   metrics_set=metrics_set, custom_loader=custom_loader,
@@ -129,7 +163,9 @@ async def run_algorithm_iter(
                                   futures_margin_model=futures_margin_model,
                                   price_used_in_order_execution=price_used_in_order_execution,
                                   exchange_repository=exchange_repository,
-                                  intraday_metrics=intraday_metrics)
+                                  intraday_metrics=intraday_metrics,
+                                  currency_reporting=currency_reporting,
+                                  currency_conversion=currency_conversion)
     trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
     async for status in trading_algorithm_executor.run_algorithm_iter(trading_algorithm=tr):
@@ -157,9 +193,24 @@ async def _prepare_algorithm(
         futures_margin_model: FuturesMarginModel | None = None,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
         intraday_metrics: bool = False,
+        currency_reporting: CurrencyReporting | None = None,
+        currency_conversion: CurrencyConversionService | None = None,
 ) -> TradingAlgorithmExecutionResult:
-    """Run a backtest for the given algorithm.
-    This is shared between the cli and :func:`ziplime.run_algo`.
+    """Prepare strategy, native benchmark, and shared services without executing bars.
+
+    Parameters
+    ----------
+    currency_reporting : CurrencyReporting or None, optional
+        Configuration passed unchanged to the algorithm and its metrics tracker.
+        Currency benchmark wrappers are created later by that tracker.
+    currency_conversion : CurrencyConversionService or None, optional
+        Independent valuation service, defaulting to the reporting converter in
+        the algorithm. Conflicting service instances are rejected there.
+
+    Returns
+    -------
+    TradingAlgorithm
+        Initialized runner object configured for subsequent execution/streaming.
     """
 
     if print_algo:
@@ -265,6 +316,8 @@ async def _prepare_algorithm(
         same_bar_execution=same_bar_execution,
         futures_margin_model=futures_margin_model,
         intraday_metrics=intraday_metrics,
+        currency_reporting=currency_reporting,
+        currency_conversion=currency_conversion,
     )
 
     for exchange in await exchange_repository.get_all_exchanges():

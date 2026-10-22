@@ -222,6 +222,8 @@ class SimulationExchange(Exchange):
                             asset=order.asset,
                             order=order,
                             amount=additional_commission,
+                            transaction_id=txn.id,
+                            dt=txn.dt,
                         )
                     )
 

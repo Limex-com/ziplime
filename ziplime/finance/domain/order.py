@@ -3,6 +3,7 @@ import math
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.finance.domain.order_status import OrderStatus
 from ziplime.finance.execution import ExecutionStyle
+from ziplime.finance.domain.order_valuation import OrderValuation
 
 SELL = 1 << 0
 BUY = 1 << 1
@@ -14,6 +15,18 @@ LIMIT = 1 << 3
 
 
 class Order:
+    """Signed quantity order with optional immutable submission-time valuations.
+
+    Attributes
+    ----------
+    submitted_valuations : dict[str, OrderValuation]
+        Snapshots keyed by reporting ISO code, populated on investment-mode
+        submission. Each values the full submitted quantity at submission-time
+        market prices/FX and retains the actual returned order ID. Empty otherwise.
+        Later ``value_orders`` calls revalue current quantities/prices and do not
+        overwrite these snapshots; ``amount`` remains a quantity throughout.
+    """
+
     def __init__(
             self,
             id,
@@ -58,6 +71,7 @@ class Order:
         self.direction = math.copysign(1, self.amount)
         self.execution_style = execution_style
         self.exchange_order_id = exchange_order_id
+        self.submitted_valuations: dict[str, OrderValuation] = {}
 
     def check_triggers(self, price, dt):
         """

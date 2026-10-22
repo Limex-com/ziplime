@@ -51,16 +51,17 @@ class BenchmarkReturnsAndVolatility:
             open_ = trading_calendar.session_open(sessions[0]).tz_convert(trading_calendar.tz).to_pydatetime()
             close = trading_calendar.session_close(sessions[-1]).tz_convert(trading_calendar.tz).to_pydatetime()
             returns = benchmark_source.get_range(start_dt=open_, end_dt=close)
+            if "pct_change" not in returns.columns:
+                returns = returns.with_columns(
+                    pl.col("close").pct_change().fill_null(0.0).fill_nan(0.0).alias("pct_change"))
             returns = returns.with_columns(
                 pl.lit(0).alias("sid"),
-                pl.lit(0.0).alias("close"),
-                pl.lit(0).alias("pct_change"),
                 pl.col("date")
             )
 
             # rrs = (1 + returns["pct_change"].to_pandas()).cumprod() - 1
             self._minute_cumulative_returns = (
-                returns.select(pl.col("date"), pl.col("sid"), (1 + pl.col("pct_change")).cum_prod() - 1))
+                returns.select(pl.col("date"), ((1 + pl.col("pct_change")).cum_prod() - 1).alias("value")))
             min_annual_volatility = minute_annual_volatility(
                 date_labels=returns["date"].dt.date(),  # returns.index.normalize().view("int64"),
                 minute_returns=returns["pct_change"],
@@ -79,13 +80,16 @@ class BenchmarkReturnsAndVolatility:
         if self._minute_cumulative_returns is None:
             # TODO: fix this so that we don't have minute/daily returns but dynamic frequency returns
             return
-        r = self._minute_cumulative_returns["date" == session]["literal"][0]
+        observed = self._minute_cumulative_returns.filter(pl.col("date") <= session).tail(n=1)
+        if observed.is_empty():
+            return
+        r = observed["value"][0]
         if np.isnan(r):
             r = None
         packet["cumulative_risk_metrics"]["benchmark_period_return"] = r
 
-        v = self._minute_annual_volatility["date" == session]["value"][0]
-        if np.isnan(v):
+        v = self._minute_annual_volatility.filter(pl.col("date") <= session).tail(n=1)["value"][0]
+        if v is None or np.isnan(v):
             v = None
         packet["cumulative_risk_metrics"]["benchmark_volatility"] = v
 
