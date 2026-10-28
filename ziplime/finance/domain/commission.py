@@ -4,6 +4,7 @@ import uuid
 
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.finance.domain.order import Order
+from ziplime.finance.domain.transaction import Transaction
 
 
 @dataclass
@@ -15,14 +16,13 @@ class Commission:
     asset : ExchangeAsset
         Listing whose quote currency denominates ``amount``.
     order : Order or None
-        Associated order, when available; also disambiguates exchange/account
-        scope when fill IDs are reused across accounts.
+        Associated order, when available, retained for execution reporting.
     amount : float
         Native fee charge; positive values debit cash, negative values are rebates.
-    transaction_id : str or None, optional
-        Fill ID to which the fee belongs. Investment accounting requires an
-        unambiguous fill: omission is only resolved from a single matching order
-        fill in the ledger's current transaction records.
+    transaction : Transaction
+        Executed fill to which the fee belongs, including exchange/account scope.
+    transaction_id : str
+        Read-only property returning ``transaction.id``; not a constructor argument.
     dt : datetime.datetime or None, optional
         Aware posting time used for fee FX. ``None`` uses the ledger's current
         reporting time; a late fee should carry its actual posting timestamp.
@@ -34,6 +34,10 @@ class Commission:
     asset: ExchangeAsset
     order: Order | None
     amount: float
-    transaction_id: str | None = None
+    transaction: Transaction
     dt: datetime.datetime | None = None
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+    @property
+    def transaction_id(self) -> str:
+        return self.transaction.id

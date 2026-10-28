@@ -20,7 +20,7 @@ from ziplime.finance.bonds import (
 
 
 class QuotationTests(unittest.TestCase):
-    """A quote of 98.5 on a 1000 nominal is 985 roubles, not 98.50."""
+    """A quote of 98.5 on a 1000 nominal is 985 euros, not 98.50."""
 
     def test_percent_quote_is_a_share_of_face_value(self):
         self.assertAlmostEqual(
@@ -162,7 +162,7 @@ class AmortizationTests(unittest.TestCase):
     def test_face_value_is_derived_when_the_vendor_omits_the_new_nominal(self):
         from ziplime.assets.entities.bond_event import BondEvent
         partial = BondEvent(asset=self.bond, event_type=BondEventType.AMORTIZATION,
-                            date=datetime.date(2024, 1, 10), value=300.0, currency="RUB",
+                            date=datetime.date(2024, 1, 10), value=300.0, currency="EUR",
                             initial_face_value=1000.0)
         book = BondBook()
         book.add(self.bond.id, [partial])

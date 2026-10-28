@@ -17,14 +17,16 @@ class InvestmentHistory:
         Explicit opening balances, external funding, and executed FX cash legs.
     income_due : tuple[tuple[datetime.date, InvestmentEvent], ...], optional
         Unpaid ``(payment_date, entitlement)`` pairs. Entitlements retain the
-        account quantity at earning time; the ledger sets posting time on payment.
+        account quantity at earning time; the position tracker owns these
+        entitlements and the ledger sets posting time on payment.
 
     Notes
     -----
     This is a domain-event export, not a file/database serialization format.
     Callers must resolve listing identities and restore matching execution
-    positions and timestamped marks separately. ``InvestmentBook`` replays
-    posted events; ``Ledger`` additionally restores unpaid entitlements.
+    positions and timestamped marks separately. ``Ledger`` restores postings
+    and the position tracker's unpaid entitlements. Trade records are exported
+    from the ledger's original transactions; they are not stored a second time.
     """
 
     events: tuple[InvestmentEvent, ...]

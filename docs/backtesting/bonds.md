@@ -9,7 +9,7 @@ are handled by the engine so that a strategy can order a bond the same way it or
 ### The quote is not the price
 
 Exchanges quote a bond as a **percentage of its face value**. A quote of
-`98.42` on a 1000-rouble nominal means 984.20 roubles per bond, not 98.42. Reading the quote as
+`98.42` on a 1000-euro nominal means 984.20 euros per bond, not 98.42. Reading the quote as
 money understates every bond position by roughly `face_value / 100`: a factor of ten on a standard
 nominal.
 

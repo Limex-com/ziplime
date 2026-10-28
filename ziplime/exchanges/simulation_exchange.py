@@ -10,6 +10,7 @@ from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.bond import Bond
+from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
@@ -28,12 +29,17 @@ from ziplime.finance.domain.commission import Commission
 from ziplime.finance.domain.order import Order
 from ziplime.finance.domain.order_status import OrderStatus
 from ziplime.finance.execution import ExecutionStyle
+from ziplime.finance.slippage.no_slippage import NoSlippage
 from ziplime.finance.slippage.slippage_model import SlippageModel
 from ziplime.exchanges.exchange import Exchange
 from ziplime.gens.domain.trading_clock import TradingClock
 
 
 class SimulationExchange(Exchange):
+    """Simulated venue with separate execution models for each instrument type.
+
+    Currency trades default to independent NoSlippage and NoCommission models.
+    """
 
     def __init__(self,
                  name: str,
@@ -52,7 +58,9 @@ class SimulationExchange(Exchange):
                  option_slippage: SlippageModel = None,
                  option_commission: OptionCommissionModel = None,
                  data_source: DataSource = None,
-                 price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close"
+                 price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
+                 currency_slippage: SlippageModel | None = None,
+                 currency_commission: CommissionModel | None = None,
                  ):
         super().__init__(name=name,
                          canonical_name=name,
@@ -63,6 +71,7 @@ class SimulationExchange(Exchange):
                          account_id=account_id, is_default=is_default)
         self.slippage_models = {
             Equity: equity_slippage,
+            Currency: currency_slippage if currency_slippage is not None else NoSlippage(),
             Bond: bond_slippage if bond_slippage is not None else equity_slippage,
             FuturesContract: future_slippage,
             # An option's fill is a percentage of a premium, which is what the equity models
@@ -73,6 +82,7 @@ class SimulationExchange(Exchange):
         }
         self.commission_models = {
             Equity: equity_commission,
+            Currency: currency_commission if currency_commission is not None else NoCommission(),
             Bond: bond_commission if bond_commission is not None else NoCommission(),
             FuturesContract: future_commission,
             # Options are billed per contract, never per share; see PerOptionContract for why
@@ -112,9 +122,14 @@ class SimulationExchange(Exchange):
                 f"{', '.join(sorted(t.__name__ for t in models))}."
             ) from None
 
-    async def submit_order(self, order: Order):
+    async def submit_order(self, order: Order) -> Order:
+        """Accept one order without filling it."""
         order.id = uuid.uuid4().hex
         return order
+
+    async def submit_orders(self, orders: list[Order]) -> list[Order]:
+        """Accept a batch in submission order, without filling its orders."""
+        return [await self.submit_order(order) for order in orders]
 
     async def get_portfolio(self) -> Portfolio:
         portfolio = Portfolio(start_date=datetime.datetime.now(tz=datetime.timezone.utc),
@@ -203,7 +218,8 @@ class SimulationExchange(Exchange):
         transactions = []
         commissions = []
 
-        for asset, asset_orders in orders.items():
+        # Process currency trades first so their cash legs precede security fills.
+        for asset, asset_orders in sorted(orders.items(), key=lambda item: not isinstance(item[0].asset, Currency)):
             slippage = self.get_slippage_model(asset=asset)
 
             async for order, txn in slippage.simulate(exchange=self,
@@ -222,7 +238,7 @@ class SimulationExchange(Exchange):
                             asset=order.asset,
                             order=order,
                             amount=additional_commission,
-                            transaction_id=txn.id,
+                            transaction=txn,
                             dt=txn.dt,
                         )
                     )

@@ -86,7 +86,7 @@ class Exchange(DataSource, ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def submit_order(self, order: Order):
+    async def submit_order(self, order: Order) -> Order:
         raise NotImplementedError
 
     @abstractmethod

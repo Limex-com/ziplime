@@ -80,14 +80,15 @@ def make_ledger(cash: float = 1_000_000.0) -> Ledger:
 def trade(ledger: Ledger, asset: ExchangeAsset, amount: int, price: float,
           dt: datetime.datetime | None = None, commission: float = 0.0) -> None:
     """Execute a transaction and mark the resulting position at the traded price."""
-    ledger.process_transaction(Transaction(
-        id=f"{asset.symbol}-{amount}-{price}",
+    executed = Transaction(
+        id=f"{asset.symbol}-{amount}-{price}-{len(ledger.transaction_history)}",
         amount=amount,
         dt=dt or datetime.datetime(2023, 6, 1, tzinfo=datetime.timezone.utc),
-        price=price, exchange_name=EXCHANGE.mic, trading_account_id=ACCOUNT, asset=asset))
+        price=price, exchange_name=EXCHANGE.mic, trading_account_id=ACCOUNT, asset=asset)
+    ledger.process_transaction(executed)
     if commission:
         ledger.process_commission(
-            Commission(asset=asset, order=None, amount=commission), tr=None)
+            Commission(asset=asset, order=None, amount=commission, transaction=executed), tr=None)
     position = ledger.position_tracker.get_position(
         asset=asset,
         exchange_name=EXCHANGE.mic,

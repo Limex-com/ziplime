@@ -39,7 +39,7 @@ class Bond(Asset):
     maturity_date: datetime.date
     coupon_rate: float = 0.0
     coupon_frequency: int = 0
-    quote_currency: str = "RUB"
+    quote_currency: str = "EUR"
     day_count: DayCount = DayCount.ACT_365
     price_quotation: PriceQuotation = PriceQuotation.PERCENT_OF_FACE
     is_amortized: bool = False

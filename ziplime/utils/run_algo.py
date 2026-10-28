@@ -12,6 +12,10 @@ from ziplime.assets.services.asset_service import AssetService
 from ziplime.core.algorithm_file import AlgorithmFile
 from ziplime.data.services.data_source import DataSource
 from ziplime.exchanges.exchange import Exchange
+from ziplime.exchanges.simulation_exchange import SimulationExchange
+from ziplime.assets.entities.currency import Currency
+from ziplime.finance.commission.commission_model import CommissionModel
+from ziplime.finance.slippage.slippage_model import SlippageModel
 from ziplime.finance.controls.max_leverage import MaxLeverage
 
 from ziplime.finance.blotter.in_memory_blotter import InMemoryBlotter
@@ -79,11 +83,19 @@ async def run_algorithm(
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
         currency_reporting: CurrencyReporting | None = None,
         currency_conversion: CurrencyConversionService | None = None,
+        currency_slippage: SlippageModel | None = None,
+        currency_commission: CommissionModel | None = None,
 ) -> TradingAlgorithmExecutionResult:
     """Run a backtest for the given algorithm, shared by CLI and simulation entry points.
 
     Parameters
     ----------
+    currency_slippage : SlippageModel or None, optional
+        Override currency slippage on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
+    currency_commission : CommissionModel or None, optional
+        Override currency commission on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
     currency_reporting : CurrencyReporting or None, optional
         Independent reporting currencies and optional investment accounting,
         forwarded unchanged to ``TradingAlgorithm``.
@@ -107,7 +119,9 @@ async def run_algorithm(
                                   exchange_repository=exchange_repository,
                                   price_used_in_order_execution=price_used_in_order_execution,
                                   intraday_metrics=intraday_metrics, currency_reporting=currency_reporting,
-                                  currency_conversion=currency_conversion)
+                                  currency_conversion=currency_conversion,
+                                  currency_slippage=currency_slippage,
+                                  currency_commission=currency_commission)
     trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
     result = await trading_algorithm_executor.run_algorithm(trading_algorithm=tr)
@@ -137,11 +151,19 @@ async def run_algorithm_iter(
         intraday_metrics: bool = False,
         currency_reporting: CurrencyReporting | None = None,
         currency_conversion: CurrencyConversionService | None = None,
+        currency_slippage: SlippageModel | None = None,
+        currency_commission: CommissionModel | None = None,
 ) -> AsyncIterator[TradingAlgorithmExecutionStatus]:
     """Stream a backtest using the same preparation as ``run_algorithm``.
 
     Parameters
     ----------
+    currency_slippage : SlippageModel or None, optional
+        Override currency slippage on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
+    currency_commission : CommissionModel or None, optional
+        Override currency commission on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
     currency_reporting : CurrencyReporting or None, optional
         Independent currency metrics and optional investment accounting. Child
         performance packets are attached under ``metrics_by_currency``.
@@ -165,7 +187,9 @@ async def run_algorithm_iter(
                                   exchange_repository=exchange_repository,
                                   intraday_metrics=intraday_metrics,
                                   currency_reporting=currency_reporting,
-                                  currency_conversion=currency_conversion)
+                                  currency_conversion=currency_conversion,
+                                  currency_slippage=currency_slippage,
+                                  currency_commission=currency_commission)
     trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
     async for status in trading_algorithm_executor.run_algorithm_iter(trading_algorithm=tr):
@@ -195,11 +219,19 @@ async def _prepare_algorithm(
         intraday_metrics: bool = False,
         currency_reporting: CurrencyReporting | None = None,
         currency_conversion: CurrencyConversionService | None = None,
-) -> TradingAlgorithmExecutionResult:
+        currency_slippage: SlippageModel | None = None,
+        currency_commission: CommissionModel | None = None,
+) -> TradingAlgorithm:
     """Prepare strategy, native benchmark, and shared services without executing bars.
 
     Parameters
     ----------
+    currency_slippage : SlippageModel or None, optional
+        Override currency slippage on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
+    currency_commission : CommissionModel or None, optional
+        Override currency commission on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
     currency_reporting : CurrencyReporting or None, optional
         Configuration passed unchanged to the algorithm and its metrics tracker.
         Currency benchmark wrappers are created later by that tracker.
@@ -300,6 +332,11 @@ async def _prepare_algorithm(
         await benchmark_source.validate_benchmark(benchmark_asset=benchmark_asset)
 
     for exchange in reversed(await exchange_repository.get_all_exchanges()):
+        if isinstance(exchange, SimulationExchange):
+            if currency_slippage is not None:
+                exchange.slippage_models[Currency] = currency_slippage
+            if currency_commission is not None:
+                exchange.commission_models[Currency] = currency_commission
         custom_data_sources.insert(0, exchange)
 
     tr = TradingAlgorithm(

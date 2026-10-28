@@ -24,7 +24,7 @@ class FuturesRoot:
     #: Cash or physical delivery, inherited by every contract in the chain.
     settlement_type: SettlementType = SettlementType.CASH
     #: Currency the exchange collects margin in; not necessarily ``quote_currency``.
-    margin_currency: str = "RUB"
+    margin_currency: str = "EUR"
 
     def __hash__(self):
         return hash(self.root_symbol)

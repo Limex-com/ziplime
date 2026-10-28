@@ -63,16 +63,16 @@ async def handle_data(context: TradingAlgorithm, data: BarData) -> None:
         context.record(submitted_orders_usd=submitted.gross_value)
 
     elif context.session_number == 2:
-        rub = await context.investment_pnl(currency="RUB")
+        eur = await context.investment_pnl(currency="EUR")
         usd = await context.value_positions(currency="USD")
-        rub_sber = next(position for position in rub.positions if position.key[2] == context.sber)
+        eur_sber = next(position for position in eur.positions if position.key[2] == context.sber)
         usd_sber = next(position for position in usd.positions if position.key[2] == context.sber)
-        print("\nSBER after its RUB price rises and RUB weakens:")
-        print(f"  RUB cost {rub_sber.historical_cost:,.2f}, value {rub_sber.market_value:,.2f}, "
-              f"PNL {rub_sber.unrealized_pnl:+,.2f}")
+        print("\nSBER after its EUR price rises and EUR weakens:")
+        print(f"  EUR cost {eur_sber.historical_cost:,.2f}, value {eur_sber.market_value:,.2f}, "
+              f"PNL {eur_sber.unrealized_pnl:+,.2f}")
         print(f"  USD historical cost {usd_sber.historical_cost:,.4f}, value {usd_sber.market_value:,.4f}, "
               f"PNL {usd_sber.unrealized_pnl:+,.4f}")
-        context.record(sber_pnl_rub=rub_sber.unrealized_pnl, sber_pnl_usd=usd_sber.unrealized_pnl)
+        context.record(sber_pnl_eur=eur_sber.unrealized_pnl, sber_pnl_usd=usd_sber.unrealized_pnl)
 
     elif context.session_number == 3:
         await context.order(asset=context.sber, amount=-100, style=MarketOrder())
@@ -80,8 +80,8 @@ async def handle_data(context: TradingAlgorithm, data: BarData) -> None:
 
     elif context.session_number == 4:
         investment = await context.investment_pnl(currency="USD", trading_account_id="simulation_account")
-        print(f"\nAfter RUB weakens further: security PNL stays USD {investment.total_pnl:+.4f}.")
-        print("  Retained RUB cash loses another USD 5; see cash_fx_pnl in the result table.")
+        print(f"\nAfter EUR weakens further: security PNL stays USD {investment.total_pnl:+.4f}.")
+        print("  Retained EUR cash loses another USD 5; see cash_fx_pnl in the result table.")
 
     elif context.session_number == 5:
         await context.fund_account(
@@ -93,9 +93,9 @@ async def handle_data(context: TradingAlgorithm, data: BarData) -> None:
         )
         # Actual executed amounts, not an inferred conversion or an instruction to a broker.
         await context.exchange_currency(
-            source_currency="RUB", currency="USD", sold=2200, received=10,
+            source_currency="EUR", currency="USD", sold=2200, received=10,
             exchange_name="LIME", trading_account_id="simulation_account", execution_id="demo-fx")
-        print("\nPosted a USD 25 external deposit and exchanged RUB 2,200 for USD 10.")
+        print("\nPosted a USD 25 external deposit and exchanged EUR 2,200 for USD 10.")
 
     # Orders are not holdings until filled; this snapshot reflects only already-booked fills.
     investment = await context.investment_pnl(currency="USD")

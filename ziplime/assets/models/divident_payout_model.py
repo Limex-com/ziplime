@@ -16,3 +16,4 @@ class DividendPayoutModel(BaseModel):
     record_date: Mapped[datetime.date]
     pay_date: Mapped[datetime.date]
     amount: Mapped[float]
+    currency_id: Mapped[AssetRouterFK]

@@ -13,7 +13,7 @@ def test_cash_event_normalizes_kinds_and_preserves_serialized_values(kind, seria
     event = CashEvent(
         id="posting",
         dt=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
-        key=("MOEX", "account", "RUB"),
+        key=("MOEX", "account", "EUR"),
         amount=100,
         kind=kind.value if serialized else kind,
     )
@@ -27,7 +27,7 @@ def test_cash_event_rejects_unsupported_kinds_at_construction(kind):
         CashEvent(
             id="posting",
             dt=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
-            key=("MOEX", "account", "RUB"),
+            key=("MOEX", "account", "EUR"),
             amount=100,
             kind=kind,
         )

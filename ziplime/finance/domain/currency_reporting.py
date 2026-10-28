@@ -31,7 +31,8 @@ class CurrencyReporting:
         Native balances keyed by ``(exchange_name, trading_account_id, currency)``.
         In investment mode these replace scalar opening cash; otherwise a
         single-exchange run seeds scalar cash in ``base_currency``. Multi-exchange
-        investment runs require explicit balances. Negative balances are allowed.
+        investment runs require explicit balances. Opening balances must be
+        nonnegative; orders require projected funding in the payment currency.
     investment_history : InvestmentHistory or None, optional
         Native posted events, cash, and unpaid income entitlements to restore in
         investment mode. History takes precedence over ``opening_cash``. Existing
@@ -45,7 +46,9 @@ class CurrencyReporting:
     Notes
     -----
     All attributes are constructor arguments. This frozen configuration does not
-    execute FX trades, enforce funding, or serialize investment history.
+    execute FX trades or serialize investment history. Order admission rejects
+    unfunded projected costs unless a simulation enables automatic currency exchange.
+    Executed trades and fees retain actual amounts if they exceed the projection.
     """
 
     base_currency: str

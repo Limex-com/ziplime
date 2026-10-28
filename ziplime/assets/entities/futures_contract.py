@@ -26,7 +26,7 @@ class FuturesContract(Asset):
     multiplier: float
     tick_size: float
     settlement_type: SettlementType = SettlementType.CASH
-    margin_currency: str = "RUB"
+    margin_currency: str = "EUR"
 
     @property
     def is_deliverable(self) -> bool:

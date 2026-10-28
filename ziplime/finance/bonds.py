@@ -331,7 +331,7 @@ def simple_yield_to_maturity(bond: Bond, book: BondBook, quoted_price: float, dt
     """Annualised return of buying at ``quoted_price`` and holding to maturity, without compounding.
 
     ``(remaining coupons + redemption - price paid) / price paid``, annualised over the years left.
-    A simple approximation rather than an IRR: it is the number a rouble-bond desk quotes as
+    A simple approximation rather than an IRR: it is the number a bond desk quotes as
     "simple yield", and it needs no solver, which keeps it usable inside a bar loop.
     Returns 0.0 for a bond already at or past maturity.
     """

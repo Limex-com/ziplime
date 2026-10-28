@@ -8,12 +8,12 @@ class PriceQuotation(enum.Enum):
     Equities and futures quote money per unit; the number on the tape multiplied by the position
     size (and the multiplier) is the exposure. Bonds do not. Most exchanges quote a
     bond as a **percentage of its face value**: ``98.42`` means 98.42% of the nominal, so a lot of
-    ten 1000-rouble bonds at that quote is 9842 roubles, not 984.20. Reading a bond quote as money
+    ten 1000-euro bonds at that quote is 9842 euros, not 984.20. Reading a bond quote as money
     understates every bond position by a factor of roughly ``face_value / 100`` -- for a standard
-    1000-rouble nominal, a factor of ten.
+    1000-euro nominal, a factor of ten.
     """
 
-    #: The quote is money per unit, e.g. an equity at 312.5 RUB per share.
+    #: The quote is money per unit, e.g. an equity at 312.5 EUR per share.
     MONEY = "MONEY"
     #: The quote is a percentage of face value, e.g. a bond at 98.42% of a 1000 nominal.
     PERCENT_OF_FACE = "PERCENT_OF_FACE"

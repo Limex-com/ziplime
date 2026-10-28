@@ -22,11 +22,11 @@ async def test_example_shows_mixed_order_values_historical_costs_and_post_sale_c
     assert service.conversion is result.trading_algorithm.currency_conversion
     assert service.bond_book is result.trading_algorithm._ledger.bond_book
     assert result.errors == []
-    assert list(result.perf_by_currency) == ["RUB", "USD"]
+    assert list(result.perf_by_currency) == ["EUR", "USD"]
     usd = result.perf_by_currency["USD"]
     assert len(usd) == 5
     assert usd["submitted_orders_usd"].iloc[0] == pytest.approx(expected=10_000 / 82 + 150)
-    assert usd["sber_pnl_rub"].iloc[1] == pytest.approx(expected=1000)
+    assert usd["sber_pnl_eur"].iloc[1] == pytest.approx(expected=1000)
     assert usd["sber_pnl_usd"].iloc[1] == pytest.approx(expected=55 - 10_000 / 82)
     assert usd["investment_realized_pnl"].iloc[2] == pytest.approx(expected=55 - 10_000 / 82)
     assert usd["investment_unrealized_pnl"].iloc[-1] == pytest.approx(expected=0)

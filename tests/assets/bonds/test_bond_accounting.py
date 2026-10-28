@@ -26,7 +26,7 @@ class PurchaseCashFlowTests(unittest.IsolatedAsyncioTestCase):
     """What leaves the account when a bond is bought."""
 
     async def test_buying_pays_the_face_value_not_the_quote(self):
-        # 10 bonds at 100% of a 1000 nominal is 10 000 roubles. Reading the quote as money would
+        # 10 bonds at 100% of a 1000 nominal is 10 000 euros. Reading the quote as money would
         # take 1000 -- a factor of ten, and the single most consequential bond bug there is.
         ledger = make_ledger(cash=1_000_000.0)
         listing = make_bond()
@@ -130,7 +130,7 @@ class PositionValueTests(unittest.IsolatedAsyncioTestCase):
         mark(ledger, listing, 101.0, dt=coupon_date)
         await settle(ledger)
 
-        # One point on ten 1000-nominal bonds is 100 roubles.
+        # One point on ten 1000-nominal bonds is 100 euros.
         self.assertAlmostEqual(ledger.position_tracker.stats.net_value, 10_100.0)
 
     async def test_a_short_position_has_negative_value(self):
@@ -461,7 +461,7 @@ class RedemptionEventTests(unittest.IsolatedAsyncioTestCase):
         events = make_coupon_events(listing)
         return events + [BondEvent(
             asset=listing.asset, event_type=BondEventType.MATURITY,
-            date=listing.asset.maturity_date, value=final_value, currency="RUB",
+            date=listing.asset.maturity_date, value=final_value, currency="EUR",
             record_date=listing.asset.maturity_date - datetime.timedelta(days=1))]
 
     async def test_a_redemption_event_does_not_pay_on_top_of_the_repayment(self):
@@ -485,7 +485,7 @@ class RedemptionEventTests(unittest.IsolatedAsyncioTestCase):
         events = (make_coupon_events(listing)
                   + make_amortization_events(listing, [(datetime.date(2024, 1, 10), 600.0)])
                   + [BondEvent(asset=listing.asset, event_type=BondEventType.MATURITY,
-                               date=listing.asset.maturity_date, value=400.0, currency="RUB")])
+                               date=listing.asset.maturity_date, value=400.0, currency="EUR")])
         service = StubBondService({listing.asset.id: events})
         ledger = make_ledger(cash=1_000_000.0)
         load_schedule(ledger, listing, events)
@@ -526,7 +526,7 @@ class OfferTests(unittest.IsolatedAsyncioTestCase):
         offer_date = datetime.date(2024, 7, 10)
         events = make_coupon_events(listing) + [BondEvent(
             asset=listing.asset, event_type=BondEventType.OFFER, date=offer_date, value=0.0,
-            currency="RUB", offer_type="put", offer_price=100.0,
+            currency="EUR", offer_type="put", offer_price=100.0,
             offer_start_date=offer_date - datetime.timedelta(days=7), offer_end_date=offer_date)]
         service = StubBondService({listing.asset.id: events})
         ledger = make_ledger(cash=1_000_000.0)
@@ -543,7 +543,7 @@ class OfferTests(unittest.IsolatedAsyncioTestCase):
         offer_date = datetime.date(2024, 7, 10)
         events = make_coupon_events(listing) + [BondEvent(
             asset=listing.asset, event_type=BondEventType.OFFER, date=offer_date, value=0.0,
-            currency="RUB", offer_type="put", offer_price=100.0)]
+            currency="EUR", offer_type="put", offer_price=100.0)]
         ledger = make_ledger()
         load_schedule(ledger, listing, events)
 
@@ -582,7 +582,7 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_commission_lands_in_the_cost_basis_in_quote_units(self):
         # The cost basis is carried in quote units, so a commission in money has to be converted
-        # or a three-rouble fee moves the basis by three percentage points.
+        # or a three-euro fee moves the basis by three percentage points.
         ledger = make_ledger(cash=1_000_000.0)
         listing = make_bond()
         coupon_date = make_coupon_events(listing)[2].date
@@ -592,7 +592,7 @@ class CommissionTests(unittest.IsolatedAsyncioTestCase):
 
         position = ledger.position_tracker.get_position(
             listing, EXCHANGE.mic, ACCOUNT)
-        # 30 roubles over ten bonds is 3 roubles each, which is 0.3% of a 1000 nominal.
+        # 30 euros over ten bonds is 3 euros each, which is 0.3% of a 1000 nominal.
         self.assertAlmostEqual(position.cost_basis, 100.3)
 
 

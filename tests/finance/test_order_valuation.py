@@ -9,7 +9,7 @@ import polars as pl
 import pytest
 
 from tests.finance.currency_fixtures import currency
-from tests.finance.investment_fixtures import book, SBER, START, END
+from tests.finance.investment_fixtures import accounting_ledger, SBER, START, END
 from ziplime.finance.domain.ledger import Ledger
 from ziplime.finance.domain.order import Order
 from ziplime.finance.domain.order_price_basis import OrderPriceBasis
@@ -23,7 +23,7 @@ from ziplime.trading.trading_algorithm import TradingAlgorithm
 @pytest.mark.asyncio
 async def test_orders_are_comparable_without_metrics_and_preserve_quantity_and_price_bases():
     algorithm = TradingAlgorithm.__new__(TradingAlgorithm)
-    algorithm.currency_conversion = book().valuation.conversion
+    algorithm.currency_conversion = accounting_ledger()._monetary_valuation.conversion
     algorithm.currency_reporting = None
     algorithm._ledger = Ledger(
         trading_sessions=pd.DatetimeIndex(data=[START, END]),
@@ -41,7 +41,7 @@ async def test_orders_are_comparable_without_metrics_and_preserve_quantity_and_p
     algorithm.exchange_repository = SimpleNamespace(get_exchange_by_mic=AsyncMock(return_value=exchange))
     orders = [
         Order(
-            id="rub",
+            id="eur",
             dt=START,
             asset=SBER,
             amount=2,
@@ -66,7 +66,7 @@ async def test_orders_are_comparable_without_metrics_and_preserve_quantity_and_p
         ),
     ]
     submitted = await algorithm.value_orders(orders=orders, currency="USD")
-    assert [order.order_id for order in submitted.orders] == ["rub", "usd"]
+    assert [order.order_id for order in submitted.orders] == ["eur", "usd"]
     assert submitted.gross_value == pytest.approx(expected=91.1)
     assert submitted.net_value == pytest.approx(expected=-88.9)
     assert submitted.orders[0].price_basis is OrderPriceBasis.MARKET

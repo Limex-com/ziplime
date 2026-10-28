@@ -211,7 +211,7 @@ class BondSimulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(cash, expected, places=2)
 
     async def test_the_position_is_valued_against_face_value(self):
-        # A hundred bonds near par is about 100 000 roubles of position, not about 10 000. Getting
+        # A hundred bonds near par is about 100 000 euros of position, not about 10 000. Getting
         # this wrong is invisible in the cash but wrecks every leverage and exposure figure.
         start, end = dt.date(2023, 6, 1), dt.date(2023, 9, 1)
         cash, value, errors = await self.run_backtest("ZLB26", start, end)
@@ -226,7 +226,7 @@ class BondOrderSizingTests(BondSimulationTests):
     """Sizing a bond order by money rather than by count."""
 
     async def test_order_value_sizes_against_the_dirty_price(self):
-        # 100 000 roubles of a bond near par is about 100 bonds, not about 1 000. Sizing off the
+        # 100 000 euros of a bond near par is about 100 bonds, not about 1 000. Sizing off the
         # quote -- a percentage of face value -- would buy roughly ten times too many.
         start, end = dt.date(2023, 6, 1), dt.date(2023, 9, 1)
         captured: dict = {}

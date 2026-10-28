@@ -7,11 +7,12 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import polars as pl
-from iso4217 import Currency as ISO4217Currency
 
 from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.entities.asset_symbol import AssetSymbol
@@ -27,6 +28,7 @@ from ziplime.data.domain.data_bundle import DataBundle
 from ziplime.domain.portfolio import Portfolio
 from ziplime.finance.commission.no_commission import NoCommission
 from ziplime.finance.domain.ledger import Ledger
+from ziplime.finance.domain.dividend_cash_payment import DividendCashPayment
 from ziplime.finance.domain.position_tracker import PositionTracker
 from ziplime.utils.calendar_utils import get_calendar
 
@@ -77,6 +79,7 @@ def make_exchange_asset(sid: int = 101) -> ExchangeAsset:
 def make_dividend(
     asset: Equity,
     *,
+    currency: CurrencyAsset,
     amount: float = 1.0,
     ex_date: dt.date = dt.date(2025, 1, 6),
     pay_date: dt.date = dt.date(2025, 1, 10),
@@ -88,7 +91,7 @@ def make_dividend(
         record_date=ex_date + dt.timedelta(days=1),
         ex_date=ex_date,
         pay_date=pay_date,
-        currency=ISO4217Currency.USD,
+        currency=currency,
     )
 
 
@@ -126,6 +129,7 @@ class PositionTrackerDividendTests(unittest.IsolatedAsyncioTestCase):
         tracker = self.tracker_with_position(10)
         dividend = make_dividend(
             self.asset.asset,
+            currency=self.asset.quote,
             amount=1.25,
             ex_date=self.ex_date,
             pay_date=self.pay_date,
@@ -133,13 +137,14 @@ class PositionTrackerDividendTests(unittest.IsolatedAsyncioTestCase):
 
         tracker.earn_dividends([dividend], [])
 
-        self.assertEqual(tracker.pay_dividends(self.pay_date), 12.5)
-        self.assertEqual(tracker.pay_dividends(self.pay_date), 0.0)
+        self.assertEqual(tracker.pay_dividends(self.pay_date), {"USD": 12.5})
+        self.assertEqual(tracker.pay_dividends(self.pay_date), {})
 
     def test_sale_after_ex_date_does_not_remove_entitlement(self):
         tracker = self.tracker_with_position(10)
         dividend = make_dividend(
             self.asset.asset,
+            currency=self.asset.quote,
             ex_date=self.ex_date,
             pay_date=self.pay_date,
         )
@@ -147,7 +152,31 @@ class PositionTrackerDividendTests(unittest.IsolatedAsyncioTestCase):
         tracker.earn_dividends([dividend], [])
         tracker.positions.clear()
 
-        self.assertEqual(tracker.pay_dividends(self.pay_date), 10.0)
+        self.assertEqual(tracker.pay_dividends(self.pay_date), {"USD": 10.0})
+
+    def test_payments_retain_exchange_account_listing_and_original_payout(self):
+        tracker = self.tracker_with_position(10)
+        other_listing = replace(self.asset, sid=102)
+        tracker.update_position(
+            asset=other_listing, exchange_name="OTHER", trading_account_id="short-account",
+            amount=-3, last_sale_price=100.0)
+        dividend = make_dividend(self.asset.asset, currency=self.asset.quote)
+
+        tracker.earn_dividends([dividend], [])
+        tracker.earn_dividends([dividend], [])
+        payments = tracker._unpaid_income[self.pay_date]
+
+        self.assertEqual(len(payments), 2)
+        self.assertTrue(all(isinstance(payment, DividendCashPayment) for payment in payments))
+        self.assertTrue(all(payment.dividend_payout is dividend for payment in payments))
+        self.assertEqual(
+            [(payment.exchange_name, payment.trading_account_id, payment.exchange_asset, payment.amount)
+             for payment in payments],
+            [("LIME", "account-1", self.asset, 10.0), ("OTHER", "short-account", other_listing, -3.0)])
+        tracker.positions.clear()
+        self.assertEqual(tracker.pay_dividends(self.pay_date), {"USD": 7.0})
+        tracker.earn_dividends([dividend], [])
+        self.assertEqual(tracker.pay_dividends(self.pay_date), {})
 
     def test_positions_across_accounts_are_aggregated(self):
         tracker = self.tracker_with_position(10)
@@ -160,13 +189,66 @@ class PositionTrackerDividendTests(unittest.IsolatedAsyncioTestCase):
         )
         dividend = make_dividend(
             self.asset.asset,
+            currency=self.asset.quote,
             ex_date=self.ex_date,
             pay_date=self.pay_date,
         )
 
         tracker.earn_dividends([dividend], [])
 
-        self.assertEqual(tracker.pay_dividends(self.pay_date), 30.0)
+        self.assertEqual(tracker.pay_dividends(self.pay_date), {"USD": 30.0})
+
+    def test_datetime_session_pays_date_entitlement_once(self):
+        for timezone in (None, dt.timezone.utc):
+            with self.subTest(timezone=timezone):
+                tracker = self.tracker_with_position(10)
+                dividend = make_dividend(
+                    self.asset.asset, currency=self.asset.quote,
+                    ex_date=self.ex_date, pay_date=self.pay_date)
+                tracker.earn_dividends([dividend], [])
+                session = dt.datetime.combine(self.pay_date, dt.time(), tzinfo=timezone)
+
+                self.assertEqual(tracker.pay_dividends(session), {"USD": 10.0})
+                self.assertEqual(tracker.pay_dividends(self.pay_date), {})
+
+    def test_overdue_payments_keep_currencies_separate_and_preserve_future_payments(self):
+        tracker = self.tracker_with_position(10)
+        saturday, sunday = dt.date(2025, 1, 11), dt.date(2025, 1, 12)
+        monday, tuesday = dt.date(2025, 1, 13), dt.date(2025, 1, 14)
+        euro = replace(self.asset.quote, id=3, asset_name="EUR")
+        dividends = [
+            make_dividend(self.asset.asset, currency=self.asset.quote, amount=1.0, pay_date=saturday),
+            make_dividend(self.asset.asset, currency=self.asset.quote, amount=2.0, pay_date=sunday),
+            make_dividend(self.asset.asset, currency=euro, amount=3.0, pay_date=monday),
+            make_dividend(self.asset.asset, currency=self.asset.quote, amount=4.0, pay_date=tuesday),
+        ]
+        tracker.earn_dividends(dividends, [])
+        tracker.positions.clear()  # Selling after earning must not forfeit the payment.
+
+        self.assertEqual(tracker.pay_dividends(self.pay_date), {})
+        self.assertEqual(tracker.pay_dividends(monday), {"USD": 30.0, "EUR": 30.0})
+        self.assertEqual(tracker.pay_dividends(monday), {})
+        self.assertEqual(tracker.pay_dividends(tuesday), {"USD": 40.0})
+        self.assertEqual(tracker.pay_dividends(tuesday), {})
+
+    def test_overdue_stock_dividends_are_paid_once_and_preserve_future_payments(self):
+        tracker = self.tracker_with_position(10)
+        saturday, monday, tuesday = dt.date(2025, 1, 11), dt.date(2025, 1, 13), dt.date(2025, 1, 14)
+        stock_dividends = [
+            SimpleNamespace(asset=self.asset.asset, payment_asset=self.asset, ratio=0.5, pay_date=saturday),
+            SimpleNamespace(asset=self.asset.asset, payment_asset=self.asset, ratio=0.2, pay_date=tuesday),
+        ]
+        tracker.earn_dividends([], stock_dividends)
+        position = tracker.positions[("LIME", "account-1", self.asset)]
+
+        self.assertEqual(tracker.pay_dividends(dt.datetime.combine(monday, dt.time())), {})
+        self.assertEqual(position.amount, 15)
+        tracker.pay_dividends(monday)
+        self.assertEqual(position.amount, 15)
+        tracker.pay_dividends(tuesday)
+        self.assertEqual(position.amount, 17)
+        tracker.pay_dividends(tuesday)
+        self.assertEqual(position.amount, 17)
 
     async def test_portfolio_helper_aggregates_positions_across_accounts(self):
         tracker = self.tracker_with_position(10)
@@ -195,12 +277,33 @@ class PositionTrackerDividendTests(unittest.IsolatedAsyncioTestCase):
 
 
 class LedgerDividendTests(unittest.IsolatedAsyncioTestCase):
+    async def test_datetime_sessions_earn_and_pay_weekend_dividend_on_next_session(self):
+        ex_date, pay_date, monday = dt.date(2025, 1, 6), dt.date(2025, 1, 11), dt.date(2025, 1, 13)
+        asset = make_exchange_asset()
+        dividend = make_dividend(asset.asset, currency=asset.quote, ex_date=ex_date, pay_date=pay_date)
+        ledger = Ledger(
+            trading_sessions=pd.DatetimeIndex([ex_date, monday]), data_frequency=dt.timedelta(days=1))
+        ledger._portfolio.cash = 1_000.0
+        ledger.position_tracker.update_position(
+            asset=asset, exchange_name="LIME", trading_account_id="account-1", amount=10, last_sale_price=100.0)
+        service = InMemoryDividendService([dividend])
+
+        await ledger.process_dividends(dt.datetime.combine(ex_date, dt.time(), tzinfo=dt.timezone.utc), service)
+        self.assertEqual(ledger.portfolio.cash, 1_000.0)
+        session = dt.datetime.combine(monday, dt.time(), tzinfo=dt.timezone.utc)
+        await ledger.process_dividends(session, service)
+        self.assertEqual(ledger.portfolio.cash, 1_010.0)
+        await ledger.process_dividends(session, service)
+        self.assertEqual(ledger.portfolio.cash, 1_010.0)
+        self.assertEqual(ledger.portfolio.cash_flow, 10.0)
+
     async def test_short_dividend_is_applied_as_negative_cash_flow(self):
         ex_date = dt.date(2025, 1, 6)
         pay_date = dt.date(2025, 1, 10)
         asset = make_exchange_asset()
         dividend = make_dividend(
             asset.asset,
+            currency=asset.quote,
             amount=1.0,
             ex_date=ex_date,
             pay_date=pay_date,
@@ -231,6 +334,7 @@ class LedgerDividendTests(unittest.IsolatedAsyncioTestCase):
         asset = make_exchange_asset()
         dividend = make_dividend(
             asset.asset,
+            currency=asset.quote,
             amount=1.0,
             ex_date=ex_date,
             pay_date=pay_date,
@@ -264,6 +368,7 @@ class DividendRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.asset_service = get_asset_service(db_path=str(self.db_path))
         assets = await self.asset_service._asset_repository.get_all_assets()
         self.asset = next(asset for asset in assets.values() if isinstance(asset, Equity))
+        self.currency = await self.asset_service.get_currency_by_symbol("USD")
 
     async def asyncTearDown(self):
         await self.asset_service._asset_repository.engine.dispose()
@@ -275,6 +380,7 @@ class DividendRepositoryTests(unittest.IsolatedAsyncioTestCase):
         pay_date = dt.date(2025, 1, 20)
         payout = make_dividend(
             self.asset,
+            currency=self.currency,
             ex_date=ex_date,
             pay_date=pay_date,
         )
@@ -290,7 +396,7 @@ class DividendRepositoryTests(unittest.IsolatedAsyncioTestCase):
 
     @unittest.expectedFailure
     async def test_repeated_import_is_idempotent(self):
-        payout = make_dividend(self.asset)
+        payout = make_dividend(self.asset, currency=self.currency)
 
         await self.asset_service.import_dividends([payout])
         await self.asset_service.import_dividends([payout])
@@ -314,14 +420,14 @@ class DividendEndToEndTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(asset)
 
         if include_dividend:
-            # Seed a correctly normalized payout directly. The public import
-            # path is covered separately and currently corrupts ex_date.
+            # Seed the payout directly; the public import path is covered separately.
+            payout_currency = await asset_service.get_currency_by_symbol("USD")
             with sqlite3.connect(db_path) as connection:
                 connection.execute(
                     """
                     INSERT INTO dividend_payouts
-                        (asset_id, ex_date, declared_date, record_date, pay_date, amount)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (asset_id, ex_date, declared_date, record_date, pay_date, amount, currency_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         asset.asset.id,
@@ -330,6 +436,7 @@ class DividendEndToEndTests(unittest.IsolatedAsyncioTestCase):
                         "2024-07-11",
                         "2024-07-19",
                         33.3,
+                        payout_currency.id,
                     ),
                 )
 

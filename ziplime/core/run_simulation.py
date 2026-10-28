@@ -11,7 +11,7 @@ from ziplime.utils.calendar_utils import get_calendar
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.core.algorithm_file import AlgorithmFile
 from ziplime.data.services.data_source import DataSource
-from ziplime.finance.commission import PerShare, DEFAULT_PER_SHARE_COST, DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE, \
+from ziplime.finance.commission import CommissionModel, PerShare, DEFAULT_PER_SHARE_COST, DEFAULT_MINIMUM_COST_PER_EQUITY_TRADE, \
     PerContract, DEFAULT_PER_CONTRACT_COST, DEFAULT_MINIMUM_COST_PER_FUTURE_TRADE, EquityCommissionModel, \
     FutureCommissionModel, BondCommissionModel, PerBondTurnover, OptionCommissionModel, PerOptionContract
 from ziplime.finance.constants import DEFAULT_BOND_COMMISSION_RATE
@@ -70,6 +70,8 @@ async def run_simulation(
         intraday_metrics: bool = False,
         currency_reporting: CurrencyReporting | None = None,
         currency_conversion: CurrencyConversionService | None = None,
+        currency_slippage: SlippageModel | None = None,
+        currency_commission: CommissionModel | None = None,
 ) -> TradingAlgorithmExecutionResult:
     """
     Run a trading algorithm simulation within a defined time period and trading environment.
@@ -95,6 +97,10 @@ async def run_simulation(
         benchmark_asset_symbol (str | None, optional): Symbol for an asset to use as the benchmark. Defaults to None.
         benchmark_returns (pl.Series | None, optional): Custom benchmark returns for evaluation. Defaults to None.
         asset_service (AssetService): Service for managing assets.
+        currency_slippage (SlippageModel | None): Currency fill-price model. Defaults to
+            an independent NoSlippage model, including when equity slippage is configured.
+        currency_commission (CommissionModel | None): Currency fee model. Defaults to
+            an independent NoCommission model.
         equity_commission: Model used to calculate fees when trading equities.
                            If not specified, ziplime.finance.commission.PerShare model is used with a default
                            share cost of 0.001 and minimum cost of trade 0.00
@@ -173,6 +179,8 @@ async def run_simulation(
             bond_commission=bond_commission,
             option_slippage=option_slippage,
             option_commission=option_commission,
+            currency_slippage=currency_slippage,
+            currency_commission=currency_commission,
             cash_balance=total_cash,
             clock=clock,
             price_used_in_order_execution=price_used_in_order_execution,
@@ -201,6 +209,8 @@ async def run_simulation(
         intraday_metrics=intraday_metrics,
         currency_reporting=currency_reporting,
         currency_conversion=currency_conversion,
+        currency_slippage=currency_slippage,
+        currency_commission=currency_commission,
     )
 
 
@@ -237,6 +247,8 @@ async def run_simulation_iter(
         intraday_metrics: bool = False,
         currency_reporting: CurrencyReporting | None = None,
         currency_conversion: CurrencyConversionService | None = None,
+        currency_slippage: SlippageModel | None = None,
+        currency_commission: CommissionModel | None = None,
 ) -> AsyncIterator[TradingAlgorithmExecutionStatus]:
     """
     Run a trading algorithm simulation within a defined time period and trading environment.
@@ -262,6 +274,10 @@ async def run_simulation_iter(
         benchmark_asset_symbol (str | None, optional): Symbol for an asset to use as the benchmark. Defaults to None.
         benchmark_returns (pl.Series | None, optional): Custom benchmark returns for evaluation. Defaults to None.
         asset_service (AssetService): Service for managing assets.
+        currency_slippage (SlippageModel | None): Currency fill-price model. Defaults to
+            an independent NoSlippage model, including when equity slippage is configured.
+        currency_commission (CommissionModel | None): Currency fee model. Defaults to
+            an independent NoCommission model.
         equity_commission: Model used to calculate fees when trading equities.
                            If not specified, ziplime.finance.commission.PerShare model is used with a default
                            share cost of 0.001 and minimum cost of trade 0.00
@@ -340,6 +356,8 @@ async def run_simulation_iter(
             bond_commission=bond_commission,
             option_slippage=option_slippage,
             option_commission=option_commission,
+            currency_slippage=currency_slippage,
+            currency_commission=currency_commission,
             cash_balance=total_cash,
             clock=clock,
             price_used_in_order_execution=price_used_in_order_execution,
@@ -368,5 +386,7 @@ async def run_simulation_iter(
             intraday_metrics=intraday_metrics,
             currency_reporting=currency_reporting,
             currency_conversion=currency_conversion,
+            currency_slippage=currency_slippage,
+            currency_commission=currency_commission,
     ):
         yield status

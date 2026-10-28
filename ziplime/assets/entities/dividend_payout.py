@@ -1,8 +1,8 @@
 import datetime
 from dataclasses import dataclass
 
-from iso4217 import Currency
 from ziplime.assets.entities.asset import Asset
+from ziplime.assets.entities.currency import Currency
 
 
 @dataclass(frozen=True)

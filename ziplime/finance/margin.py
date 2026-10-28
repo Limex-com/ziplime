@@ -30,7 +30,7 @@ _logger = structlog.get_logger(__name__)
 NO_MARGIN_MODEL_WARNING = "NO FUTURES MARGIN MODEL"
 
 #: Fallback when a contract does not say which currency its margin is posted in.
-DEFAULT_MARGIN_CURRENCY = "RUB"
+DEFAULT_MARGIN_CURRENCY = "EUR"
 
 
 class MissingFxRate(ValueError):
@@ -63,14 +63,9 @@ def quote_currency_of(asset: ExchangeAsset) -> str:
 def margin_currency_of(asset: ExchangeAsset) -> str:
     """Currency the exchange collects margin for ``asset`` in.
 
-    A futures contract says so itself, because the answer is genuinely not derivable: an exchange
-    may quote a contract in dollars and still collect roubles. An instrument that does not carry
-    the field -- a margined option -- is margined in the currency it is **quoted** in, which is
-    true on both venues that have them: SPY options margin in dollars, MOEX options in roubles.
-
-    Falling back to :data:`DEFAULT_MARGIN_CURRENCY` instead would claim a dollar-quoted option
-    margins in roubles, and a rate-of-notional model would then refuse to compute anything for it
-    rather than silently converting -- which is how this was found.
+    A futures contract declares its margin currency explicitly. Instruments
+    without that field use their listing's quote currency, including margined
+    options. A known quote currency takes precedence over the fallback default.
     """
     declared = getattr(asset.asset, "margin_currency", None)
     return declared or quote_currency_of(asset)
@@ -128,7 +123,7 @@ class FixedRateFuturesMarginModel(FuturesMarginModel):
 
     Notional is in the contract's **quote** currency, so when margin is collected in a different
     one -- a dollar-quoted contract margined in another currency -- a rate alone is not enough.
-    Supply ``fx_rates`` for those pairs or the model refuses rather than silently reporting roubles
+    Supply ``fx_rates`` for those pairs or the model refuses rather than silently reporting euros
     of margin as dollars.
 
     Args:

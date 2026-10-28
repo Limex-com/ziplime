@@ -38,7 +38,7 @@ class BondEvent:
     event_type: BondEventType
     date: datetime.date
     value: float = 0.0
-    currency: str = "RUB"
+    currency: str = "EUR"
 
     record_date: datetime.date | None = None
     period_start_date: datetime.date | None = None

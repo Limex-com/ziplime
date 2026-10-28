@@ -122,12 +122,13 @@ def trade(ledger: Ledger, asset: ExchangeAsset, amount: int, price: float,
     """Execute a transaction at a quoted price and mark the resulting position at it."""
     when = dt if isinstance(dt, datetime.datetime) else datetime.datetime.combine(
         dt, datetime.time.min, tzinfo=datetime.timezone.utc)
-    ledger.process_transaction(Transaction(
+    executed = Transaction(
         id=f"{asset.symbol}-{amount}-{price}-{when.date()}",
         amount=amount, dt=when, price=price, exchange_name=EXCHANGE.mic,
-        trading_account_id=ACCOUNT, asset=asset))
+        trading_account_id=ACCOUNT, asset=asset)
+    ledger.process_transaction(executed)
     if commission:
-        ledger.process_commission(Commission(asset=asset, order=None, amount=commission), tr=None)
+        ledger.process_commission(Commission(asset=asset, order=None, amount=commission, transaction=executed), tr=None)
     position = ledger.position_tracker.get_position(
         asset=asset,
         exchange_name=EXCHANGE.mic,

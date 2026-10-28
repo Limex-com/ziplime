@@ -2,14 +2,18 @@ import datetime
 import math
 import uuid
 from collections import OrderedDict, deque
-from dataclasses import replace
+from collections.abc import Iterable, Mapping
+from dataclasses import fields, replace
+from copy import copy
 
 import numpy as np
 import pandas as pd
 import structlog
+from iso4217 import Currency as ISOCurrency
 
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.bond import Bond
+from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.option_contract import OptionContract
@@ -27,13 +31,15 @@ from ziplime.finance.domain.order import Order
 from ziplime.finance.domain.position_tracker import PositionTracker
 from ziplime.finance.domain.transaction import Transaction
 from ziplime.trading.domain.lot import Lot
-from ziplime.finance.domain.cash_event import CashEvent
+from ziplime.finance.domain.cash_event import CashEvent, CashKey
 from ziplime.finance.domain.cash_event_kind import CashEventKind
 from ziplime.finance.domain.currency_reporting import CurrencyReporting
-from ziplime.finance.domain.investment_event import InvestmentEvent
+from ziplime.data.services.currency_conversion_service import CurrencyConversionService
+from ziplime.finance.domain.investment_event import InvestmentEvent, InvestmentKey
+from ziplime.finance.domain.investment_event_kind import InvestmentEventKind
 from ziplime.finance.domain.investment_history import InvestmentHistory
 from ziplime.finance.domain.investment_snapshot import InvestmentSnapshot
-from ziplime.finance.investment_book import InvestmentBook
+from ziplime.finance.domain.investment_position import InvestmentPosition
 from ziplime.finance.monetary_valuation_service import MonetaryValuationService
 from ziplime.assets.domain.bond_event_type import BondEventType
 
@@ -74,16 +80,14 @@ class Ledger:
         ISO code for execution-book money when currency reporting is enabled.
     reporting_events : list[tuple[datetime.datetime, float, bool]]
         Aware posting time, base-currency cash-flow amount, and external-capital
-        flag. Reporting ledgers translate flows at event-time FX, not today's rate.
-    investments : InvestmentBook or None
-        Native-cash and historical security-accounting book, present only in
-        investment mode. Native positions keep their execution average-cost fields.
+        flag for plain base-currency reporting. Native currency reports read
+        dated amounts directly from the ledger's postings.
+    native_currency_accounting : bool
+        Whether native scoped cash and historical monetary accounting are initialized.
     _reporting_dt : datetime.datetime or None
         Current aware posting/valuation time while reporting is enabled.
     _investment_base : str or None
         Accounting currency for aggregating investment-mode portfolio/account totals.
-    _investment_income_due : dict[datetime.date, list[InvestmentEvent]]
-        Account-scoped unpaid entitlements keyed by payment date, retained after sale.
     """
 
     def __init__(self, trading_sessions: pd.DatetimeIndex,
@@ -186,227 +190,667 @@ class Ledger:
         self.reporting_base_currency: str | None = None
         self.reporting_events: list[tuple[datetime.datetime, float, bool]] = []
         self._reporting_dt: datetime.datetime | None = None
-        self.investments: InvestmentBook | None = None
+        self.native_currency_accounting = False
         self._investment_base: str | None = None
-        self._investment_income_due: dict[datetime.date, list[InvestmentEvent]] = {}
+        self._postings: list[Transaction | InvestmentEvent] = []
+        self._posting_identities: dict[tuple[InvestmentKey, str], Transaction | InvestmentEvent] = {}
+        self._accounting_keys: dict[InvestmentKey, None] = {}
+        self._fill_opening: dict[tuple[InvestmentKey, str], tuple[float, float]] = {}
+        self._money_flows: dict[str, dict[InvestmentKey, list[tuple[datetime.datetime, str, float]]]] = {
+            field: {} for field in ("realized", "income", "fees", "cash_flow")}
+        self._currency_totals: dict[str, dict[str, dict[InvestmentKey, float]]] = {}
+        self._opening_posting_count = 0
+        self._cash_flow_baselines: dict[str, float] = {}
+        self._cash_events: dict[tuple[CashKey, str], CashEvent] = {}
+        self._restoring_history = False
+        self._monetary_valuation: MonetaryValuationService | None = None
+        self._currency_conversion: CurrencyConversionService | None = None
+
+    @property
+    def transaction_history(self) -> tuple[Transaction, ...]:
+        """All executed fills; session reporting indexes reference these same objects."""
+        return tuple(posting for posting in self._postings if isinstance(posting, Transaction))
+
+    @property
+    def investment_events(self) -> tuple[InvestmentEvent, ...]:
+        """Compatibility export; trade DTOs are constructed only when requested."""
+        return tuple(self._history_event(posting) for posting in self._postings)
+
+    @staticmethod
+    def _history_event(posting: Transaction | InvestmentEvent) -> InvestmentEvent:
+        if isinstance(posting, Transaction):
+            return InvestmentEvent(
+                id=posting.id, dt=posting.dt, kind=InvestmentEventKind.TRADE, key=posting.key,
+                currency=posting.asset.quote.asset_name, quantity=posting.amount,
+                unit_value=posting.native_unit_value, quoted_price=posting.price, order_id=posting.order_id)
+        return posting
+
+    @property
+    def investment_quantities(self) -> dict[InvestmentKey, float]:
+        """FIFO quantities for reconciliation, derived from the ledger's one set of lots."""
+        return {key: math.fsum(lot.quantity for lot in lots)
+                for key, lots in self._buy_lots_by_asset.items() if not isinstance(key[2].asset, Currency)}
+
+    @property
+    def cash_events(self) -> tuple[CashEvent, ...]:
+        return tuple(self._cash_events.values())
+
+    def _add_total(self, field: str, key: InvestmentKey, flow: tuple[datetime.datetime, str, float]) -> None:
+        """Retain a dated native amount and update already requested currency totals."""
+        self._money_flows[field].setdefault(key, []).append(flow)
+        stamp, native, amount = flow
+        for currency in tuple(self._currency_totals):
+            try:
+                converted = amount * self._currency_conversion.rate(base=native, quote=currency, dt=stamp)
+            except ValueError:
+                # The execution remains recorded. A requested report must resolve its FX.
+                del self._currency_totals[currency]
+                continue
+            totals = self._currency_totals[currency][field]
+            totals[key] = totals.get(key, 0.0) + converted
+
+    def _add_lot_cost(self, lot: Lot, flow: tuple[datetime.datetime, str, float]) -> None:
+        lot.costs.append(flow)
+        stamp, native, amount = flow
+        for currency in tuple(self._currency_totals):
+            try:
+                converted = amount * self._currency_conversion.rate(base=native, quote=currency, dt=stamp)
+            except ValueError:
+                del self._currency_totals[currency]
+                continue
+            lot.cost_by_currency[currency] = lot.cost_by_currency.get(currency, 0.0) + converted
+
+    def _ensure_currency(self, currency: str) -> dict[str, dict[InvestmentKey, float]]:
+        """Initialize an additional currency from native amounts, without rematching FIFO."""
+        if currency not in self._currency_totals:
+            totals = {}
+            for field, by_key in self._money_flows.items():
+                totals[field] = {
+                    key: math.fsum(amount * self._currency_conversion.rate(base=native, quote=currency, dt=stamp)
+                                   for stamp, native, amount in flows)
+                    for key, flows in by_key.items()}
+            costs = [(lot, math.fsum(amount * self._currency_conversion.rate(
+                base=native, quote=currency, dt=stamp) for stamp, native, amount in lot.costs))
+                for lots in self._buy_lots_by_asset.values() for lot in lots]
+            for lot, cost in costs:
+                lot.cost_by_currency[currency] = cost
+            self._currency_totals[currency] = totals
+        return self._currency_totals[currency]
+
+    def _match_transaction(self, transaction: Transaction) -> None:
+        """Match native quantities once; dated monetary components serve every currency."""
+        key = transaction.key
+        lots = self._buy_lots_by_asset.setdefault(key, deque())
+        quantity = transaction.amount
+        if isinstance(transaction.asset.asset, Currency):
+            self._fill_opening[(key, transaction.id)] = (0.0, 0.0)
+            return
+        quoted_cost = 0.0
+        quoted_pnl = 0.0
+        matched_quantity = 0.0
+        while lots and quantity * lots[0].quantity < 0:
+            lot = lots[0]
+            matched = min(abs(quantity), abs(lot.quantity))
+            direction = math.copysign(1.0, lot.quantity)
+            fraction = matched / abs(lot.quantity)
+            self._add_total("realized", key, (transaction.dt, transaction.asset.quote.asset_name,
+                                            direction * matched * transaction.native_unit_value))
+            for stamp, currency, amount in lot.costs:
+                self._add_total("realized", key, (stamp, currency, -amount * fraction))
+            lot.costs = [(stamp, currency, amount * (1 - fraction)) for stamp, currency, amount in lot.costs]
+            for currency in lot.cost_by_currency:
+                lot.cost_by_currency[currency] *= 1 - fraction
+            if lot.price is not None and transaction.price is not None:
+                quoted_cost += lot.price * matched
+                quoted_pnl += direction * matched * (transaction.price - lot.price)
+            matched_quantity += matched
+            lot.quantity -= direction * matched
+            quantity += direction * matched
+            if math.isclose(lot.quantity, 0.0, abs_tol=1e-12):
+                lots.popleft()
+        self._fill_opening[(key, transaction.id)] = (abs(quantity), abs(quantity))
+        if not math.isclose(quantity, 0.0, abs_tol=1e-12):
+            lot = Lot(quantity=quantity, price=transaction.price, transaction_id=transaction.id)
+            self._add_lot_cost(lot, (transaction.dt, transaction.asset.quote.asset_name,
+                                     quantity * transaction.native_unit_value))
+            lots.append(lot)
+        transaction.average_entry_price = (quoted_cost / matched_quantity if matched_quantity
+                                           else transaction.price or 0.0)
+        transaction.realized_pnl = quoted_pnl - (transaction.commission or 0.0) if matched_quantity else 0.0
+        transaction.realized_pnl_percentage = (100 * transaction.realized_pnl / quoted_cost if quoted_cost else 0.0)
+
+    def _apply_fee(self, event: InvestmentEvent) -> None:
+        key = event.key
+        fill = self._posting_identities[(key, event.transaction_id)]
+        opening, adjusted_opening = self._fill_opening[(key, event.transaction_id)]
+        opening_fee = event.amount * opening / abs(fill.amount)
+        lots = [lot for lot in self._buy_lots_by_asset.get(key, ()) if lot.transaction_id == event.transaction_id]
+        remaining = math.fsum(abs(lot.quantity) for lot in lots)
+        retained = opening_fee * remaining / adjusted_opening if adjusted_opening else 0.0
+        for lot in lots:
+            self._add_lot_cost(lot, (event.dt, event.currency, retained * abs(lot.quantity) / remaining))
+        self._add_total("realized", key, (event.dt, event.currency, -(event.amount - retained)))
+        self._add_total("fees", key, (event.dt, event.currency, event.amount))
+
+    def _validate_posting(self, posting: Transaction | InvestmentEvent) -> bool:
+        existing = self._posting_identities.get((posting.key, posting.id))
+        if existing is not None:
+            previous = self._history_event(existing)
+            incoming = self._history_event(posting)
+            # Older history exports did not carry the quoted price or order ID.
+            same_fact = replace(previous, quoted_price=None, order_id=None) == replace(
+                incoming, quoted_price=None, order_id=None)
+            conflicting_metadata = any(
+                left is not None and right is not None and left != right
+                for left, right in ((previous.quoted_price, incoming.quoted_price),
+                                    (previous.order_id, incoming.order_id)))
+            if not same_fact or conflicting_metadata:
+                raise ValueError(f"Conflicting investment event {posting.id}.")
+            return False
+        if self.native_currency_accounting:
+            if posting.dt.tzinfo is None or posting.dt.utcoffset() is None:
+                raise ValueError("Investment event timestamps must be timezone-aware.")
+            if self._postings and posting.dt < self._postings[-1].dt:
+                raise ValueError("Investment events must be recorded in chronological posting order.")
+            if not posting.id or not all(posting.key[:2]):
+                raise ValueError("Investment events need an identity and explicit account scope.")
+        if isinstance(posting, Transaction):
+            if not all(math.isfinite(value) for value in (posting.amount, posting.native_unit_value)):
+                raise ValueError("Investment monetary values and quantities must be finite.")
+            if self.native_currency_accounting and (posting.amount == 0 or posting.native_unit_value < 0):
+                raise ValueError("An investment fill needs a nonzero quantity and nonnegative unit value.")
+            if self.native_currency_accounting:
+                self._monetary_valuation.unit_value(asset=posting.asset, price=0.0, dt=posting.dt)
+        else:
+            ISOCurrency(value=posting.currency)
+            if not all(math.isfinite(value) for value in (posting.amount, posting.quantity, posting.unit_value)):
+                raise ValueError("Investment monetary values and quantities must be finite.")
+            if posting.kind == InvestmentEventKind.FEE:
+                fill = self._posting_identities.get((posting.key, posting.transaction_id))
+                if not isinstance(fill, Transaction):
+                    raise ValueError("A fee must reference an existing scoped ledger fill; transaction_id required.")
+            elif posting.kind == InvestmentEventKind.SPLIT:
+                if posting.amount <= 0:
+                    raise ValueError("Split ratio must be positive.")
+                quantity = self.investment_quantities.get(posting.key, 0.0) / posting.amount
+                if not math.isclose(quantity, round(quantity), abs_tol=1e-10):
+                    raise ValueError("Fractional split cash-in-lieu requires an explicit disposal event.")
+            elif posting.kind != InvestmentEventKind.INCOME:
+                raise ValueError(f"Unsupported investment event kind: {posting.kind}.")
+        return True
+
+    def _record_posting(self, posting: Transaction | InvestmentEvent, check_funding: bool = False) -> bool:
+        if not self._validate_posting(posting):
+            return False
+        if check_funding:
+            changes = {}
+            for key, amount in self._posting_cash_changes(posting):
+                changes[key] = changes.get(key, 0.0) + amount
+            self.validate_cash_changes(dt=posting.dt, changes=changes)
+        self._postings.append(posting)
+        self._posting_identities[(posting.key, posting.id)] = posting
+        self._accounting_keys.setdefault(posting.key, None)
+        if isinstance(posting, Transaction):
+            self._match_transaction(posting)
+        elif posting.kind == InvestmentEventKind.FEE:
+            self._apply_fee(posting)
+        elif posting.kind == InvestmentEventKind.INCOME:
+            self._add_total("income", posting.key, (posting.dt, posting.currency, posting.amount))
+        elif posting.kind == InvestmentEventKind.SPLIT:
+            for lot in self._buy_lots_by_asset.get(posting.key, ()):
+                lot.quantity /= posting.amount
+                if lot.price is not None:
+                    lot.price *= posting.amount
+            for identity, (opening, adjusted) in self._fill_opening.items():
+                if identity[0] == posting.key:
+                    self._fill_opening[identity] = (opening, adjusted / posting.amount)
+        for cash_key, amount in self._posting_cash_changes(posting):
+            self._add_total("cash_flow", posting.key, (posting.dt, cash_key[2], amount))
+        return True
+
+    def record_investment_event(self, event: InvestmentEvent, *, check_funding: bool = True) -> bool:
+        """Import/post a history DTO; trades become canonical Transaction records."""
+        if event.kind == InvestmentEventKind.TRADE:
+            if event.currency != event.key[2].quote.asset_name:
+                raise ValueError("Fill consideration must be denominated in the listing's quote currency.")
+            posting = Transaction(
+                id=event.id, dt=event.dt, asset=event.key[2], amount=event.quantity,
+                price=event.quoted_price, exchange_name=event.key[0], trading_account_id=event.key[1],
+                order_id=event.order_id, native_unit_value=event.unit_value)
+        else:
+            posting = event
+        return self._record_posting(posting, check_funding=check_funding)
+
+    def record_execution(self, event: InvestmentEvent) -> bool:
+        if event.kind not in (InvestmentEventKind.TRADE, InvestmentEventKind.FEE):
+            raise ValueError("Only executed trades and linked fees can be recorded as executions.")
+        return self.record_investment_event(event=event, check_funding=False)
+
+    def restore_accounting_history(self, history: InvestmentHistory) -> None:
+        """Import posted facts without rerunning pre-submission funding decisions."""
+        if self._postings or self._cash_events:
+            raise ValueError("Restore requires an empty ledger history.")
+        self._restoring_history = True
+        try:
+            for event in history.events:
+                self.record_investment_event(event, check_funding=False)
+            for event in history.cash_events:
+                self.record_cash(event)
+            self.position_tracker.restore_income(income_due=history.income_due, posted=history.events)
+        finally:
+            self._restoring_history = False
 
     def enable_investment_accounting(
             self, reporting: CurrencyReporting, dt: datetime.datetime,
             opening_cash: dict[tuple[str, str, str], float],
     ) -> None:
-        """Initialize native cash/FIFO history and reset simulation-period portfolio baselines.
-
-        Parameters
-        ----------
-        reporting : CurrencyReporting
-            Base currency, shared FX service, and optional opening native history.
-        dt : datetime.datetime
-            Aware simulation start time for opening equity and conversion rates.
-        opening_cash : dict[tuple[str, str, str], float]
-            Explicit native balances by ``(exchange, account, currency)``. Used only
-            without ``reporting.investment_history``; supplied history takes precedence.
-
-        Raises
-        ------
-        ValueError
-            If already initialized, opening positions lack history, historical
-            quantities/marks fail reconciliation, events post after ``dt``, or
-            required monetary values/FX are invalid or missing.
-
-        Notes
-        -----
-        Restores unpaid income but not execution positions. Existing execution
-        positions and marks must be populated separately. Portfolio PNL/returns
-        start at zero while investment snapshots retain lifetime security PNL.
-        """
-        if self.investments is not None:
-            raise ValueError("Investment accounting has already been initialized.")
+        """Initialize native cash and FIFO accounting atomically on this ledger."""
+        if self.native_currency_accounting:
+            raise ValueError("Native currency accounting has already been initialized.")
         if self.position_tracker.get_position_list() and reporting.investment_history is None:
             raise ValueError("Opening positions require historical investment events; average cost is not enough.")
-        valuation = MonetaryValuationService(conversion=reporting.conversion, bond_book=self.bond_book)
-        income_due: dict[datetime.date, list[InvestmentEvent]] = {}
-        if reporting.investment_history is None:
-            investments = InvestmentBook(valuation=valuation)
-        else:
-            history = reporting.investment_history
+        candidate = Ledger(self.daily_returns_series.index, self._data_frequency, bond_book=self.bond_book)
+        candidate._monetary_valuation = MonetaryValuationService(conversion=reporting.conversion, bond_book=self.bond_book)
+        candidate.enable_currency_reporting(reporting.base_currency, dt, reporting.conversion)
+        candidate.native_currency_accounting = True
+        candidate._investment_base = reporting.base_currency
+        for currency in dict.fromkeys((reporting.base_currency, *reporting.currencies)):
+            candidate._ensure_currency(currency)
+        history = reporting.investment_history
+        if history is not None:
+            candidate.restore_accounting_history(history)
             if any(event.dt > dt for event in (*history.events, *history.cash_events)):
                 raise ValueError("Opening investment history contains events after the simulation start.")
-            identities = set()
-            for date, event in history.income_due:
-                if event.dt > dt or event.kind != "income" or not math.isfinite(event.amount):
-                    raise ValueError("Opening income entitlements must be finite historical income events.")
-                if (event.key, event.id) in identities:
-                    raise ValueError("Opening income entitlements must have unique scoped identities.")
-                identities.add((event.key, event.id))
-                income_due.setdefault(date, []).append(event)
-            investments = InvestmentBook.from_history(valuation=valuation, history=history)
-        if reporting.investment_history is None:
+            if any(event.dt > dt for _, event in history.income_due):
+                raise ValueError("Opening income entitlements must be historical income events.")
+        else:
             for key, amount in opening_cash.items():
-                investments.record_cash(
-                    event=CashEvent(id="opening", dt=dt, key=key, amount=amount, kind=CashEventKind.OPENING),
-                )
-        snapshot = self._investment_snapshot(investments=investments, currency=reporting.base_currency, dt=dt)
-        cash = investments.cash_value(currency=reporting.base_currency, dt=dt)
-        value = cash + snapshot.market_value
-        self.investments = investments
-        self._investment_income_due = income_due
+                candidate.record_cash(CashEvent(id="opening", dt=dt, key=key, amount=amount, kind=CashEventKind.OPENING))
+        marks = self._position_marks()
+        self._reconcile_quantities(candidate.investment_quantities)
+        snapshot = candidate.investment_snapshot(reporting.base_currency, dt, marks=marks)
+        cash = candidate.cash_value(reporting.base_currency, dt)
+        for name in ("_postings", "_posting_identities", "_accounting_keys", "_buy_lots_by_asset", "_fill_opening",
+                     "_money_flows", "_currency_totals", "_cash_events", "_monetary_valuation"):
+            setattr(self, name, getattr(candidate, name))
+        if history is not None:
+            self.position_tracker.restore_income(history.income_due, posted=history.events)
+        self.native_currency_accounting = True
+        self._opening_posting_count = len(self._postings)
+        self._cash_flow_baselines = {}
         self._investment_base = reporting.base_currency
-        self.enable_currency_reporting(base_currency=reporting.base_currency, dt=dt)
+        self.enable_currency_reporting(reporting.base_currency, dt, reporting.conversion)
         self._portfolio.positions_value = self._portfolio.positions_exposure = snapshot.market_value
         self._portfolio.cash = cash
-        self._portfolio.starting_cash = self._portfolio.portfolio_value = value
+        self._portfolio.starting_cash = self._portfolio.portfolio_value = cash + snapshot.market_value
         self._portfolio.pnl = self._portfolio.returns = 0.0
         self._dirty_portfolio = self._dirty_account = True
         self._update_investment_portfolio()
         self.update_account()
 
-    def investment_snapshot(self, currency: str, dt: datetime.datetime) -> InvestmentSnapshot:
-        """Value reconciled investment lots using execution positions' existing marks.
-
-        Parameters
-        ----------
-        currency : str
-            Reporting ISO currency code.
-        dt : datetime.datetime
-            Aware as-of time; stored market marks must be valid at this time.
-
-        Returns
-        -------
-        InvestmentSnapshot
-            Lifetime security accounting, excluding cash FX and external capital.
-
-        Raises
-        ------
-        ValueError
-            If investment mode is disabled, lots differ from execution quantities,
-            marks lack timestamps, or price/FX validation fails.
-
-        Notes
-        -----
-        Does not fetch prices. For strategy-side current market lookups, use
-        ``TradingAlgorithm.investment_pnl`` instead.
-        """
-        if self.investments is None:
-            raise ValueError("Enable investment_pnl in CurrencyReporting before requesting investment PNL.")
-        return self._investment_snapshot(investments=self.investments, currency=currency, dt=dt)
-
-    def investment_history(self) -> InvestmentHistory:
-        """Export posted native history together with unpaid income entitlements.
-
-        Returns
-        -------
-        InvestmentHistory
-            Immutable replay inputs; execution positions, marks, and serialization
-            remain the caller's responsibility.
-
-        Raises
-        ------
-        ValueError
-            If investment accounting is disabled.
-        """
-        if self.investments is None:
-            raise ValueError("Enable investment_pnl before exporting investment history.")
-        return replace(self.investments.history(), income_due=tuple(
-            (date, event) for date, events in self._investment_income_due.items() for event in events))
-
-    def _investment_snapshot(
-            self, investments: InvestmentBook, currency: str, dt: datetime.datetime,
-    ) -> InvestmentSnapshot:
-        """Reconcile ``investments`` to execution quantities and value stored marks.
-
-        Parameters
-        ----------
-        investments : InvestmentBook
-            Current or candidate opening native history to validate.
-        currency : str
-            Destination ISO currency code.
-        dt : datetime.datetime
-            Aware event cutoff/valuation time.
-
-        Returns
-        -------
-        InvestmentSnapshot
-            Currency-specific security accounting after quantity/mark validation.
-
-        Raises
-        ------
-        ValueError
-            If any scoped quantity differs, a mark lacks a timestamp, or snapshot
-            valuation cannot obtain valid prices/FX.
-        """
+    def _position_marks(self) -> dict[InvestmentKey, tuple[float, datetime.datetime]]:
         marks = {}
         for key, position in self.position_tracker.positions.items():
             if position.last_sale_date is None:
                 raise ValueError(f"No timestamped market mark for {position.asset}.")
             marks[key] = (position.last_sale_price, position.last_sale_date)
-        expected = investments.quantities
+        return marks
+
+    def _reconcile_quantities(self, expected: Mapping[InvestmentKey, float]) -> None:
         actual = {key: position.amount for key, position in self.position_tracker.positions.items()}
         for key in expected.keys() | actual.keys():
-            if not math.isclose(a=expected.get(key, 0.0), b=actual.get(key, 0.0), abs_tol=1e-9):
+            if not math.isclose(expected.get(key, 0.0), actual.get(key, 0.0), abs_tol=1e-9):
                 raise ValueError(f"Investment lots do not reconcile to execution positions for {key}.")
-        return investments.snapshot(currency=currency, dt=dt, marks=marks)
 
-    def _earn_investment_income(
-            self, asset_id: int, date: datetime.date, value: float, currency: str | None, identity: str,
-    ) -> None:
-        """Capture an income entitlement against current account-scoped holdings.
+    def investment_snapshot(
+            self, currency: str, dt: datetime.datetime,
+            marks: Mapping[InvestmentKey, tuple[float, datetime.datetime]] | None = None,
+    ) -> InvestmentSnapshot:
+        """Value the ledger's existing FIFO costs and current holdings in a requested currency."""
+        if not self.native_currency_accounting:
+            raise ValueError("Enable investment_pnl in CurrencyReporting before requesting investment PNL.")
+        if dt.tzinfo is None or dt.utcoffset() is None:
+            raise ValueError("Investment valuation timestamps must be timezone-aware.")
+        if marks is None:
+            self._reconcile_quantities(self.investment_quantities)
+            marks = self._position_marks()
+        if self._postings and self._postings[-1].dt > dt:
+            # Historical queries use the same posting/FIFO implementation on the requested prefix.
+            historical = Ledger(self.daily_returns_series.index, self._data_frequency, bond_book=self.bond_book)
+            historical.native_currency_accounting = True
+            historical._monetary_valuation = self._monetary_valuation
+            historical._currency_conversion = self._currency_conversion
+            historical.restore_accounting_history(InvestmentHistory(
+                events=tuple(self._history_event(posting) for posting in self._postings if posting.dt <= dt),
+                cash_events=tuple(event for event in self.cash_events if event.dt <= dt)))
+            return historical.investment_snapshot(currency, dt, marks=marks)
+        totals = self._ensure_currency(currency)
+        positions = []
+        for key in self._accounting_keys:
+            lots = self._buy_lots_by_asset.get(key, ())
+            quantity = math.fsum(lot.quantity for lot in lots)
+            cost = math.fsum(lot.cost_by_currency[currency] for lot in lots)
+            valuation = None
+            if not math.isclose(quantity, 0.0, abs_tol=1e-12):
+                if key not in marks:
+                    raise ValueError(f"No market mark supplied for investment position {key}.")
+                price, price_at = marks[key]
+                valuation = self._monetary_valuation.value(
+                    asset=key[2], quantity=quantity, price=price, price_at=price_at, dt=dt, currency=currency)
+            value = valuation.value if valuation is not None else 0.0
+            positions.append(InvestmentPosition(
+                key=key, quantity=quantity, historical_cost=cost, market_value=value,
+                realized_pnl=totals["realized"].get(key, 0.0), unrealized_pnl=value - cost,
+                income=totals["income"].get(key, 0.0), fees=totals["fees"].get(key, 0.0), valuation=valuation))
+        return InvestmentSnapshot(currency=currency, valuation_at=dt, positions=tuple(positions))
+
+    def reporting_cash_flow(self, currency: str) -> float:
+        """Simulation-period internal flows at each posting's own FX rate."""
+        total = math.fsum(self._ensure_currency(currency)["cash_flow"].values())
+        if currency not in self._cash_flow_baselines:
+            self._cash_flow_baselines[currency] = math.fsum(
+                amount * self._currency_conversion.rate(base=key[2], quote=currency, dt=posting.dt)
+                for posting in self._postings[:self._opening_posting_count]
+                for key, amount in self._posting_cash_changes(posting))
+        return total - self._cash_flow_baselines[currency]
+
+    def currency_snapshot(self, currency: str, dt: datetime.datetime):
+        """Return read-only reporting data; performance baselines belong to MetricsTracker."""
+        rate = self._currency_conversion.rate(base=self.reporting_base_currency, quote=currency, dt=dt)
+        native = self.portfolio
+        for position in self.position_tracker.get_position_list():
+            self.validate_reporting_asset(position.asset)
+        investment = self.investment_snapshot(currency, dt) if self.native_currency_accounting else None
+        cash = self.cash_value(currency, dt) if investment is not None else native.cash * rate
+        positions_value = investment.market_value if investment is not None else native.positions_value * rate
+        portfolio = replace(
+            native, cash=cash, portfolio_value=cash + positions_value,
+            cash_flow=self.reporting_cash_flow(currency) if investment is not None else native.cash_flow * rate,
+            positions_value=positions_value, positions_exposure=(
+                positions_value if investment is not None else native.positions_exposure * rate),
+            positions={key: replace(position) for key, position in native.positions.items()})
+        account = copy(self.account)
+        nonmonetary = {"cushion", "day_trades_remaining", "leverage", "net_leverage", "gross_leverage"}
+        for field in fields(self.account):
+            if field.name not in nonmonetary:
+                setattr(account, field.name, getattr(self.account, field.name) * rate)
+        stats = copy(self.position_tracker.stats)
+        for name in ("gross_exposure", "gross_value", "long_exposure", "long_value",
+                     "net_exposure", "net_value", "short_exposure", "short_value"):
+            setattr(stats, name, getattr(stats, name) * rate)
+        if stats.position_exposure_array is not None:
+            stats.position_exposure_array = stats.position_exposure_array.copy() * rate
+        if stats.position_exposure_series is not None:
+            stats.position_exposure_series = stats.position_exposure_series.copy() * rate
+        if investment is not None:
+            stats.long_value = math.fsum(item.market_value for item in investment.positions if item.quantity > 0)
+            stats.short_value = math.fsum(item.market_value for item in investment.positions if item.quantity < 0)
+            stats.long_exposure, stats.short_exposure = stats.long_value, stats.short_value
+            stats.net_value = stats.net_exposure = investment.market_value
+            stats.gross_value = stats.gross_exposure = stats.long_value - stats.short_value
+            values = {item.key: item.market_value for item in investment.positions}
+            if stats.position_exposure_array is not None:
+                stats.position_exposure_array[:] = [values[(position.exchange_name, position.trading_account_id,
+                                                           position.asset)]
+                                                    for position in self.position_tracker.get_position_list()]
+        return portfolio, account, stats, investment
+
+    def investment_history(self) -> InvestmentHistory:
+        if not self.native_currency_accounting:
+            raise ValueError("Enable investment_pnl before exporting investment history.")
+        return InvestmentHistory(events=self.investment_events, cash_events=self.cash_events,
+                                 income_due=self.position_tracker.income_due)
+
+    @staticmethod
+    def _cash_balance(amounts: Iterable[float]) -> float:
+        """Sum native postings, treating only a few ULPs of roundoff as zero."""
+        values = list(amounts)
+        balance = math.fsum(values)
+        rounding = 4 * math.ulp(max((abs(value) for value in values), default=0.0))
+        return 0.0 if -rounding <= balance < 0 else balance
+
+    @staticmethod
+    def _posting_cash_changes(posting: Transaction | InvestmentEvent):
+        if isinstance(posting, Transaction):
+            yield (*posting.key[:2], posting.asset.quote.asset_name), -posting.amount * posting.native_unit_value
+            if isinstance(posting.asset.asset, Currency):
+                yield (*posting.key[:2], posting.asset.asset.asset_name), posting.amount
+        elif posting.kind == InvestmentEventKind.FEE:
+            yield (*posting.key[:2], posting.currency), -posting.amount
+        elif posting.kind == InvestmentEventKind.INCOME:
+            yield (*posting.key[:2], posting.currency), posting.amount
+
+    def _cash_postings(self):
+        for event in self._cash_events.values():
+            yield event.dt, event.key, event.amount
+        for posting in self._postings:
+            for key, amount in self._posting_cash_changes(posting):
+                yield posting.dt, key, amount
+
+    def validate_cash_changes(self, dt: datetime.datetime, changes: Mapping[CashKey, float]) -> None:
+        """Reject proposed native cash changes before mutating any postings.
+
+        Balances are scoped by exchange, account, and currency. Future funding
+        cannot pay an earlier debit. Backdated changes must also leave all
+        already-posted later balances nonnegative.
+        """
+        if dt.tzinfo is None or dt.utcoffset() is None:
+            raise ValueError("Cash changes need a timezone-aware timestamp.")
+        if any(not math.isfinite(amount) for amount in changes.values()):
+            raise ValueError("Cash changes must be finite.")
+        if self._restoring_history:
+            return
+        amounts = {key: [change] for key, change in changes.items()}
+        future: dict[datetime.datetime, dict[CashKey, list[float]]] = {}
+        for stamp, key, amount in self._cash_postings():
+            if key not in amounts:
+                continue
+            if stamp <= dt:
+                amounts[key].append(amount)
+            else:
+                future.setdefault(stamp, {}).setdefault(key, []).append(amount)
+
+        def check(stamp):
+            for (exchange, account, currency), values in amounts.items():
+                balance = self._cash_balance(values)
+                if balance < 0 and changes[(exchange, account, currency)] < 0:
+                    raise ValueError(
+                        f"Insufficient {currency} cash for exchange {exchange}, account {account} "
+                        f"at {stamp.isoformat()}: balance would be {balance:g}. "
+                        "Fund this currency or perform an explicit currency exchange before spending it."
+                    )
+
+        check(dt)
+        for stamp, postings in sorted(future.items()):
+            for key, values in postings.items():
+                amounts[key].extend(values)
+            check(stamp)
+
+    def record_cash(self, event: CashEvent) -> bool:
+        """Record an opening balance, external funding, or executed FX cash leg.
 
         Parameters
         ----------
-        asset_id : int
-            Underlying domain asset ID, matching all held listings of that asset.
-        date : datetime.date
-            Payment date under which the entitlement is retained.
-        value : float
-            Native signed income per held unit.
-        currency : str or None
-            Actual payment ISO code; ``None`` uses each holding's quote currency.
+        event : CashEvent
+            Signed native posting with an aware timestamp, finite amount, valid
+            ISO currency, and nonempty identity/account scope.
+
+        Returns
+        -------
+        bool
+            ``True`` for a new posting, ``False`` for an identical scoped duplicate.
+
+        Raises
+        ------
+        ValueError
+            If the posting is invalid, overdraws its native cash balance, or
+            conflicts with the same ``(key, id)``.
+        """
+        if event.dt.tzinfo is None or event.dt.utcoffset() is None or not math.isfinite(event.amount):
+            raise ValueError("Cash events need an aware timestamp and finite amount.")
+        if not event.id or not all(event.key):
+            raise ValueError("Cash events need an identity, account scope, and currency.")
+        ISOCurrency(value=event.key[2])
+        identity = (event.key, event.id)
+        existing = self._cash_events.get(identity)
+        if existing is not None:
+            if existing != event:
+                raise ValueError(f"Conflicting cash event {event.id}.")
+            return False
+        if event.kind == CashEventKind.OPENING and event.amount < 0:
+            raise ValueError("Opening native cash balances must be nonnegative.")
+        self.validate_cash_changes(dt=event.dt, changes={event.key: event.amount})
+        self._cash_events[identity] = event
+        return True
+
+    def cash_balances(self, dt: datetime.datetime) -> dict[CashKey, float]:
+        """Reconstruct native balances through an inclusive aware timestamp.
+
+        Parameters
+        ----------
+        dt : datetime.datetime
+            Aware as-of time; later cash and investment events are excluded.
+
+        Returns
+        -------
+        dict[CashKey, float]
+            Balances by ``(exchange, account, currency)``, including derived trade
+            consideration, fee debits, and paid income. Zero balances are
+            retained and no implicit FX trade is performed.
+        """
+        amounts: dict[CashKey, list[float]] = {}
+        for stamp, key, amount in self._cash_postings():
+            if stamp <= dt:
+                amounts.setdefault(key, []).append(amount)
+        return {key: self._cash_balance(values) for key, values in amounts.items()}
+
+    def cash_value(self, currency: str, dt: datetime.datetime) -> float:
+        """Sum native cash after translating each balance at valuation-time FX.
+
+        Parameters
+        ----------
+        currency : str
+            Destination ISO currency code.
+        dt : datetime.datetime
+            Inclusive aware balance and FX valuation time.
+
+        Returns
+        -------
+        float
+            Net cash equity in ``currency``. Missing/stale FX for nonzero
+            balances raises ``ValueError`` instead of dropping an account.
+        """
+        return sum(amount * self._monetary_valuation.conversion.rate(base=key[2], quote=currency, dt=dt)
+                   for key, amount in self.cash_balances(dt=dt).items() if amount != 0)
+
+    def external_value(self, currency: str, dt: datetime.datetime) -> float:
+        """Sum external contributions at their own posting-time FX rates.
+
+        Parameters
+        ----------
+        currency : str
+            Destination ISO currency code.
+        dt : datetime.datetime
+            Inclusive aware cutoff for contributions and withdrawals.
+
+        Returns
+        -------
+        float
+            Net external capital to exclude from PNL. Opening balances and FX
+            executions are excluded; deposits remain at historical contribution FX.
+            Missing/stale event-time FX raises ``ValueError``.
+        """
+        return sum(event.amount * self._monetary_valuation.conversion.rate(base=event.key[2], quote=currency, dt=event.dt)
+                   for event in self._cash_events.values() if event.dt <= dt and event.kind == CashEventKind.EXTERNAL)
+
+    def exchange_cash(
+            self, identity: str, dt: datetime.datetime, exchange: str, account: str,
+            source_currency: str, currency: str, sold: float, received: float,
+    ) -> bool:
+        """Post both native legs of an actual FX execution, without submitting an order.
+
+        Parameters
+        ----------
         identity : str
-            Corporate-action identity used with the position key to avoid earning
-            the same entitlement twice, including after history restoration.
+            Nonempty execution ID shared by both cash legs for idempotent replay.
+        dt : datetime.datetime
+            Aware execution/posting time.
+        exchange, account : str
+            Nonempty execution exchange and trading-account identities.
+        source_currency, currency : str
+            Distinct ISO codes of the currency sold and the currency received.
+        sold, received : float
+            Positive finite executed native amounts, not an indicative FX rate.
+
+        Returns
+        -------
+        bool
+            ``True`` when both legs are new; ``False`` for an identical execution.
+
+        Raises
+        ------
+        ValueError
+            If inputs are invalid, source cash is insufficient, or an existing
+            execution is conflicting/incomplete.
 
         Notes
         -----
-        No cash or FX conversion is posted yet. A short holding captures a
-        negative payment. Does nothing when investment mode is disabled.
+        No valuation rate is used to infer consideration. This changes cash
+        exposure, not security cost basis. The source cash must be available.
         """
-        if self.investments is None:
-            return
-        known = {(event.key, event.id) for event in self.investments.events}
-        known.update((event.key, event.id) for events in self._investment_income_due.values() for event in events)
-        for key, position in self.position_tracker.positions.items():
-            if position.asset.asset.id == asset_id and (key, identity) not in known:
-                self._investment_income_due.setdefault(date, []).append(InvestmentEvent(
-                    id=identity, dt=self._reporting_dt, kind="income", key=key,
-                    currency=currency if currency is not None else position.asset.quote.asset_name,
-                    amount=position.amount * value))
+        if source_currency == currency or not all(
+                math.isfinite(value) and value > 0 for value in (sold, received)):
+            raise ValueError("An FX execution needs distinct currencies and positive finite executed amounts.")
+        if dt.tzinfo is None or dt.utcoffset() is None:
+            raise ValueError("FX execution timestamps must be timezone-aware.")
+        if not identity or not exchange or not account:
+            raise ValueError("FX executions need an identity and explicit account scope.")
+        ISOCurrency(value=source_currency)
+        ISOCurrency(value=currency)
+        events = (
+            CashEvent(
+                id=identity, dt=dt, key=(exchange, account, source_currency), amount=-sold, kind=CashEventKind.FX,
+            ),
+            CashEvent(id=identity, dt=dt, key=(exchange, account, currency), amount=received, kind=CashEventKind.FX),
+        )
+        existing = [self._cash_events.get((event.key, event.id)) for event in events]
+        if any(item is not None for item in existing):
+            if tuple(existing) == events:
+                return False
+            raise ValueError(f"Conflicting or incomplete FX execution {identity}.")
+        self.validate_cash_changes(dt=dt, changes={event.key: event.amount for event in events})
+        for event in events:
+            self.record_cash(event=event)
+        return True
 
-    def _pay_investment_income(self, session: datetime.date) -> None:
-        """Post unpaid entitlements due on or before ``session`` exactly once.
+    def _post_income(self, entitlements: list[InvestmentEvent]) -> None:
+        """Post a validated income batch once; the tracker owns its unpaid entitlements."""
+        payments = [replace(event, dt=self._reporting_dt or event.dt) for event in entitlements]
+        pending: dict[CashKey, list[float]] = {}
+        fresh = []
+        for payment in payments:
+            if self.native_currency_accounting and not self._validate_posting(posting=payment):
+                continue
+            # Validate every conversion and liability before changing cash or history.
+            base = self.reporting_base_currency
+            if base is not None and payment.currency != base:
+                if self._currency_conversion is None:
+                    raise ValueError("Foreign income requires a currency conversion service.")
+                self._currency_conversion.rate(base=payment.currency, quote=base, dt=payment.dt)
+            key = (*payment.key[:2], payment.currency)
+            pending.setdefault(key, []).append(payment.amount)
+            fresh.append(payment)
+        if self.native_currency_accounting and fresh:
+            self.validate_cash_changes(dt=fresh[0].dt, changes={
+                key: math.fsum(values) for key, values in pending.items()})
+        for payment in fresh:
+            if self.native_currency_accounting:
+                self.record_investment_event(event=payment, check_funding=False)
+            self._cash_flow(amount=payment.amount, currency=payment.currency)
 
-        Parameters
-        ----------
-        session : datetime.date
-            Inclusive payment-date cutoff. The current ``_reporting_dt`` supplies
-            the actual posting time and payment-time FX, including holiday delays.
-
-        Notes
-        -----
-        Credits native cash and base-currency cash-flow metrics, then removes paid
-        entitlements. Does nothing without investment accounting; unavailable FX raises.
-        """
-        if self.investments is None:
-            return
-        for date in sorted(date for date in self._investment_income_due if date <= session):
-            for event in self._investment_income_due[date]:
-                payment = replace(event, dt=self._reporting_dt)
-                self.investments.valuation.conversion.rate(
-                    base=payment.currency, quote=self._investment_base, dt=payment.dt)
-                if self.investments.record(event=payment):
-                    self._cash_flow(amount=payment.amount, currency=payment.currency)
-            del self._investment_income_due[date]
-
-    def enable_currency_reporting(self, base_currency: str, dt: datetime.datetime) -> None:
+    def enable_currency_reporting(
+            self, base_currency: str, dt: datetime.datetime, conversion: CurrencyConversionService | None = None,
+    ) -> None:
         """Declare execution-book currency and set the initial aware reporting time.
 
         Parameters
@@ -415,8 +859,13 @@ class Ledger:
             ISO code used by execution-book monetary totals and reporting events.
         dt : datetime.datetime
             Aware initial time; a naive timestamp raises ``ValueError``.
+        conversion : CurrencyConversionService or None, optional
+            Shared FX service for foreign cash flows, including dividends in
+            plain reporting mode. Investment accounting supplies this service.
         """
         self.reporting_base_currency = base_currency
+        if conversion is not None:
+            self._currency_conversion = conversion
         self.set_reporting_datetime(dt=dt)
 
     def set_reporting_datetime(self, dt: datetime.datetime) -> None:
@@ -454,8 +903,8 @@ class Ledger:
         currencies but does not substitute principal accounting for margin settlement.
         """
         base = self.reporting_base_currency
-        if self.investments is not None:
-            self.investments.valuation.unit_value(asset=asset, price=0.0, dt=self._reporting_dt)
+        if self.native_currency_accounting:
+            self._monetary_valuation.unit_value(asset=asset, price=0.0, dt=self._reporting_dt)
             return
         if base is not None and asset.quote.asset_name != base:
             raise ValueError(
@@ -533,8 +982,8 @@ class Ledger:
         amount : float
             Signed cash movement: positive credits, negative debits.
         currency : str or None, optional
-            Native ISO code in investment mode; converts ``amount`` to the
-            accounting base at the current reporting time. ``None`` means the
+            Native ISO code; converts ``amount`` to the reporting base at the
+            current reporting time. ``None`` means the
             amount is already base/native execution-book money.
 
         Notes
@@ -543,9 +992,23 @@ class Ledger:
         event; this updates execution aggregates/flow metrics, not a second
         native cash posting. External funding must use ``capital_change``.
         """
-        if currency is not None and self.investments is not None:
-            amount *= self.investments.valuation.conversion.rate(
-                base=currency, quote=self._investment_base, dt=self._reporting_dt)
+        if self.native_currency_accounting:
+            self._dirty_portfolio = True
+            try:
+                rate = (self._currency_conversion.rate(base=currency, quote=self._investment_base, dt=self._reporting_dt)
+                        if currency is not None else 1.0)
+                self._portfolio.cash += amount * rate
+                self._portfolio.cash_flow = self.reporting_cash_flow(self._investment_base)
+            except ValueError:
+                # Report valuation will raise until FX is available; executed facts stay recorded.
+                pass
+            return
+        if (currency is not None and self.reporting_base_currency is not None
+                and currency != self.reporting_base_currency):
+            if self._currency_conversion is None:
+                raise ValueError("Foreign cash flows require a currency conversion service.")
+            amount *= self._currency_conversion.rate(
+                base=currency, quote=self.reporting_base_currency, dt=self._reporting_dt)
         if self.reporting_base_currency is not None:
             if self._reporting_dt is None:
                 raise ValueError("No timestamp set for a reporting cash flow.")
@@ -553,6 +1016,13 @@ class Ledger:
         self._dirty_portfolio = True
         self._portfolio.cash_flow += amount
         self._portfolio.cash += amount
+
+    def cash_balance(self, currency: str, exchange_name: str, trading_account_id: str) -> float:
+        """Current posted native cash for one venue/account/currency."""
+        if not self.native_currency_accounting:
+            raise ValueError("Native currency balances require investment accounting.")
+        return self.cash_balances(dt=self._reporting_dt).get(
+            (exchange_name, trading_account_id, currency), 0.0)
 
     def process_transaction(self, transaction: Transaction):
         """Add a transaction to ledger, updating the current state as needed.
@@ -568,20 +1038,24 @@ class Ledger:
         monetary consideration; identical fill repeats do nothing. Historical
         cost uses fill-time FX. Commissions are posted separately through
         ``process_commission`` to avoid charging the fill's fee twice.
+        Funding is checked before submission; already-executed fills are
+        recorded without a funding veto if actual costs exceed the projection.
         """
         asset = transaction.asset
         self.validate_reporting_asset(asset=asset)
+        if transaction.native_unit_value is None:
+            if self.native_currency_accounting:
+                transaction.native_unit_value = self._monetary_valuation.unit_value(
+                    asset=asset, price=transaction.price, dt=transaction.dt)
+            elif isinstance(asset.asset, Bond):
+                transaction.native_unit_value = self.bond_price_in_money(asset, transaction.price, transaction.dt)
+            elif isinstance(asset.asset, OptionContract):
+                transaction.native_unit_value = transaction.price * asset.asset.multiplier
+            else:
+                transaction.native_unit_value = transaction.price
+        if not self._record_posting(transaction):
+            return
         self.set_reporting_datetime(dt=transaction.dt)
-        if self.investments is not None:
-            unit = self.investments.valuation.unit_value(asset=asset, price=transaction.price, dt=transaction.dt)
-            self.investments.valuation.conversion.rate(
-                base=asset.quote.asset_name, quote=self._investment_base, dt=transaction.dt)
-            event = InvestmentEvent(
-                id=transaction.id, dt=transaction.dt, kind="trade",
-                key=(transaction.exchange_name, transaction.trading_account_id, asset),
-                currency=asset.quote.asset_name, quantity=transaction.amount, unit_value=unit)
-            if not self.investments.record(event=event):
-                return
         # `asset` is the exchange listing; the instrument itself hangs off `.asset`.
         #
         # A margined option settles the way a future does -- no premium changes hands, variation
@@ -614,6 +1088,9 @@ class Ledger:
                     del self._payout_last_sale_prices[asset]
                 else:
                     self._payout_last_sale_prices[asset] = price
+        elif self.native_currency_accounting:
+            self._cash_flow(amount=-transaction.native_unit_value * transaction.amount,
+                            currency=asset.quote.asset_name)
         elif isinstance(asset.asset, Bond):
             # A bond settles at its dirty price: the quote is a percentage of face value, and the
             # buyer additionally hands the seller the coupon accrued since the last payment. Both
@@ -633,7 +1110,11 @@ class Ledger:
             self._cash_flow(amount=-(transaction.price * transaction.amount), currency=asset.quote.asset_name)
         # print("LEVERAGE: BEFORE EXCEUTION", self.account.leverage, self.account.net_leverage)
 
-        self.position_tracker.execute_transaction(transaction)
+        currency_trade = self.native_currency_accounting and isinstance(asset.asset, Currency)
+        if currency_trade:
+            self._cash_flow(amount=transaction.amount, currency=asset.asset.asset_name)
+        else:
+            self.position_tracker.execute_transaction(transaction)
         # print("LEVERAGE: AFTER EXCEUTION", self.account.leverage, self.account.net_leverage)
 
         # we only ever want the dict form from now on
@@ -649,41 +1130,8 @@ class Ledger:
             # self._processed_transactions[transaction.dt] = [transaction_dict]
             self._processed_transactions[transaction.dt] = [transaction]
 
-        lot_key = (transaction.exchange_name, transaction.trading_account_id, asset)
-        if lot_key not in self._buy_lots_by_asset:
-            self._buy_lots_by_asset[lot_key] = deque()
-        realized = 0.0
-        realized_pnl_percentage = 0.00
-
-        if transaction.amount > 0:
-            self._buy_lots_by_asset[lot_key].append(
-                Lot(quantity=transaction.amount, price=transaction.price, commission=transaction.commission or 0.00)
-            )
-            transaction.average_entry_price = transaction.price
-        else:
-            sell_qty = -transaction.amount
-            sell_comm = transaction.commission or 0.00
-            total_match_price = 0
-            while sell_qty > 0 and self._buy_lots_by_asset[lot_key]:
-                lot = self._buy_lots_by_asset[lot_key][0]
-                match_qty = min(sell_qty, lot.quantity)
-
-                pnl = (transaction.price - lot.price) * match_qty
-                total_match_price += lot.price * match_qty
-                realized += pnl
-
-                lot.quantity -= match_qty
-                sell_qty -= match_qty
-
-                # Drop empty lot
-                if lot.quantity == 0:
-                    self._buy_lots_by_asset[lot_key].popleft()
-            transaction.average_entry_price = total_match_price / -transaction.amount
-            realized -= sell_comm
-            if total_match_price > 0:
-                realized_pnl_percentage = (realized / total_match_price) * 100
-        transaction.realized_pnl = realized
-        transaction.realized_pnl_percentage = realized_pnl_percentage
+        if currency_trade:
+            return
 
     def process_splits(self, splits):
         """Processes a list of splits by modifying any positions as needed.
@@ -700,9 +1148,9 @@ class Ledger:
         Recorded splits preserve historical cost and identical repeats are ignored.
         """
         splits = list(splits)
-        if self.investments is not None:
-            quantities = self.investments.quantities
-            existing = {(event.key, event.id): event for event in self.investments.events}
+        if self.native_currency_accounting:
+            quantities = self.investment_quantities
+            existing = {(event.key, event.id): event for event in self.investment_events}
             pending = []
             applicable = []
             for split in splits:
@@ -711,7 +1159,8 @@ class Ledger:
                     if position.asset.asset.id == split.asset.id:
                         event = InvestmentEvent(
                             id=f"split-{split.asset.id}-{self._reporting_dt}", dt=self._reporting_dt,
-                            kind="split", key=key, currency=position.asset.quote.asset_name, amount=split.ratio)
+                            kind=InvestmentEventKind.SPLIT, key=key,
+                            currency=position.asset.quote.asset_name, amount=split.ratio)
                         prior = existing.get((key, event.id))
                         if prior is not None:
                             if prior != event:
@@ -729,7 +1178,7 @@ class Ledger:
                     pending.extend(events)
                     applicable.append(split)
             for event in pending:
-                self.investments.record(event=event)
+                self.record_investment_event(event=event)
                 self.position_tracker.positions[event.key].last_sale_price *= event.amount
             splits = applicable
         leftover_cash = self.position_tracker.handle_splits(splits)
@@ -766,9 +1215,8 @@ class Ledger:
         Parameters
         ----------
         commission : Commission
-            Native quote-currency fee, associated order/fill, stable fee ID, and
-            optional aware posting time. Nonzero investment fees require exactly
-            one matching fill; ambiguous association raises ``ValueError``.
+            Native quote-currency fee with its transaction, stable fee ID, and
+            optional aware posting time. The linked fill must already be recorded.
 
         tr
             Legacy caller context; retained for API compatibility and not used.
@@ -778,26 +1226,16 @@ class Ledger:
         Investment mode charges a scoped fee once, converts at posting-time FX,
         and allocates it to the referenced fill's remaining basis/realized PNL.
         """
-        if self.investments is not None and commission.amount:
-            fills = [event for event in self.investments.events
-                     if event.kind == "trade" and event.key[2] == commission.asset
-                     and (commission.order is None or event.key[:2] == (
-                         commission.order.exchange_name, commission.order.trading_account_id))
-                     and (commission.transaction_id == event.id if commission.transaction_id is not None
-                          else commission.order is not None
-                          and event.id in {
-                              txn.id for txn in self.transactions()
-                              if txn.order_id == commission.order.id
-                              and txn.exchange_name == commission.order.exchange_name
-                              and txn.trading_account_id == commission.order.trading_account_id})]
-            if len(fills) != 1:
-                raise ValueError("Investment commissions require an unambiguous transaction_id.")
-            fill = fills[0]
+        if commission.asset != commission.transaction.asset:
+            raise ValueError("Commission asset must match its transaction asset.")
+        if self.native_currency_accounting and commission.amount:
+            fill = self._posting_identities.get((commission.transaction.key, commission.transaction_id))
+            if not isinstance(fill, Transaction):
+                raise ValueError("Commission transaction must already be recorded in the ledger.")
             stamp = commission.dt if commission.dt is not None else self._reporting_dt
-            self.investments.valuation.conversion.rate(
-                base=commission.asset.quote.asset_name, quote=self._investment_base, dt=stamp)
-            if not self.investments.record(event=InvestmentEvent(
-                    id=commission.id, dt=stamp, kind="fee", key=fill.key, currency=commission.asset.quote.asset_name,
+            if not self.record_execution(event=InvestmentEvent(
+                    id=commission.id, dt=stamp, kind=InvestmentEventKind.FEE, key=fill.key,
+                    currency=commission.asset.quote.asset_name,
                     amount=commission.amount, transaction_id=fill.id)):
                 return
             self.set_reporting_datetime(dt=stamp)
@@ -805,7 +1243,7 @@ class Ledger:
             if position is not None:
                 self.position_tracker.adjust_commission_cost_basis(position=position, cost=commission.amount)
                 self.position_tracker._dirty_stats = True
-        elif self.investments is None:
+        elif not self.native_currency_accounting:
             self.position_tracker.handle_commission(asset=commission.asset, cost=commission.amount)
         # print(f"Commission 2 for {asset.asset_name} is {cost}", tr.account.leverage, tr.account.net_leverage)
         self._cash_flow(amount=-commission.amount, currency=commission.asset.quote.asset_name)
@@ -880,28 +1318,14 @@ class Ledger:
                       for event in self.bond_book.payments_entitled_between(
                           bond, after=previous, through=session_date)]
             if earned:
-                if self.investments is not None and any(
+                if self.native_currency_accounting and any(
                         event.event_type is BondEventType.AMORTIZATION for event in earned):
                     raise ValueError(
                         "Investment accounting for bond amortization requires principal-allocation events."
                     )
-                for event in earned:
-                    self._earn_investment_income(
-                        asset_id=event.asset.id,
-                        date=event.date,
-                        value=event.value,
-                        currency=event.currency,
-                        identity=(
-                            f"bond-{event.asset.id}-{event.event_type}-"
-                            f"{event.record_date}-{event.date}-{event.value}"
-                        ),
-                    )
-                self.position_tracker.earn_bond_payments(earned)
+                self.position_tracker.earn_bond_payments(earned, earned_at=self._reporting_dt)
 
-        payment = self.position_tracker.pay_bond_payments(session_date)
-        self._pay_investment_income(session=session_date)
-        if payment != 0 and self.investments is None:
-            self._cash_flow(payment)
+        self.position_tracker.pay_income(session=session_date, post=self._post_income)
 
     async def redeem_matured_bonds(self, session, asset_service=None) -> None:
         """Repay the principal of every bond position that has reached maturity.
@@ -954,9 +1378,10 @@ class Ledger:
     async def process_dividends(self, next_session, asset_service):
         """Process dividends for the next session.
 
-        This will earn us any dividends whose ex-date is the next session as
-        well as paying out any dividends whose pay-date is the next session
+        Earn dividends whose ex-date is this session and pay all previously
+        earned dividends whose pay-date is on or before this session.
         """
+        session_date = next_session.date() if isinstance(next_session, datetime.datetime) else next_session
         position_tracker = self.position_tracker
 
         # Earn dividends whose ex_date is the next trading day. We need to
@@ -965,41 +1390,21 @@ class Ledger:
         held_assets = [pos.asset.asset for pos in position_tracker.get_position_list()]
         if held_assets:
             cash_dividends = await asset_service.get_cash_dividends_with_ex_date(
-                assets=held_assets, date=next_session  # self.data_bundle.asset_repository
+                assets=held_assets, date=session_date
             )
             # stock_dividends = await asset_service.get_stock_dividends_with_ex_date(
             #     assets=held_assets, date=next_session  # self.data_bundle.asset_repository
             # )
             stock_dividends = []
-            if self.investments is not None:
-                for dividend in cash_dividends:
-                    if dividend.currency is None:
-                        raise ValueError("Investment dividend accounting requires an explicit payout currency.")
-                    self._earn_investment_income(
-                        asset_id=dividend.asset.id,
-                        date=dividend.pay_date,
-                        value=dividend.amount,
-                        currency=dividend.currency.value,
-                        identity=(
-                            f"dividend-{dividend.asset.id}-{dividend.ex_date}-"
-                            f"{dividend.pay_date}-{dividend.amount}"
-                        ),
-                    )
-
             # Earning a dividend just marks that we need to get paid out on
             # the dividend's pay-date. This does not affect our cash yet.
             position_tracker.earn_dividends(
                 cash_dividends=cash_dividends,
                 stock_dividends=stock_dividends,
+                earned_at=self._reporting_dt,
             )
 
-        # Pay out the dividends whose pay-date is the next session. This does
-        # affect out cash.
-        dividends = position_tracker.pay_dividends(next_session)
-        session_date = next_session.date() if isinstance(next_session, datetime.datetime) else next_session
-        self._pay_investment_income(session=session_date)
-        if dividends != 0 and self.investments is None:
-            self._cash_flow(dividends)
+        position_tracker.pay_dividends(session_date, post=self._post_income)
 
     async def capital_change(
             self, change_amount: float, currency: str | None = None,
@@ -1038,8 +1443,8 @@ class Ledger:
         # capital change is measured against was whatever the last bar left behind, so the deposit
         # or withdrawal computed from it was wrong by a bar of profit and loss.
         await self.update_portfolio()
-        if self.investments is not None:
-            scopes = {(key[0], key[1]) for key in self.investments.cash_balances(dt=self._reporting_dt)}
+        if self.native_currency_accounting:
+            scopes = {(key[0], key[1]) for key in self.cash_balances(dt=self._reporting_dt)}
             if exchange_name is not None and trading_account_id is not None:
                 exchange, account = exchange_name, trading_account_id
             elif len(scopes) == 1 and exchange_name is None and trading_account_id is None:
@@ -1047,9 +1452,9 @@ class Ledger:
             else:
                 raise ValueError("A capital change in a multi-account book requires an explicit scoped cash event.")
             native_currency = currency if currency is not None else self._investment_base
-            rate = self.investments.valuation.conversion.rate(
+            rate = self._monetary_valuation.conversion.rate(
                 base=native_currency, quote=self._investment_base, dt=self._reporting_dt)
-            if not self.investments.record_cash(
+            if not self.record_cash(
                 event=CashEvent(
                     id=event_id if event_id is not None else uuid.uuid4().hex,
                     dt=self._reporting_dt,
@@ -1273,7 +1678,7 @@ class Ledger:
 
     async def update_portfolio(self) -> None:
         """Force a computation of the current portfolio state."""
-        if self.investments is not None:
+        if self.native_currency_accounting:
             self._update_investment_portfolio()
             return
         if not self._dirty_portfolio:
@@ -1335,7 +1740,8 @@ class Ledger:
             position_tracker=self.position_tracker,
         )
         self._portfolio.positions_value = self._portfolio.positions_exposure = snapshot.market_value
-        self._portfolio.cash = self.investments.cash_value(currency=self._investment_base, dt=self._reporting_dt)
+        self._portfolio.cash = self.cash_value(currency=self._investment_base, dt=self._reporting_dt)
+        self._portfolio.cash_flow = self.reporting_cash_flow(self._investment_base)
         start_value = self._portfolio.portfolio_value
         end_value = self._portfolio.cash + snapshot.market_value
         pnl = end_value - start_value

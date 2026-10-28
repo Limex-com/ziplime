@@ -68,3 +68,15 @@ def reporting_tracker(rates=(1.1, 1.2, 1.3), intraday=False, metrics=None):
         benchmark_source=benchmark, intraday_metrics=intraday, currency_reporting=reporting,
     )
     return tracker, ledger, sessions, closes
+
+
+def reporting_view(source: Ledger, reporting: CurrencyReporting, currency: str, initial_dt) -> MetricsTracker:
+    calendar = get_calendar("XNYS")
+    tracker = MetricsTracker(
+        sessions=pl.Series(source.daily_returns_series.index.date), asset_service=None, exchanges={},
+        trading_calendar=calendar, first_session=pd.Timestamp(initial_dt.date()),
+        last_session=pd.Timestamp(source.daily_returns_series.index[-1].date()),
+        emission_rate=datetime.timedelta(days=1), ledger=source, metrics=[], benchmark_source=None,
+        currency_reporting=reporting, currency=currency)
+    tracker.initialize_currency(initial_dt)
+    return tracker

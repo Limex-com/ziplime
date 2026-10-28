@@ -30,7 +30,7 @@ def make_bond(name: str = "REPOTEST", isin: str = "REPOTEST0001") -> Bond:
         start_date=dt.date(2021, 3, 15), end_date=dt.date(2028, 3, 14),
         first_traded=dt.date(2021, 3, 15), auto_close_date=dt.date(2028, 3, 15),
         face_value=1000.0, maturity_date=dt.date(2028, 3, 15),
-        coupon_rate=0.0925, coupon_frequency=4, quote_currency="RUB",
+        coupon_rate=0.0925, coupon_frequency=4, quote_currency="EUR",
         day_count=DayCount.ACT_ACT, price_quotation=PriceQuotation.PERCENT_OF_FACE,
         is_amortized=True,
     )
@@ -89,16 +89,16 @@ class BondPersistenceTests(unittest.IsolatedAsyncioTestCase):
         [bond] = await self.asset_service.save_bonds([make_bond()])
         events = [
             BondEvent(asset=bond, event_type=BondEventType.COUPON,
-                      date=dt.date(2024, 3, 15), value=23.13, currency="RUB",
+                      date=dt.date(2024, 3, 15), value=23.13, currency="EUR",
                       record_date=dt.date(2024, 3, 14),
                       period_start_date=dt.date(2023, 12, 15),
                       face_value=1000.0, value_percent=9.25),
             BondEvent(asset=bond, event_type=BondEventType.AMORTIZATION,
-                      date=dt.date(2025, 3, 15), value=250.0, currency="RUB",
+                      date=dt.date(2025, 3, 15), value=250.0, currency="EUR",
                       new_face_value=750.0, initial_face_value=1000.0,
                       amortization_percent=25.0),
             BondEvent(asset=bond, event_type=BondEventType.OFFER,
-                      date=dt.date(2026, 3, 15), value=0.0, currency="RUB",
+                      date=dt.date(2026, 3, 15), value=0.0, currency="EUR",
                       offer_type="put", offer_price=100.0,
                       offer_start_date=dt.date(2026, 3, 8),
                       offer_end_date=dt.date(2026, 3, 15), offer_agent="Broker"),
@@ -121,7 +121,7 @@ class BondPersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_reimporting_a_schedule_does_not_duplicate_it(self):
         [bond] = await self.asset_service.save_bonds([make_bond()])
         events = [BondEvent(asset=bond, event_type=BondEventType.COUPON,
-                            date=dt.date(2024, 3, 15), value=23.13, currency="RUB")]
+                            date=dt.date(2024, 3, 15), value=23.13, currency="EUR")]
 
         await self.asset_service.save_bond_events(events)
         await self.asset_service.save_bond_events(events)

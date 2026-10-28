@@ -1,5 +1,6 @@
 import datetime
 import inspect
+import math
 import traceback
 import uuid
 from collections import namedtuple, OrderedDict
@@ -43,6 +44,7 @@ from ziplime.finance.domain.order_status import OrderStatus
 from ziplime.finance.controls.max_leverage import MaxLeverage
 from ziplime.gens.domain.trading_clock import TradingClock
 from ziplime.exchanges.exchange import Exchange
+from ziplime.exchanges.simulation_exchange import SimulationExchange
 from ziplime.trading.base_trading_algorithm import BaseTradingAlgorithm
 from ziplime.trading.enums.simulation_event import SimulationEvent
 from ziplime.utils.calendar_utils import get_calendar
@@ -69,7 +71,7 @@ from ziplime.errors import (
     ZeroCapitalError, SymbolNotFound, BarSimulationError,
 )
 
-from ziplime.finance.execution import ExecutionStyle, make_execution_style
+from ziplime.finance.execution import ExecutionStyle, MarketOrder, make_execution_style
 from ziplime.finance.asset_restrictions import Restrictions
 from ziplime.finance.cancel_policy import CancelPolicy
 from ziplime.finance.asset_restrictions import (
@@ -78,6 +80,7 @@ from ziplime.finance.asset_restrictions import (
 from ziplime.assets.domain.continuous_future import ContinuousFuture
 from ziplime.finance.margin import FuturesMarginModel
 from ziplime.assets.entities.bond import Bond
+from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.equity import Equity
 from ziplime.finance.metrics_tracker import MetricsTracker
@@ -245,6 +248,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         As-of FX service for monetary/order estimates without enabling currency
         metrics. Defaults to ``currency_reporting.conversion`` when configured;
         explicitly supplying a different service instance raises ``ValueError``.
+    automatic_currency_exchange : bool, optional
+        Submit FX and asset orders together through SimulationExchange when
+        quote-currency cash is missing. Defaults to ``False``; requires native
+        investment accounting. Live orders require the quote currency to be funded.
 
     Attributes
     ----------
@@ -278,6 +285,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             intraday_metrics: bool = False,
             currency_reporting: CurrencyReporting | None = None,
             currency_conversion: CurrencyConversionService | None = None,
+            automatic_currency_exchange: bool = False,
 
     ):
         self.algorithm = algorithm
@@ -395,6 +403,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         #: See MetricsTracker: the whole metric set on every intraday bar, or only at the close.
         self.intraday_metrics = intraday_metrics
         self.currency_reporting = currency_reporting
+        self.automatic_currency_exchange = automatic_currency_exchange
         self.currency_conversion = (currency_conversion if currency_conversion is not None
                                     else currency_reporting.conversion if currency_reporting is not None else None)
         if (currency_conversion is not None and currency_reporting is not None
@@ -1000,12 +1009,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         excludes uninvested cash FX and external funding. Fees are already included
         in basis/realized PNL and must not be subtracted from ``total_pnl`` again.
         """
-        if self._ledger.investments is None:
+        if not self._ledger.native_currency_accounting:
             raise ValueError("Enable investment_pnl in CurrencyReporting to request investment PNL.")
         dt = _as_datetime(value=self.simulation_dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session)
         marks = {}
         by_exchange: dict[str, set[ExchangeAsset]] = {}
-        for key, quantity in self._ledger.investments.quantities.items():
+        quantities = self._ledger.investment_quantities
+        for key, quantity in quantities.items():
             if quantity:
                 by_exchange.setdefault(key[0], set()).add(key[2])
         for name, assets in by_exchange.items():
@@ -1014,10 +1024,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                 assets=frozenset(assets), fields=frozenset({"close"}), dt=dt)
             by_sid = {row["sid"]: (row["close"], row["date"])
                       for row in data.sort("date").iter_rows(named=True) if row["close"] is not None}
-            for key in self._ledger.investments.quantities:
+            for key in quantities:
                 if key[0] == name and key[2].sid in by_sid:
                     marks[key] = by_sid[key[2].sid]
-        snapshot = self._ledger.investments.snapshot(currency=currency, dt=dt, marks=marks)
+        snapshot = self._ledger.investment_snapshot(currency=currency, dt=dt, marks=marks)
         return InvestmentSnapshot(currency=currency, valuation_at=dt, positions=tuple(
             position for position in snapshot.positions
             if (exchange_name is None or position.key[0] == exchange_name)
@@ -1101,18 +1111,17 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         Notes
         -----
         Revalues the execution portfolio/account around the posting. Does not
-        change security acquisition cost or enforce available native funding.
+        change security acquisition cost. The source currency must be funded.
         Actual execution differences from valuation FX affect portfolio PNL.
         """
-        book = self._ledger.investments
-        if book is None:
+        if not self._ledger.native_currency_accounting:
             raise ValueError("Enable investment_pnl before posting multi-currency cash executions.")
         exchange = (await self.exchange_repository.get_default_exchange() if exchange_name is None
                     else await self.exchange_repository.get_exchange_by_mic(mic=exchange_name))
         dt = _as_datetime(value=self.simulation_dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session)
         self._ledger.set_reporting_datetime(dt=dt)
         await self._ledger.update_portfolio()
-        book.exchange_cash(
+        self._ledger.exchange_cash(
             identity=execution_id if execution_id is not None else uuid.uuid4().hex,
             dt=dt,
             exchange=exchange.name,
@@ -1157,7 +1166,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         Uses the current simulation time. Contributions are excluded from PNL at
         posting-time FX; holding the resulting native cash still creates FX exposure.
         """
-        if self._ledger.investments is None:
+        if not self._ledger.native_currency_accounting:
             raise ValueError("Enable investment_pnl before posting scoped funding.")
         dt = _as_datetime(value=self.simulation_dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session)
         self._ledger.set_reporting_datetime(dt=dt)
@@ -1171,9 +1180,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                                    currency: str | None = None) -> float:
         """Margin the open futures positions tie up, in one currency.
 
-        Pass ``currency`` when the book spans venues that collect different ones -- an exchange
-        may collect
-        roubles even for its dollar-quoted contracts, CME collects dollars. Returns 0.0 when
+        Pass ``currency`` when the book spans venues that collect different currencies.
+        A contract's margin currency can differ from its quote currency. Returns 0.0 when
         margin is not being modelled; check :meth:`models_futures_margin` to tell that apart from
         a book that genuinely needs no margin.
         """
@@ -1181,7 +1189,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     def futures_margin_by_currency(self, maintenance: bool = False) -> dict:
-        """Margin posted per currency, e.g. ``{"RUB": 41_000.0, "USD": 10_500.0}``."""
+        """Margin posted per currency, e.g. ``{"EUR": 41_000.0, "USD": 10_500.0}``."""
         return self._ledger.futures_margin_by_currency(maintenance=maintenance)
 
     @api_method
@@ -1932,7 +1940,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             self._logger.debug(f"Price of 0 for {asset}; can't infer value")
             # Don't place any order
             return 0
-        if self._ledger.investments is not None:
+        if self._ledger.native_currency_accounting:
             service = self._get_monetary_valuation_service()
             if isinstance(asset.asset, Bond):
                 await self._ledger.bond_book.load(asset_service=self.asset_service, bonds=[asset.asset])
@@ -2094,6 +2102,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             exchange_name = exchange.name
         else:
             exchange = await self.exchange_repository.get_exchange_by_mic(mic=exchange_name)
+        if (account_id is not None and account_id != exchange.account_id
+                and (not isinstance(exchange, SimulationExchange) or exchange.live)):
+            raise ValueError("Use an exchange configured for the requested live trading account.")
         order_id = uuid.uuid4().hex[:20]
 
         order_qty_rounded = int(round_if_near_integer(amount))
@@ -2108,72 +2119,107 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             execution_style=style,
             status=OrderStatus.OPEN,
             exchange_name=exchange.name,
-            trading_account_id=exchange.account_id
+            trading_account_id=account_id if account_id is not None else exchange.account_id
         )
-        if amount == 0:
+        if order_qty_rounded == 0:
             self._logger.warning("Not executing order for zero shares.")
             return None
 
-        if self._ledger.investments is not None:
+        orders = [order]
+        if self.automatic_currency_exchange and not self._ledger.native_currency_accounting:
+            raise ValueError("Automatic currency exchange requires native investment accounting.")
+        if self._ledger.native_currency_accounting:
             self._ledger.validate_reporting_asset(asset=asset)
+            currency = asset.quote.asset_name
+            basis = OrderPriceBasis.LIMIT if order.limit is not None else OrderPriceBasis.MARKET
+            valued = await self.value_orders(orders=[order], currency=currency, price_basis=basis)
+            monetary = valued.orders[0].monetary
+            value = monetary.native_value
+            if order.amount > 0 and order.limit is None and order.stop is not None:
+                value = order.amount * self._get_monetary_valuation_service().unit_value(
+                    asset=asset, price=max(monetary.reference_price, order.stop), dt=monetary.valuation_at)
+            commission = exchange.get_commission_model(asset=asset).calculate_for_asset(
+                asset=asset, quantity=order.amount, transaction_amount=abs(value))
+            if not math.isfinite(commission):
+                raise ValueError("Projected commission must be finite before submitting an order.")
+            required = value + max(0.0, commission)
+            balance = self._ledger.cash_balance(currency, exchange.name, order.trading_account_id)
+            if isinstance(asset.asset, Currency) and order.amount < 0:
+                source = asset.asset.asset_name
+                if -order.amount > self._ledger.cash_balance(source, exchange.name, order.trading_account_id):
+                    raise ValueError(f"Insufficient {source} cash for currency sale.")
+            if required > balance:
+                if not self.automatic_currency_exchange or isinstance(asset.asset, Currency):
+                    raise ValueError(f"Insufficient {currency} cash: need {required:g}, available {balance:g}.")
+                if not isinstance(exchange, SimulationExchange) or exchange.live:
+                    raise ValueError(
+                        "Automatic currency exchange currently requires SimulationExchange. "
+                        "Fund the quote currency before submitting a live order.")
+                shortfall = required - balance
+                for (venue, account, source), cash in self._ledger.cash_balances(self.simulation_dt).items():
+                    if (venue, account) != (exchange.name, order.trading_account_id) or source == currency or cash <= 0:
+                        continue
+                    try:
+                        fx = self.currency_conversion.observation(source, currency, self.simulation_dt)
+                    except ValueError:
+                        continue
+                    pair = await self.asset_service.get_asset_by_sid(sid=fx.listing_sid)
+                    if (pair is None or not isinstance(pair.asset, Currency)
+                            or {pair.asset.asset_name, pair.quote.asset_name} != {source, currency}):
+                        continue
+                    buy = pair.asset.asset_name == currency
+                    price = await self._spot_price(asset=pair, dt=self.simulation_dt, exchange=exchange)
+                    if price is None or not math.isfinite(price) or price <= 0:
+                        raise ValueError("Currency exchange requires a positive market price.")
+                    quantity = math.ceil(shortfall) if buy else -math.ceil(shortfall / price)
+                    model = exchange.get_commission_model(asset=pair)
+                    # For an inverse pair, its fee reduces the currency acquired.
+                    for _ in range(10):
+                        fee = model.calculate_for_asset(
+                            asset=pair, quantity=quantity, transaction_amount=abs(quantity * price))
+                        if not math.isfinite(fee):
+                            raise ValueError("Projected commission must be finite before submitting an order.")
+                        cost = quantity * price + max(0.0, fee)
+                        if buy or -cost >= shortfall:
+                            break
+                        quantity -= max(1, math.ceil((shortfall + cost) / price))
+                    else:
+                        raise ValueError("Cannot cover the currency shortfall including the projected FX commission.")
+                    if (cost > cash if buy else -quantity > cash):
+                        continue
+                    if not self._can_order_asset(asset=pair):
+                        continue
+                    await self.validate_order_params(asset=pair, amount=quantity)
+                    orders.insert(0, Order(
+                        id=uuid.uuid4().hex[:20], dt=self.simulation_dt, asset=pair, amount=quantity,
+                        filled=0, commission=0, execution_style=MarketOrder(), status=OrderStatus.OPEN,
+                        exchange_name=exchange.name, trading_account_id=order.trading_account_id))
+                    break
+                else:
+                    raise ValueError(f"Insufficient {currency} cash; no funded currency pair is available for automatic exchange.")
             for currency in self.currency_reporting.currencies:
-                valued = await self.value_orders(orders=[order], currency=currency)
-                order.submitted_valuations[currency] = valued.orders[0]
-
-        # quote_asset = await self.asset_service.get_currency_by_symbol(symbol="USD",
-        #                                                               exchange_name=exchange_name)
-
-        self._logger.info(LoggingEvent.ORDER_SUBMIT, style=str(style), quantity=order_qty_rounded,
-                          asset_symbol=asset.symbol, asset_mic=asset.mic,
-                          simulation_dt=self.simulation_dt)
-
-        submitted_order = await exchange.submit_order(order=order)
-        if submitted_order.id != order_id:
-            submitted_order.submitted_valuations = {
-                currency: replace(valuation, order_id=submitted_order.id)
-                for currency, valuation in order.submitted_valuations.items()
-            }
-        # quote_asset = await self.asset_service.get_currency_by_symbol(symbol="USD",
-        #                                                               exchange_name=exchange_name)
-
-        # match style.to_order_type():
-        #     case OrderType.LIMIT:
-        #         order_req = LimitOrderRequest(
-        #             order_id=uuid.uuid4().hex,
-        #             trading_pair=TradingPair(base_asset=asset,
-        #                                      quote_asset=quote_asset,
-        #                                      exchange_name=exchange.name),
-        #             order_side=OrderSide.BUY if amount > 0 else OrderSide.SELL,
-        #             quantity=float(amount),
-        #             limit_price=style.get_limit_price(is_buy=amount > 0)
-        #         )
-        #     case OrderType.MARKET:
-        #         order_req = MarketOrderRequest(
-        #             order_id=uuid.uuid4().hex,
-        #             trading_pair=TradingPair(base_asset=asset,
-        #                                      quote_asset=quote_asset,
-        #                                      exchange_name=exchange.name),
-        #             order_side=OrderSide.BUY if amount > 0 else OrderSide.SELL,
-        #             quantity=float(amount),
-        #             exchange_name=exchange.name,
-        #             creation_date=self.simulation_dt
-        #         )
-        #     case _:
-        #         raise ValueError(f"Unsupported order type: {style.to_order_type()}")
-
-        # trading_signal = await self.trading_signal_executor.create_order_execute_trading_signal(
-        #     algorithm=self,
-        #     order=order_req,
-        #     exchange=exchange
-        # )
-
-        persisted_order = self.blotter.save_order(order=submitted_order)
-        self.new_orders[submitted_order.id] = submitted_order
-
-        return submitted_order
+                valued = await self.value_orders(orders=orders, currency=currency)
+                for item, valuation in zip(orders, valued.orders):
+                    item.submitted_valuations[currency] = valuation
+        for item in orders:
+            self._logger.info(
+                LoggingEvent.ORDER_SUBMIT, style=str(item.execution_style), quantity=item.amount,
+                asset_symbol=item.asset.symbol, asset_mic=item.asset.mic, simulation_dt=self.simulation_dt)
+        if len(orders) > 1 and isinstance(exchange, SimulationExchange) and not exchange.live:
+            submitted = await exchange.submit_orders(orders=orders)
+        else:
+            submitted = [await exchange.submit_order(order=order)]
+        for requested, accepted in zip(orders, submitted):
+            accepted.submitted_valuations = {
+                currency: replace(valuation, order_id=accepted.id)
+                for currency, valuation in requested.submitted_valuations.items()}
+            self.new_order_submitted(accepted)
+        return submitted[-1]
 
     def new_order_submitted(self, order: Order):
         self.blotter.save_order(order=order)
+        if not order.open:
+            self.blotter.prune_orders(closed_orders=[order])
         self.new_orders[order.id] = order
         return order
 
@@ -2565,7 +2611,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         slippage = exchange.get_slippage_model(asset=asset)
         projected_commission = commission.calculate_for_asset(asset=asset, quantity=requested_quantity,
                                                               transaction_amount=value)
-        if self._ledger.investments is not None and asset.quote.asset_name != self.currency_reporting.base_currency:
+        if self._ledger.native_currency_accounting and asset.quote.asset_name != self.currency_reporting.base_currency:
             raise ValueError(
                 "Percentage sizing with foreign-currency commission/slippage requires explicit quantity orders. "
                 "Use value_orders to compare their reporting-currency values.")
@@ -2883,16 +2929,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         order = self.blotter.get_order_by_id(order_id=order_id, exchange_name=exchange_name)
         if order is None or not order.open:
             return
-        order.cancel()
-        order.dt = self.simulation_dt
-        # we want this order's new status to be relayed out
-        # along with newly placed orders.
-
-        self.blotter.order_cancelled(order=order)
         exchange = await self.exchange_repository.get_exchange_by_mic(exchange_name) if exchange_name else (
             await self.exchange_repository.get_default_exchange()
         )
         await exchange.cancel_order(order_id=order.exchange_order_id)
+        order.cancel()
+        order.dt = self.simulation_dt
+        self.blotter.order_cancelled(order=order)
         if relay_status:
             self.new_orders[order.id] = order
         else:
@@ -3271,6 +3314,16 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return self.calculate_capital_changes(dt, emission_rate=self.metrics_tracker.emission_rate,
                                               is_interday=False)
 
+    def _process_execution_batch(self, transactions, commissions):
+        for transaction in transactions:
+            self._ledger.process_transaction(transaction=transaction)
+            if transaction.order_id is not None:
+                order = self.blotter.get_order_by_id(transaction.order_id, exchange_name=transaction.exchange_name)
+                if order is not None:
+                    self._ledger.process_order(order=order)
+        for commission in commissions:
+            self._ledger.process_commission(commission=commission, tr=self)
+
     # TODO: simplify
     # flake8: noqa: C901
     async def every_bar(
@@ -3290,14 +3343,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         if self.same_bar_execution:
             await handle_data(context=self, data=current_data, dt=dt_to_use)
 
-        # handle any transactions and commissions coming out new orders
-        # placed in the last bar
-        new_transactions = []
-        new_commissions = []
-        closed_orders = []
+        # Record each exchange's executions before fetching the next exchange.
+        has_executions = False
         for exchange in await self.exchange_repository.get_all_exchanges():
-            # print("LEVERAGE BEFORE: ", self.account.leverage, self.account.net_leverage)
-
             (
                 new_trans,
                 new_comm,
@@ -3307,40 +3355,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                 current_dt=self.simulation_dt,
                 same_bar_execution=self.same_bar_execution,
             )
-            new_transactions.extend(new_trans)
-            new_commissions.extend(new_comm)
-            closed_orders.extend(closed)
-            # print("LEVERAGE: AFTER ", self.account.leverage, self.account.net_leverage)
-
-        # print(f"getting transactions for {current_data.current_dt}, new transactions: {len(new_transactions)}, new commissions: {len(new_commissions)}, closed orders: {len(closed_orders)}" )
-        self.blotter.prune_orders(closed_orders=closed_orders)
-
-        for transaction in new_transactions:
-            self._ledger.process_transaction(transaction=transaction)
-            # if self.account.leverage > 2:
-            #    print("a")
-            # print("LEVERAGE: AFTER 2", self.account.leverage, self.account.net_leverage)
-
-            if transaction.order_id is None:
-                # TODO: fix this when we get back order id in transaction
-                continue
-
-            # since this order was modified, record it
-            order = self.blotter.get_order_by_id(transaction.order_id, exchange_name=transaction.exchange_name)
-            self._ledger.process_order(order=order)
-            # print("LEVERAGE: AFTER 3", self.account.leverage, self.account.net_leverage)
-
-        # print("LEVERAGE: BEFORE COMMISION", self.account.leverage, self.account.net_leverage)
-
-        for commission in new_commissions:
-            self._ledger.process_commission(commission=commission, tr=self)
-        # print("LEVERAGE: BEFORE 4", self.account.leverage, self.account.net_leverage)
+            self._process_execution_batch(new_trans, new_comm)
+            self.blotter.prune_orders(closed_orders=closed)
+            has_executions = has_executions or bool(new_trans or new_comm)
         if not self.same_bar_execution:
             # The fills above changed the positions, and `portfolio` is a cache last refreshed
             # at the top of the bar. Without this, handle_data saw yesterday's positions with
             # today's orders already filled, and every order_target* re-sent the difference:
             # a long-only daily rebalance went short and ran gross leverage past 4.
-            if new_transactions or new_commissions:
+            if has_executions:
                 await self._ledger.update_portfolio()
                 self._ledger.update_account()
             await handle_data(context=self, data=current_data, dt=dt_to_use)
@@ -3629,21 +3652,23 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                 symbol=asset.symbol, dt=str(dt))
         return instrument.intrinsic_value(underlying_price)
 
-    async def _spot_price(self, asset: ExchangeAsset, dt: datetime.datetime) -> float | None:
+    async def _spot_price(self, asset: ExchangeAsset, dt: datetime.datetime,
+                          exchange: Exchange | None = None) -> float | None:
         """The close of ``asset``'s most recent bar at ``dt``, or ``None`` if it has none."""
-        return await self._read_field(asset=asset, dt=dt, field="close")
+        return await self._read_field(asset=asset, dt=dt, field="close", exchange=exchange)
 
     async def _read_field(self, asset: ExchangeAsset, dt: datetime.datetime,
-                          field: str) -> float | None:
+                          field: str, exchange: Exchange | None = None) -> float | None:
         """One column of ``asset``'s most recent bar at ``dt``.
 
-        Reads through the default exchange rather than the asset's own venue. Those are different
+        Uses the supplied exchange, or the default exchange rather than the asset's own venue. Those are different
         things and the repository's `get_exchange_by_mic` does not bridge them: it is keyed by the
         exchange's *name* -- the broker the simulation trades through, "LIME" -- while a listing's
         `mic` names where the instrument is listed, "ARCX". Asking it for a listing's MIC raises a
         KeyError on every simulation with one exchange, which is all of them.
         """
-        exchange = await self.exchange_repository.get_default_exchange()
+        if exchange is None:
+            exchange = await self.exchange_repository.get_default_exchange()
         rows = await exchange.get_spot_value(fields=frozenset([field]), dt=dt,
                                              assets=frozenset({asset}))
         if rows is None or rows.is_empty() or field not in rows.columns:

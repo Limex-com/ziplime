@@ -65,13 +65,16 @@ async def test_fx_only_pnl_returns_and_histories_are_independent(intraday):
     np.testing.assert_allclose(actual=frames["USD"]["pnl"], desired=[10, 10, 10])
     np.testing.assert_allclose(actual=frames["USD"]["returns"], desired=[0.1, 1.2 / 1.1 - 1, 1.3 / 1.2 - 1])
     np.testing.assert_allclose(
-        actual=tracker._reporting_ledgers["USD"].daily_returns_array, desired=frames["USD"]["returns"])
+        actual=tracker._currency_trackers["USD"].daily_returns_array, desired=frames["USD"]["returns"])
     assert frames["USD"]["benchmark_period_return"].eq(other=0).all()
     assert native.portfolio.cash == 100
-    assert tracker._reporting_ledgers["USD"].portfolio.pnl == pytest.approx(expected=30)
+    assert tracker._currency_trackers["USD"].portfolio.pnl == pytest.approx(expected=30)
     assert frames["USD"]["algo_volatility"].iloc[-1] == pytest.approx(
         expected=empyrical.annual_volatility(returns=frames["USD"]["returns"].to_numpy()))
     assert tracker._currency_trackers["USD"]._metrics is not tracker._currency_trackers["EUR"]._metrics
+    assert all(child._ledger is native for child in tracker._currency_trackers.values())
+    assert not np.shares_memory(tracker._currency_trackers["USD"].daily_returns_array,
+                                tracker._currency_trackers["EUR"].daily_returns_array)
     assert list(tracker.handle_simulation_end()["risk_report_by_currency"]) == ["EUR", "USD"]
 
 

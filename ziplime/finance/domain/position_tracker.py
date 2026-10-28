@@ -2,7 +2,10 @@ import uuid
 
 import datetime
 from collections import OrderedDict
-from math import isnan, copysign
+from collections.abc import Callable, Iterable
+from math import isnan, copysign, fsum, isfinite
+
+from iso4217 import Currency as ISOCurrency
 
 import numpy as np
 import structlog
@@ -16,6 +19,9 @@ from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.finance.bonds import BondBook
 from ziplime.exchanges.exchange import Exchange
+from ziplime.finance.domain.dividend_cash_payment import DividendCashPayment
+from ziplime.finance.domain.investment_event import InvestmentEvent, InvestmentKey
+from ziplime.finance.domain.investment_event_kind import InvestmentEventKind
 from ziplime.finance.domain.position import Position
 from ziplime.finance.domain.transaction import Transaction
 from ziplime.finance.finance_ext import (
@@ -44,10 +50,9 @@ class PositionTracker:
         # (exchange_name,)
         self.positions_by_exchange = {}
 
-        self._unpaid_dividends = {}
+        self._unpaid_income: dict[datetime.date, list[DividendCashPayment | InvestmentEvent]] = {}
+        self._income_identities: set[tuple[InvestmentKey, str]] = set()
         self._unpaid_stock_dividends = {}
-        #: pay date -> money owed, from coupons and amortization instalments already earned.
-        self._unpaid_bond_payments: dict[datetime.date, float] = {}
         #: Coupon and amortization schedules, shared with the ledger that owns this tracker.
         self.bond_book = bond_book if bond_book is not None else BondBook()
         # self._positions_store = {}
@@ -297,12 +302,6 @@ class PositionTracker:
 
         return total_leftover_cash
 
-    def earn_dividend(self, position: Position, dividend: DividendPayout) -> dict[str, float]:
-        """
-        Register the number of shares we held at this dividend's ex date so
-        that we can pay out the correct amount on the dividend's pay date.
-        """
-        return {"amount": position.amount * dividend.amount}
 
     def earn_stock_dividend(self, position: Position, stock_dividend):
         """
@@ -354,33 +353,59 @@ class PositionTracker:
         # (rounded to the nearest cent)
         return return_cash
 
-    def earn_dividends(self, cash_dividends, stock_dividends):
-        """Given a list of dividends whose ex_dates are all the next trading
-        day, calculate and store the cash and/or stock payments to be paid on
-        each dividend's pay date.
+    def _add_income(self, date: datetime.date, payment: DividendCashPayment | InvestmentEvent) -> None:
+        event = payment.to_event() if isinstance(payment, DividendCashPayment) else payment
+        identity = (event.key, event.id)
+        if identity in self._income_identities:
+            return
+        self._unpaid_income.setdefault(date, []).append(payment)
+        self._income_identities.add(identity)
 
-        Parameters
-        ----------
-        cash_dividends : iterable of (asset, amount, pay_date) namedtuples
+    @property
+    def income_due(self) -> tuple[tuple[datetime.date, InvestmentEvent], ...]:
+        """Unpaid scoped entitlements, ready for history export without a second queue."""
+        return tuple(
+            (date, payment.to_event() if isinstance(payment, DividendCashPayment) else payment)
+            for date, payments in sorted(self._unpaid_income.items()) for payment in payments)
 
-        stock_dividends: iterable of (asset, payment_asset, ratio, pay_date)
-            namedtuples.
-        """
-        for cash_dividend in cash_dividends:
-            # Store the earned dividends so that they can be paid on the
-            # dividends' pay_dates.
-            divs_owed = [
-                self.earn_dividend(position=position, dividend=cash_dividend)
-                for position in self.positions.values()
-                if position.asset.asset.id == cash_dividend.asset.id
-            ]
-            if not divs_owed:
-                continue
-            self._dirty_stats = True  # only mark dirty if we pay a dividend
-            try:
-                self._unpaid_dividends[cash_dividend.pay_date].extend(divs_owed)
-            except KeyError:
-                self._unpaid_dividends[cash_dividend.pay_date] = divs_owed
+    def restore_income(
+            self, income_due: Iterable[tuple[datetime.date, InvestmentEvent]],
+            posted: Iterable[InvestmentEvent] = (),
+    ) -> None:
+        """Restore entitlements and earned identities, including income already paid."""
+        identities = {(event.key, event.id) for event in posted if event.kind == InvestmentEventKind.INCOME}
+        pending: dict[datetime.date, list[InvestmentEvent]] = {}
+        for date, event in income_due:
+            if (event.kind != InvestmentEventKind.INCOME or not isfinite(event.amount)
+                    or event.dt.tzinfo is None or event.dt.utcoffset() is None):
+                raise ValueError("Opening income entitlements must be finite historical income events.")
+            if not event.id or not all(event.key[:2]):
+                raise ValueError("Income entitlements need an identity and explicit account scope.")
+            ISOCurrency(value=event.currency)
+            identity = (event.key, event.id)
+            if identity in identities:
+                raise ValueError("Opening income entitlements must have unique unpaid scoped identities.")
+            identities.add(identity)
+            pending.setdefault(date, []).append(event)
+        self._unpaid_income = pending
+        self._income_identities = identities
+
+    def earn_dividends(self, cash_dividends, stock_dividends, earned_at: datetime.datetime | None = None):
+        """Capture each account's entitlement on the ex-date, retaining payout currency."""
+        for dividend in cash_dividends:
+            if dividend.currency is None:
+                raise ValueError("Dividend accounting requires an explicit payout currency.")
+            for position in self.positions.values():
+                if position.asset.asset.id != dividend.asset.id:
+                    continue
+                self._add_income(date=dividend.pay_date, payment=DividendCashPayment(
+                    dividend_payout=dividend,
+                    amount=position.amount * dividend.amount,
+                    exchange_name=position.exchange_name,
+                    trading_account_id=position.trading_account_id,
+                    exchange_asset=position.asset,
+                    earned_at=earned_at,
+                ))
 
         for stock_dividend in stock_dividends:
             position = next(
@@ -405,67 +430,63 @@ class PositionTracker:
                     div_owed,
                 ]
 
-    def earn_bond_payments(self, bond_events: list[BondEvent]) -> None:
-        """Record what the coupons and amortizations in ``bond_events`` will pay us.
+    def earn_bond_payments(
+            self, bond_events: list[BondEvent], earned_at: datetime.datetime | None = None,
+    ) -> None:
+        """Capture coupons and amortization per account at the record-date holding size.
 
-        Entitlement is settled on the record date and paid later, so this snapshots the position
-        size now and the money moves in :meth:`pay_bond_payments`. Selling in between does not
-        forfeit the payment, which is what a record date means; a short position owes it, and the
-        negative amount carries that through.
-
-        Holdings are summed across every exchange and account, so the same coupon is never earned
-        twice and a position split over two accounts is paid in full.
+        Selling before payment preserves the entitlement; a short position owes
+        a negative payment in the schedule's currency.
         """
         for event in bond_events:
-            held = sum(position.amount
-                       for position in self.positions.values()
-                       if isinstance(position.asset.asset, Bond)
-                       and position.asset.asset.id == event.asset.id)
-            if held == 0:
-                continue
-            self._dirty_stats = True
-            owed = held * event.value
-            self._unpaid_bond_payments[event.date] = (
-                self._unpaid_bond_payments.get(event.date, 0.0) + owed)
+            for key, position in self.positions.items():
+                if not isinstance(position.asset.asset, Bond) or position.asset.asset.id != event.asset.id:
+                    continue
+                self._add_income(date=event.date, payment=InvestmentEvent(
+                    id=(f"bond-{event.asset.id}-{event.event_type}-"
+                        f"{event.record_date}-{event.date}-{event.value}"),
+                    dt=earned_at or datetime.datetime.combine(
+                        event.entitlement_date, datetime.time.min, tzinfo=datetime.timezone.utc),
+                    kind=InvestmentEventKind.INCOME,
+                    key=key,
+                    currency=event.currency,
+                    amount=position.amount * event.value,
+                ))
+
+    def pay_income(
+            self, session: datetime.date | datetime.datetime,
+            post: Callable[[list[InvestmentEvent]], None] | None = None,
+    ) -> dict[str, float]:
+        """Pay all due cash income once, removing entitlements only after posting succeeds."""
+        session_date = session.date() if isinstance(session, datetime.datetime) else session
+        dates = sorted(date for date in self._unpaid_income if date <= session_date)
+        payments = [payment.to_event() if isinstance(payment, DividendCashPayment) else payment
+                    for date in dates for payment in self._unpaid_income[date]]
+        if payments and post is not None:
+            post(payments)
+        amounts: dict[str, list[float]] = {}
+        for payment in payments:
+            amounts.setdefault(payment.currency, []).append(payment.amount)
+        for date in dates:
+            del self._unpaid_income[date]
+        return {currency: fsum(values) for currency, values in amounts.items()}
 
     def pay_bond_payments(self, session: datetime.date) -> float:
-        """Cash from every coupon and amortization instalment due on or before ``session``.
+        """Legacy scalar total of due income; ledger posting keeps its native currency and scope."""
+        return fsum(self.pay_income(session=session).values())
 
-        On or *before*, not on: a payment dated to a weekend or an exchange holiday still has to
-        reach the account, and it reaches it on the next session rather than never.
-
-        Negative for a short position: a short bond seller owes the coupon to whoever lent them
-        the paper, exactly as a short equity owes the dividend.
-        """
-        due = [date for date in self._unpaid_bond_payments if date <= session]
-        return sum(self._unpaid_bond_payments.pop(date) for date in due)
-
-    def pay_dividends(self, next_trading_day: datetime.datetime):
-        """
-        Returns a cash payment based on the dividends that should be paid out
-        according to the accumulated bookkeeping of earned, unpaid, and stock
-        dividends.
-        """
-        net_cash_payment = 0.0
-
-        try:
-            payments = self._unpaid_dividends[next_trading_day]
-            # Mark these dividends as paid by dropping them from our unpaid
-            del self._unpaid_dividends[next_trading_day]
-        except KeyError:
-            payments = []
-
-        # representing the fact that we're required to reimburse the owner of
-        # the stock for any dividends paid while borrowing.
-        for payment in payments:
-            net_cash_payment += payment["amount"]
+    def pay_dividends(
+            self, next_trading_day: datetime.date | datetime.datetime,
+            post: Callable[[list[InvestmentEvent]], None] | None = None,
+    ) -> dict[str, float]:
+        """Pay due cash income and stock dividends, including delayed holiday payments."""
+        session_date = next_trading_day.date() if isinstance(next_trading_day, datetime.datetime) else next_trading_day
+        cash_payments = self.pay_income(session=session_date, post=post)
 
         # Add stock for any stock dividends paid.  Again, the values here may
         # be negative in the case of short positions.
-        try:
-            stock_payments = self._unpaid_stock_dividends[next_trading_day]
-        except KeyError:
-            stock_payments = []
+        due_dates = sorted(date for date in self._unpaid_stock_dividends if date <= session_date)
+        stock_payments = [payment for date in due_dates for payment in self._unpaid_stock_dividends.pop(date)]
 
         for stock_payment in stock_payments:
             payment_asset = stock_payment["payment_asset"]
@@ -484,7 +505,7 @@ class PositionTracker:
             for position in positions:
                 position.amount += share_count
 
-        return net_cash_payment
+        return cash_payments
 
     def close_positions(self, asset: ExchangeAsset, dt: datetime.datetime,
                         price: float | None = None) -> list[Transaction]:

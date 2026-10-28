@@ -1,24 +1,24 @@
 import datetime
 from dataclasses import dataclass
-from typing import Literal
 
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.finance.domain.investment_event_kind import InvestmentEventKind
 
 type InvestmentKey = tuple[str, str, ExchangeAsset]
 
 
 @dataclass(frozen=True)
 class InvestmentEvent:
-    """Immutable native investment posting; fields are constructor arguments.
+    """Immutable non-trade posting or exported trade; fields are constructor arguments.
 
     Attributes
     ----------
     id : str
         Identity unique within ``key``. Identical repeats are idempotent;
-        conflicting repeats are rejected by the investment book.
+        conflicting repeats are rejected by the ledger.
     dt : datetime.datetime
         Aware posting time. Events must be recorded in chronological order.
-    kind : {'trade', 'fee', 'income', 'split'}
+    kind : InvestmentEventKind
         Determines which of the monetary/quantity fields are used.
     key : InvestmentKey
         ``(exchange_name, trading_account_id, ExchangeAsset)``. Lots never
@@ -37,14 +37,23 @@ class InvestmentEvent:
     transaction_id : str or None, optional
         For fees, the referenced trade's ``id`` in the same ``key``. Required
         to allocate the fee between realized PNL and remaining acquisition cost.
+    quoted_price, order_id : optional
+        Original trade metadata retained by new exports. Older exports retain
+        monetary consideration without these fields; their quotes are not inferred.
     """
 
     id: str
     dt: datetime.datetime
-    kind: Literal["trade", "fee", "income", "split"]
+    kind: InvestmentEventKind
     key: InvestmentKey
     currency: str
     quantity: float = 0.0
     unit_value: float = 0.0
     amount: float = 0.0
     transaction_id: str | None = None
+    quoted_price: float | None = None
+    order_id: str | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize serialized strings to enum members and reject unsupported kinds."""
+        object.__setattr__(self, "kind", InvestmentEventKind(self.kind))

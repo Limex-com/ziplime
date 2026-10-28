@@ -400,6 +400,13 @@ async def to_execution_result(
             asset_service=asset_service, trading_calendar=trading_calendar, sessions=sessions,
             exchange=exchange, emission_rate=emission_rate, index=index)
 
+    if (currency_reporting is not None and currency_reporting.investment_pnl
+            and currency_reporting.opening_cash is None and currency_reporting.investment_history is None):
+        currency_reporting = dataclasses.replace(
+            currency_reporting,
+            opening_cash={(exchange.name, trading_account_id, currency_reporting.base_currency): starting_cash},
+        )
+
     tracker = MetricsTracker(
         sessions=sessions,
         asset_service=asset_service,
@@ -448,7 +455,7 @@ async def to_execution_result(
             if transaction.commission:
                 ledger.process_commission(
                     commission=Commission(asset=transaction.asset, order=None,
-                                          amount=transaction.commission, transaction_id=transaction.id,
+                                          amount=transaction.commission, transaction=transaction,
                                           dt=transaction.dt),
                     tr=None)
 

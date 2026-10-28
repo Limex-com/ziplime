@@ -187,7 +187,7 @@ async def test_delta_rates_event_vector_and_streaming_results_agree(tmp_path, in
                 sid_indexes={equity.sid: (0, len(index)), us_equity.sid: (len(index), len(index) * 2)})
             kwargs["currency_reporting"] = replace(reporting, opening_cash={
                 ("LIME", "simulation_account", "EUR"): 100,
-                ("LIME", "simulation_account", "USD"): 30,
+                ("LIME", "simulation_account", "USD"): 30.5,
             })
             algorithm.write_text(data=algorithm.read_text().replace(
                 "        context.bought = True\n",
@@ -201,7 +201,7 @@ async def test_delta_rates_event_vector_and_streaming_results_agree(tmp_path, in
                 "        context.bought = True\n"))
             mixed = await run_simulation(**kwargs)
             usd_perf = mixed.perf_by_currency["USD"]
-            assert usd_perf["portfolio_value"].iloc[-1] == pytest.approx(expected=103 * 1.3 + 29.5)
+            assert usd_perf["portfolio_value"].iloc[-1] == pytest.approx(expected=103 * 1.3 + 30)
             assert usd_perf["investment_cost"].iloc[-1] == pytest.approx(expected=21 * 1.1 + 30.5)
             assert usd_perf["cash_fx_pnl"].iloc[-1] == pytest.approx(expected=100 * (1.3 - 1.0) - 21 * (1.3 - 1.1))
     finally:

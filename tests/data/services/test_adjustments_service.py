@@ -7,6 +7,7 @@ import polars as pl
 import pytest
 
 from ziplime.assets.entities.asset import Asset
+from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.split import Split
@@ -71,7 +72,7 @@ async def test_adjust_data_bundle_with_split_and_dividend(sample_market_bundle):
         first_traded=datetime.date(2020, 1, 1),
         auto_close_date=datetime.date(2030, 1, 1),
     )
-    quote = Asset(
+    quote = Currency(
         id=1,
         isin=None,
         asset_name="USD",
@@ -110,7 +111,6 @@ async def test_adjust_data_bundle_with_split_and_dividend(sample_market_bundle):
     # Dividend on Jan 5: amount = 10.0. Preceding close (Jan 4) is 100.0.
     # Factor is (100 - 10) / 100 = 0.9.
     # Bars strictly before Jan 5 should have price * 0.9.
-    from iso4217 import Currency as IsoCurrency
     div = DividendPayout(
         asset=asset,
         amount=10.0,
@@ -118,7 +118,7 @@ async def test_adjust_data_bundle_with_split_and_dividend(sample_market_bundle):
         declared_date=datetime.date(2024, 1, 1),
         record_date=datetime.date(2024, 1, 5),
         ex_date=datetime.date(2024, 1, 5),
-        currency=IsoCurrency.USD,
+        currency=quote,
     )
     asset_service.get_dividends_by_assets_and_ex_date_between = AsyncMock(return_value=[div])
 

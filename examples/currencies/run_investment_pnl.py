@@ -8,17 +8,19 @@ Assets live in a temporary SQLite database; FX bars are written to Delta Lake an
 Polars through CurrencyConversionService. Everything is synthetic, including SBER's listing
 on the demo's single XNYS calendar. No credentials or checked-in database are used.
 
-The strategy buys RUB 10,000 of SBER and USD 150 of a USD-quoted stock. SBER rises 10%, but
-USD/RUB moves from 82 to 200: SBER gains RUB 1,000 while losing USD 66.9512. After selling,
-USD/RUB reaches 220; the retained RUB cash loses another USD 5, without changing security PNL.
+The strategy buys EUR 10,000 of SBER and USD 150 of a USD-quoted stock. SBER rises 10%, but
+USD/EUR moves from 82 to 200: SBER gains EUR 1,000 while losing USD 66.9512. After selling,
+USD/EUR reaches 220; the retained EUR cash loses another USD 5, without changing security PNL.
 The final session demonstrates external funding and an explicit executed FX cash exchange.
 """
 import asyncio
 import datetime
 import math
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
+import pandas as pd
 import polars as pl
 from exchange_calendars import ExchangeCalendar
 
@@ -36,8 +38,7 @@ from ziplime.data.services.currency_conversion_service import CurrencyConversion
 from ziplime.data.services.file_system_delta_lake_bundle_storage import FileSystemDeltaLakeBundleStorage
 from ziplime.finance.commission.no_commission import NoCommission
 from ziplime.finance.domain.currency_reporting import CurrencyReporting
-from ziplime.finance.investment_book import InvestmentBook
-from ziplime.finance.monetary_valuation_service import MonetaryValuationService
+from ziplime.finance.domain.ledger import Ledger
 from ziplime.finance.slippage.no_slippage import NoSlippage
 from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 from ziplime.utils.calendar_utils import get_calendar
@@ -61,16 +62,16 @@ async def seed_assets(service: AssetService) -> tuple[ExchangeAsset, ExchangeAss
     Returns
     -------
     tuple[ExchangeAsset, ExchangeAsset, ExchangeAsset]
-        Persisted SBER/RUB, USD_STOCK/USD, and USD/RUB listings, in that order.
+        Persisted SBER/EUR, USD_STOCK/USD, and USD/EUR listings, in that order.
         All use the demo's XNYS venue/calendar, not real Moscow trading hours.
     """
     exchange = ExchangeInfo(mic="XNYS", name="Demo", canonical_name="Demo", country_code="US")
     await service.save_exchanges(exchanges=[exchange])
-    rub, usd = await service.save_currencies(currencies=[
+    eur, usd = await service.save_currencies(currencies=[
         Currency(
             id=None, isin=None, asset_name=code, start_date=LISTED_FROM, end_date=LISTED_UNTIL,
             first_traded=LISTED_FROM, auto_close_date=LISTED_UNTIL)
-        for code in ("RUB", "USD")
+        for code in ("EUR", "USD")
     ])
     equities = await service.save_equities(equities=[
         Equity(
@@ -84,7 +85,7 @@ async def seed_assets(service: AssetService) -> tuple[ExchangeAsset, ExchangeAss
             start_date=LISTED_FROM, end_date=LISTED_UNTIL, first_traded=LISTED_FROM,
             auto_close_date=LISTED_UNTIL, external_id=symbol)
         for symbol, asset, quote in zip(
-            ("SBER", "USD_STOCK", "USD_RUB"), [*equities, usd], (rub, usd, rub), strict=True)
+            ("SBER", "USD_STOCK", "USD_EUR"), [*equities, usd], (eur, usd, eur), strict=True)
     ])
     return sber, usd_stock, fx
 
@@ -128,7 +129,7 @@ async def run_example(workspace: Path) -> TradingAlgorithmExecutionResult:
     Returns
     -------
     TradingAlgorithmExecutionResult
-        Five daily sessions with RUB/USD metrics, recorded pre-metric order/PNL
+        Five daily sessions with EUR/USD metrics, recorded pre-metric order/PNL
         estimates, and exportable native investment history.
 
     Raises
@@ -147,7 +148,7 @@ async def run_example(workspace: Path) -> TradingAlgorithmExecutionResult:
         closes = [calendar.session_close(session=session).to_pydatetime() for session in sessions]
         sber, usd_stock, fx_listing = await seed_assets(service=service)
 
-        # A quote is RUB per USD. Seed the initial open, then publish changes at session close.
+        # A quote is EUR per USD. Seed the initial open, then publish changes at session close.
         fx_data = pl.DataFrame(data={
             "sid": [fx_listing.sid] * 6,
             "date": [initial - DAY, *closes],
@@ -156,7 +157,7 @@ async def run_example(workspace: Path) -> TradingAlgorithmExecutionResult:
         fx_bundle = make_bundle(name="demo-fx", data=fx_data, calendar=calendar)
         storage = FileSystemDeltaLakeBundleStorage(base_data_path=str(workspace / "delta"))
         await storage.store_bundle(data_bundle=fx_bundle, merge=False)
-        selected_fx = await service.get_exchange_currency_by_symbol(symbol=AssetSymbol(symbol="USD_RUB", mic="XNYS"))
+        selected_fx = await service.get_exchange_currency_by_symbol(symbol=AssetSymbol(symbol="USD_EUR", mic="XNYS"))
         if selected_fx is None:
             raise ValueError("The demo FX listing was not persisted.")
         conversion = await CurrencyConversionService.from_bundle(
@@ -168,9 +169,9 @@ async def run_example(workspace: Path) -> TradingAlgorithmExecutionResult:
             max_rate_age=DAY * 7,
         )
         reporting = CurrencyReporting(
-            base_currency="RUB", currencies=("RUB", "USD"), conversion=conversion, investment_pnl=True,
+            base_currency="EUR", currencies=("EUR", "USD"), conversion=conversion, investment_pnl=True,
             opening_cash={
-                ("LIME", "simulation_account", "RUB"): 10_000.0,
+                ("LIME", "simulation_account", "EUR"): 10_000.0,
                 ("LIME", "simulation_account", "USD"): 150.0,
             })
         market_data = pl.concat(items=[
@@ -209,11 +210,16 @@ async def run_example(workspace: Path) -> TradingAlgorithmExecutionResult:
 
         # Domain-event export/restore is separate from serialization and execution-position restoration.
         history = result.trading_algorithm.investment_history()
-        restored = InvestmentBook.from_history(
-            valuation=MonetaryValuationService(conversion=conversion),
-            history=history,
-        )
-        snapshot = restored.snapshot(
+        restored = Ledger(pd.DatetimeIndex(closes), DAY)
+        for position in result.trading_algorithm._ledger.position_tracker.get_position_list():
+            restored.position_tracker.update_position(
+                asset=position.asset, exchange_name=position.exchange_name,
+                trading_account_id=position.trading_account_id, amount=position.amount,
+                cost_basis=position.cost_basis, last_sale_price=position.last_sale_price,
+                last_sale_date=position.last_sale_date)
+        restored.enable_investment_accounting(
+            reporting=replace(reporting, investment_history=history), dt=closes[-1], opening_cash={})
+        snapshot = restored.investment_snapshot(
             currency="USD", dt=closes[-1], marks={("LIME", "simulation_account", usd_stock): (30.0, closes[-1])})
         usd = result.perf_by_currency["USD"]
         expected_security_pnl = 55 - 10_000 / 82
