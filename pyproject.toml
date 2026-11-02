@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ziplime"
-version = "2.11.0"
+version = "2.12.0"
 description = ""
 authors = ["Ziplime"]
 readme = "README.md"
@@ -59,12 +59,18 @@ vollib = {version = "^1.0.11", optional = true}
 # the same loop runs interpreted and produces identical numbers, just slower. Measured on 500
 # instruments over five years: 0.055s compiled against 0.312s interpreted.
 numba = {version = "^0.67", optional = true}
+# mlx / cuda: parameter sweeps on a GPU -- see ziplime.sweep. MLX runs on Apple silicon (and on
+# NVIDIA through mlx[cuda] on Linux); CuPy on NVIDIA. Without either a sweep runs on the CPU.
+mlx = {version = ">=0.29", optional = true, markers = "sys_platform == 'darwin' and platform_machine == 'arm64'"}
+cupy-cuda12x = {version = ">=13", optional = true}
 
 [tool.poetry.extras]
 mcp = ["mcp"]
 huggingface = ["huggingface-hub", "pyyaml"]
 options = ["vollib"]
 numba = ["numba"]
+mlx = ["mlx"]
+cuda = ["cupy-cuda12x"]
 all = ["mcp", "huggingface-hub", "pyyaml", "vollib", "numba"]
 
 [tool.poetry.group.docs.dependencies]

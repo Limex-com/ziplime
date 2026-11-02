@@ -32,8 +32,12 @@ class FixedSlippage(SlippageModel):
             spread=self.spread,
         )
 
-    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order):
-        price = await exchange.get_spot_value(frozenset([order.asset]), frozenset(["close"]),
-                                              )
-
-        return (price + (self.spread / 2.0 * order.direction), order.amount)
+    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order,
+                            price: float = None):
+        # `simulate` passes the bar's price; this used to take no `price`, so every order raised
+        # TypeError, and the fallback read added a float to a frame and returned the full amount
+        # rather than what is still open.
+        if price is None:
+            spot = await exchange.get_spot_value(frozenset([order.asset]), frozenset(["close"]), dt=dt)
+            price = spot["close"][0]
+        return (price + (self.spread / 2.0 * order.direction), order.open_amount)

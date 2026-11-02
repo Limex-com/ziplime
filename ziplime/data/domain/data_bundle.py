@@ -344,9 +344,21 @@ class DataBundle(DataSource):
                     total_bar_count).sort(by="date")
 
         if self.frequency_td < frequency_td:
-            df = df_raw.group_by_dynamic(
-                index_column="date", every=frequency, by="sid").agg(pl.col(field).last() for field in fields).tail(
-                limit)
+            # Coarser bars out of finer ones, as OHLCV: the open is the first, the high the highest,
+            # the low the lowest, the volume the sum. This used to take the last row of every
+            # field, so a daily "open" was the last minute's and "volume" one minute's; and it cut
+            # `.tail(limit)` across all instruments together, so with several only the last came back.
+            def aggregate(field):
+                return {"open": pl.col(field).first(), "high": pl.col(field).max(),
+                        "low": pl.col(field).min(), "volume": pl.col(field).sum()}.get(
+                    field, pl.col(field).last())
+
+            wanted = [field for field in fields if field not in ("date", "sid")]
+            df = (df_raw.sort(["sid", "date"])
+                  .group_by_dynamic(index_column="date", every=frequency, group_by="sid")
+                  .agg(aggregate(field) for field in wanted)
+                  .group_by("sid", maintain_order=True).tail(limit)
+                  .sort(by="date"))
             return df
         return df_raw
 

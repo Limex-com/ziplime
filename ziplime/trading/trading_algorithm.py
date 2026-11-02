@@ -320,6 +320,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self._signals_warmup = int(getattr(algorithm, "warmup", 0) or 0)
         #: Set by :meth:`_compute_vectorised_signals`; read by strategies as `context.signals`.
         self.signals = None
+        #: Polars expressions declared with :meth:`indicators` in initialize.
+        self._indicators = {}
 
         self.event_manager.add_event(
             ziplime.utils.events.Event(
@@ -392,6 +394,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             )
         else:
             self.engine = ExplodingPipelineEngine()
+
+    def indicators(self, **expressions) -> None:
+        """Declare indicators as polars expressions, read in handle_data as ``context.signals``.
+
+        The alternative to ``compute_signals``: see :mod:`ziplime.vectorized.indicators`.
+        """
+        self._indicators.update(expressions)
 
     async def initialize(self, *args, **kwargs):
         """Call self._initialize with `self` made available to Zipline API
@@ -499,7 +508,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         however much history the bundle happens to hold, because then a strategy's first signals
         would depend on how deeply the bundle was ingested rather than on what it declared.
         """
-        if self._compute_signals is None:
+        compute_signals = self._compute_signals
+        if self._indicators and compute_signals is not None:
+            raise ValueError("Declare indicators either in compute_signals or with "
+                             "context.indicators() in initialize, not both.")
+        if self._indicators:
+            from ziplime.vectorized.indicators import compute_indicators
+            expressions = dict(self._indicators)
+            compute_signals = lambda context, prices: compute_indicators(expressions, prices)
+        if compute_signals is None:
             return
 
         universe = getattr(self, "universe", None)
@@ -537,8 +554,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         panel = self._trim_to_warmup(panel, first_session=self.clock.start_session)
         panel = await self._attach_datasets(panel, universe=universe, names=names)
 
-        computed = normalise_signals(self._compute_signals(self, panel), panel.index)
-        verify_causality(lambda prices: self._compute_signals(self, prices),
+        computed = normalise_signals(compute_signals(self, panel), panel.index)
+        verify_causality(lambda prices: compute_signals(self, prices),
                          panel=panel, computed=computed, warmup=self._signals_warmup)
         self.signals = SignalPanel(computed, clock=self.get_datetime)
 

@@ -333,6 +333,9 @@ async def clean(bundle, before, after, keep_last, bundle_storage_path):
 @main.command()
 @click.option("-f", "--algofile", required=True, type=click.Path(exists=True, dir_okay=False),
               help="Python file with `initialize` and `handle_data`.")
+@click.option("--config-file", type=click.Path(exists=True, dir_okay=False),
+              help="JSON values for the strategy's AlgorithmConfig -- best_config.json from "
+                   "`ziplime sweep run`, for one.")
 @click.option("-b", "--bundle", required=True, help="Bundle to run over.")
 @click.option("--bundle-version", default=None, help="Version to load. Defaults to the newest.")
 @click.option("-s", "--symbols", required=True,
@@ -369,10 +372,10 @@ async def clean(bundle, before, after, keep_last, bundle_storage_path):
                    "Without it, a summary is printed.")
 @storage_option
 @asset_db_option
-async def run(algofile, bundle, bundle_version, symbols, start_date, end_date, trading_calendar,
-              emission_rate, capital_base, asset_type, benchmark_symbol, max_leverage,
-              same_bar_execution, fill_price, commission_per_share, slippage_bps, stop_on_error,
-              print_algo, output, bundle_storage_path, asset_db):
+async def run(algofile, config_file, bundle, bundle_version, symbols, start_date, end_date,
+              trading_calendar, emission_rate, capital_base, asset_type, benchmark_symbol,
+              max_leverage, same_bar_execution, fill_price, commission_per_share, slippage_bps,
+              stop_on_error, print_algo, output, bundle_storage_path, asset_db):
     """Run a backtest over an ingested bundle.
 
     The symbols are named explicitly rather than taken from the bundle: loading a bundle checks
@@ -406,7 +409,8 @@ async def run(algofile, bundle, bundle_version, symbols, start_date, end_date, t
             start_date=start, end_date=end, trading_calendar=trading_calendar,
             emission_rate=DataFrequency(emission_rate).to_timedelta(),
             total_cash=capital_base, market_data_source=market_data, custom_data_sources=[],
-            algorithm_file=algofile, stop_on_error=stop_on_error, asset_service=asset_service,
+            algorithm_file=algofile, config_file=config_file, stop_on_error=stop_on_error,
+            asset_service=asset_service,
             benchmark_asset_symbol=benchmark_symbol, benchmark_returns=None,
             equity_commission=PerShare(cost=commission_per_share, min_trade_cost=0.0),
             equity_slippage=FixedBasisPointsSlippage(basis_points=slippage_bps),
@@ -420,6 +424,179 @@ async def run(algofile, bundle, bundle_version, symbols, start_date, end_date, t
 
 
 # -- mcp ---------------------------------------------------------------------------------------
+
+
+# -- sweep -------------------------------------------------------------------------------------
+
+class _SweepCommands(click.Group):
+    """``ziplime sweep FILE`` runs FILE, as it did before ``sweep`` had subcommands."""
+
+    def resolve_command(self, ctx, args):
+        if args and args[0] not in self.commands and not args[0].startswith("-"):
+            args = ["run", *args]
+        return super().resolve_command(ctx, args)
+
+
+@main.group(cls=_SweepCommands)
+async def sweep():
+    """Every combination of a strategy's parameters at once, on a GPU or across CPU cores.
+
+    \b
+      ziplime sweep init strategy.py      write a sweep file for the strategy
+      ziplime sweep check sweep.json      how the strategy converts, on a few combinations
+      ziplime sweep run sweep.json        the sweep (also: ziplime sweep sweep.json)
+      ziplime sweep doctor                which backends this machine has
+
+    See docs/backtesting/parameter-sweeps.md.
+    """
+
+
+@sweep.command("run")
+@click.argument("sweep_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--backend", type=click.Choice(["mlx", "cupy", "cpu", "exact"]),
+              help="Override the sweep file's backend.")
+@click.option("--grid", "grid", multiple=True, metavar="NAME=SPEC",
+              help="Set one parameter's values: fast=5,10,20 or slow=30:90:10 (from:to:step). "
+                   "Repeatable; replaces that parameter in the file's grid.")
+@click.option("--set", "assignments", multiple=True, metavar="FIELD=VALUE",
+              help="Override any field of the sweep file: --set total_cash=50000 "
+                   "--set where='fast < slow'. Values are JSON where they parse.")
+@click.option("--compile/--no-compile", "compile_", default=None,
+              help="Compile each bar into a few GPU kernels (MLX). Default: on.")
+@click.option("--batch-size", type=int, help="Combinations per GPU call (default: auto).")
+@click.option("--workers", type=int, help="Processes for backend cpu (default: one per core).")
+@click.option("-o", "--output-dir", type=click.Path(file_okay=False), help="Where to write results.")
+@click.option("--refuse", is_flag=True,
+              help="Stop if the strategy cannot be converted, instead of running every "
+                   "combination through run_simulation.")
+@click.option("--no-verify", is_flag=True, help="Skip the run_simulation check of the best one.")
+async def sweep_run(sweep_file, backend, grid, assignments, compile_, batch_size, workers,
+                    output_dir, refuse, no_verify):
+    """Run the sweep SWEEP_FILE describes.
+
+    Every combination of the grid goes through the strategy at once; the best are recomputed
+    exactly and the best one is run through run_simulation and its trades compared. Writes
+    sweep_results.csv, best_config.json (a config file for run_simulation) and best_fills.csv.
+    """
+    from ziplime.sweep import SweepError, run_sweep
+
+    params = _sweep_params(sweep_file, grid, assignments, backend=backend, compile=compile_,
+                           batch_size=batch_size, workers=workers, output_dir=output_dir,
+                           on_unsupported="refuse" if refuse else None,
+                           verify=False if no_verify else None)
+    try:
+        await run_sweep(params, sweep_file.resolve().parent, say=click.echo)
+    except SweepError as error:
+        _fail(str(error))
+
+
+@sweep.command("check")
+@click.argument("sweep_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--backend", type=click.Choice(["mlx", "cupy", "cpu", "exact"]), default="exact",
+              show_default=True, help="Where to run the few combinations.")
+@click.option("--set", "assignments", multiple=True, metavar="FIELD=VALUE",
+              help="Override a field of the sweep file, as for run.")
+async def sweep_check(sweep_file, backend, assignments):
+    """How the strategy converts: a few combinations, the grid's corners, in seconds.
+
+    Says whether every combination can run at once and how each part of the strategy is computed,
+    and warns about a computation that is NaN at every bar or a parameter that changes nothing.
+    Nothing is written next to the sweep file.
+    """
+    import tempfile
+
+    from ziplime.sweep import SweepError, run_sweep
+    from ziplime.sweep.tools import corner_of
+
+    params = _sweep_params(sweep_file, (), assignments)
+    with tempfile.TemporaryDirectory(prefix="ziplime-sweep-check-") as folder:
+        small = params.model_copy(update={
+            "grid": corner_of(params.grid), "backend": backend, "verify": False, "refine_top": 0,
+            "on_unsupported": "refuse", "output_dir": folder, "min_fills": 0})
+        try:
+            await run_sweep(small, sweep_file.resolve().parent, say=click.echo)
+        except SweepError as error:
+            click.secho("\nThe strategy cannot run for every combination at once:", fg="yellow")
+            click.echo(str(error))
+            click.echo("With on_unsupported: engine (the default) every combination goes through "
+                       "run_simulation on the CPU's cores instead -- the engine's own numbers, "
+                       "at the engine's speed.")
+            raise SystemExit(1)
+    click.secho("\nThe strategy converts: every combination runs at once.", fg="green")
+
+
+@sweep.command("init")
+@click.argument("algorithm_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("-o", "--output", type=click.Path(dir_okay=False, path_type=Path),
+              default=Path("sweep.json"), show_default=True)
+@click.option("-b", "--bundle", help="Bundle to read bars from; without one, Yahoo daily bars.")
+@click.option("--start-date", type=click.DateTime(formats=DATE_FORMATS))
+@click.option("--end-date", type=click.DateTime(formats=DATE_FORMATS))
+@click.option("-c", "--trading-calendar", default="XNYS", show_default=True)
+@click.option("--force", is_flag=True, help="Overwrite the output file.")
+async def sweep_init(algorithm_file, output, bundle, start_date, end_date, trading_calendar, force):
+    """Write a sweep file for ALGORITHM_FILE.
+
+    Its grid varies every number of the strategy's AlgorithmConfig around its default (half, the
+    default, twice it); edit it, then `ziplime sweep check` and `ziplime sweep run`.
+    """
+    import datetime
+    import json
+
+    from ziplime.sweep import SweepError
+    from ziplime.sweep.tools import default_backend, template
+
+    if output.exists() and not force:
+        _fail(f"{output} exists.", "Pass --force to overwrite it, or -o another name.")
+    today = datetime.date.today()
+    end = end_date.date() if end_date else today - datetime.timedelta(days=1)
+    start = start_date.date() if start_date else end.replace(year=end.year - 3)
+    try:
+        content = template(algorithm_file, output, bundle=bundle, start=start, end=end,
+                           calendar=trading_calendar, backend=default_backend())
+    except SweepError as error:
+        _fail(str(error))
+    output.write_text(json.dumps(content, indent=2) + "\n", encoding="utf-8")
+    click.echo(f"Written {output}: {len(content['grid'])} parameters, backend {content['backend']}.")
+    click.echo(f"Next: ziplime sweep check {output}")
+
+
+@sweep.command("doctor")
+async def sweep_doctor():
+    """Which sweep backends and libraries this machine has."""
+    from ziplime.sweep.tools import doctor
+
+    rows = doctor()
+    width = max(len(name) for name, _ in rows)
+    for name, state in rows:
+        click.echo(f"{name:<{width}}  {state}")
+
+
+def _sweep_params(sweep_file: Path, grid, assignments, **overrides):
+    """The sweep file, with the command line's --grid, --set and options over it."""
+    import json
+
+    from pydantic import ValidationError
+
+    from ziplime.sweep import SweepError, SweepParams
+    from ziplime.sweep.tools import parse_assignment, parse_grid, parse_value
+
+    try:
+        raw = json.loads(sweep_file.read_text(encoding="utf-8"))
+        for text in assignments:
+            name, value = parse_assignment(text)
+            raw[name] = parse_value(value)
+        for text in grid:
+            name, values = parse_grid(text)
+            raw.setdefault("grid", {})[name] = values
+        raw.update({name: value for name, value in overrides.items() if value is not None})
+        return SweepParams.model_validate(raw)
+    except json.JSONDecodeError as error:
+        _fail(f"{sweep_file.name} is not JSON: {error}")
+    except SweepError as error:
+        _fail(str(error))
+    except ValidationError as error:
+        _fail(f"{sweep_file.name} is not a valid sweep file:\n{error}")
 
 
 @main.command()

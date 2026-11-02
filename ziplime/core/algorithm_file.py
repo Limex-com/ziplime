@@ -57,7 +57,7 @@ class AlgorithmFile:
             """
             pass
 
-        with open(algorithm_file, "r") as f:
+        with open(algorithm_file, "r", encoding="utf-8") as f:
             self.algorithm_text = f.read()
 
         module_name = "ziplime.ziplime_algorithm"  # TODO: check if we need to modify this
@@ -100,7 +100,7 @@ class AlgorithmFile:
                 "Configuration file won't be loaded."
             )
         if algorithm_config_file is not None:
-            with open(algorithm_config_file, "r") as f:
+            with open(algorithm_config_file, "r", encoding="utf-8") as f:
                 config = custom_config_class.model_validate_json(f.read())
         else:
             config = custom_config_class.model_validate({})

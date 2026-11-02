@@ -16,7 +16,12 @@ What it deliberately is not: a portfolio accounting engine. The kernel tracks ca
 to decide whether an order fits, and the ledger remains the single source of truth for what a run
 holds. See :mod:`ziplime.vectorized.kernel.simulation` for the four semantic decisions it takes on
 its own, and why each is not vectorbt's.
+
+A parameter sweep runs many signal sets through the same decisions:
+:func:`~ziplime.vectorized.kernel.batch.simulate_signals_batch`, one combination at a time in
+float64 or all of them at once on the Apple GPU through MLX (``backend="mlx"``).
 """
+from .batch import BatchSimulationResult, simulate_signals_batch
 from .comparison import ExecutionComparison, compare_execution_results
 from .costs import ResolvedSlippage, resolve_commission, resolve_slippage
 from .models import (
@@ -27,6 +32,7 @@ from .simulation import simulate_signals
 
 __all__ = [
     "VECTOR_KERNEL_VERSION",
+    "BatchSimulationResult",
     "ExecutionComparison",
     "ExecutionTiming",
     "ResolvedSlippage",
@@ -39,4 +45,5 @@ __all__ = [
     "resolve_commission",
     "resolve_slippage",
     "simulate_signals",
+    "simulate_signals_batch",
 ]

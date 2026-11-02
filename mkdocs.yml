@@ -71,6 +71,10 @@ nav:
 - Backtesting:
   - Backtesting: backtesting/index.md
   - Trading bonds: backtesting/bonds.md
+  - Parameter sweeps:
+    - Running a sweep: backtesting/parameter-sweeps.md
+    - How a sweep works: backtesting/sweep-internals.md
+    - Sweep performance: backtesting/sweep-performance.md
 
 - AI Assistant (No-Code):
   - ai-assistant/index.md

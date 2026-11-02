@@ -246,6 +246,22 @@ async def handle_data(context, data):         # bar by bar, as usual
 
 ---
 
+<a id="sweeps"></a>
+## 🔥 Parameter sweeps on a GPU
+
+The same algorithm file, every combination of its parameters at once — on an Apple GPU, an NVIDIA GPU or across CPU cores. `handle_data` is converted to run for every combination in one pass; history read as an array, TA-Lib and fitted models are computed ahead of the run. The best combinations are recomputed in float64 and the best one is run through `run_simulation` and its trades compared.
+
+```bash
+pip install "ziplime[mlx]"            # Apple silicon; "ziplime[cuda]" on NVIDIA
+ziplime sweep init strategy.py        # a sweep file around the strategy's defaults
+ziplime sweep check sweep.json        # how it converts, in seconds
+ziplime sweep run sweep.json          # the sweep; best_config.json runs in run_simulation
+```
+
+Measured on an Apple M3: 998,400 combinations of a 4-instrument trend strategy in 27 s; 24,900 combinations of a TA-Lib strategy in 1.7 s. See [Parameter sweeps](docs/backtesting/parameter-sweeps.md), [how they work](docs/backtesting/sweep-internals.md) and [performance](docs/backtesting/sweep-performance.md).
+
+---
+
 ## 📈 Asset classes and data
 
 - **Equities & ETFs** — US markets out of the box

@@ -18,7 +18,7 @@ from ziplime.finance.margin import (
 )
 from ziplime.domain.account import Account
 from ziplime.domain.position import Position
-from ziplime.domain.portfolio import Portfolio
+from ziplime.domain.portfolio import Portfolio, Positions
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.commission import CommissionModel
 
@@ -687,7 +687,7 @@ class Ledger:
         The projected positions carry ``exchange_name`` and ``trading_account_id``: the accessors
         filter on both, and a projection without them silently matches nothing.
         """
-        positions = {}
+        positions = Positions()
         for key, position in position_tracker.positions.items():
             positions[key] = Position(
                 asset=position.asset,
