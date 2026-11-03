@@ -1,5 +1,39 @@
 # Release Notes
 
+### Version 2.11.2
+
+Futures chains per exchange, and option bars by the vendor's security id.
+
+One asset database can now hold the same futures root on several exchanges. `NG` is natural gas
+on the Moscow Exchange (100 MMBtu) and on NYMEX (10,000 MMBtu). Before, the second chain was
+skipped on import without a word, and its contracts were filed under the first chain's
+specification.
+
+#### Upgrading from 2.11.0
+
+- **The asset database gains a migration** (`f3a9d6b2c814`). A chain is keyed by `(root_symbol, mic)`
+  and `futures_contracts.root_symbol` is no longer a foreign key. Older ziplime cannot open a
+  database migrated this way.
+- **A bare root on several exchanges is ambiguous.** `front_contract`, `futures_chain` and
+  `continuous_future` raise `AmbiguousRootSymbol` unless the exchange is named: `"NG@XNYM"` or
+  `mic="XNYM"`. `ZIPLIME_FUTURES_DEFAULT_MIC` (a comma-separated list) sets the exchange used when
+  none is named. A root listed on one exchange works as before.
+- **`get_futures_roots()` is keyed by `(root_symbol, mic)`.** It was keyed by root symbol.
+
+#### Fixed
+
+- **A reused contract ticker is two contracts.** The Moscow Exchange writes the year as one digit,
+  so `SiH4` is both the March 2014 and the March 2024 delivery. A contract's identity now includes
+  its expiry. Before, the second contract was dropped on import, and its listing pointed at the
+  first contract.
+- **A continuous future's sid includes its exchange.** `NG@RTSX` and `NG@XNYM` got the same sid,
+  and so did `Si` (Moscow) and `SI` (COMEX).
+- **CBOT and CBOE Futures listings use their own calendars.** XCBT now maps to CMES and XCBF to
+  XCBF. Before, they used the simulation's calendar.
+- **gRPC option chains fetch bars by security id.** `GrpcOptionChainSource.bars` hands the ids
+  `GetOptions` returned to a source that accepts them (`security_ids`, in the private gRPC wheel
+  0.3.0). The candle service mostly does not answer an option by its OCC ticker.
+
 ### Version 2.11.0
 
 Each listing now keeps its own venue's trading hours, so one backtest can hold instruments from

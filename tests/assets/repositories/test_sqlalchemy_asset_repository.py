@@ -1,7 +1,9 @@
 import datetime as dt
+import os
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import pandas as pd
@@ -21,7 +23,7 @@ from ziplime.assets.domain.settlement_type import SettlementType
 from ziplime.assets.entities.symbol_universe import SymbolsUniverse
 from ziplime.assets.entities.symbols_universe_asset import SymbolsUniverseAsset
 from ziplime.core.ingest_data import get_asset_service
-from ziplime.errors import SidsNotFound
+from ziplime.errors import AmbiguousRootSymbol, SidsNotFound
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -296,9 +298,19 @@ class SqlAlchemyAssetRepositoryTests(unittest.IsolatedAsyncioTestCase):
         contract = await self.repository.get_futures_contract_by_symbol("CLM23", "XFCM")
         by_root = await self.repository.get_exchange_futures_contracts_by_root("CL", "XFCM")
         ordered = await self.repository.get_ordered_contracts("CL", "XFCM")
-        continuous = await self.repository.create_continuous_future("CL", 0, "volume", "mul")
+        continuous = await self.repository.create_continuous_future("CL", 0, "volume", "mul", mic="XFCM")
+        spelled = await self.repository.create_continuous_future("CL@XFCM", 0, "volume", "mul")
+        nymex = await self.repository.create_continuous_future("CL@XNYM", 0, "volume", "mul")
 
-        self.assertEqual(roots["CL"].root_symbol, "CL")
+        # The seed database already holds NYMEX CL. A second CL on another exchange used to be
+        # skipped as already stored, its contracts filed under NYMEX's specification.
+        self.assertEqual(roots[("CL", "XFCM")].root_symbol, "CL")
+        self.assertIn(("CL", "XNYM"), roots)
+        with self.assertRaises(AmbiguousRootSymbol):
+            await self.repository.create_continuous_future("CL", 0, "volume", "mul")
+        self.assertEqual(spelled.sid, continuous.sid)
+        self.assertNotEqual(nymex.sid, continuous.sid)
+        self.assertEqual(continuous.mic, "XFCM")
         self.assertEqual(by_symbol[0].sid, listings[0].sid)
         self.assertEqual(single.sid, listings[0].sid)
         self.assertEqual(contract.id, contracts[0].id)
@@ -306,6 +318,73 @@ class SqlAlchemyAssetRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.sid for item in ordered.contracts], [listings[0].sid, listings[1].sid])
         self.assertEqual(continuous.root_symbol, "CL")
         self.assertEqual(continuous.offset, 0)
+
+    async def _store_chain(self, exchange: ExchangeInfo, root_symbol: str, multiplier: float,
+                           deliveries: list[tuple[str, str, dt.date]]) -> list[ExchangeAsset]:
+        """One chain on one exchange: ``deliveries`` is ``[(asset_name, symbol, expiry), ...]``."""
+        [currency] = await self.repository.save_currencies([make_currency()])
+        far_past, far_future = dt.date(2000, 1, 1), dt.date(2040, 1, 1)
+        [underlying] = await self.repository.save_commodities([Commodity(
+            id=None, isin=None, asset_name=f"{root_symbol}@{exchange.mic}", start_date=far_past,
+            end_date=far_future, first_traded=far_past, auto_close_date=far_future)])
+        await self.repository.save_futures_roots([FuturesRoot(
+            root_symbol=root_symbol, description=root_symbol, exchange=exchange,
+            root_asset=underlying, multiplier=multiplier, tick_size=0.001,
+            quote_currency=currency.asset_name, margin_currency=currency.asset_name)])
+        contracts = await self.repository.save_futures_contracts([
+            FuturesContract(
+                id=None, isin=None, asset_name=name, start_date=expiry - dt.timedelta(days=400),
+                end_date=expiry, first_traded=expiry - dt.timedelta(days=400),
+                auto_close_date=expiry + dt.timedelta(days=1), root_exchange_asset=None,
+                root_asset=underlying, root_symbol=root_symbol, notice_date=expiry,
+                expiration_date=expiry, multiplier=multiplier, tick_size=0.001,
+                settlement_type=SettlementType.CASH, margin_currency=currency.asset_name)
+            for name, _, expiry in deliveries])
+        return await self.repository.save_exchange_assets([
+            ExchangeAsset(
+                sid=None, symbol=symbol, start_date=contract.start_date, end_date=contract.end_date,
+                first_traded=contract.first_traded, auto_close_date=contract.auto_close_date,
+                external_id=symbol, exchange=exchange, asset=contract, quote=currency)
+            for contract, (_, symbol, _) in zip(contracts, deliveries)])
+
+    async def test_one_root_on_two_exchanges_keeps_two_chains(self):
+        moscow = ExchangeInfo("XMOF", "Moscow futures", "MOF", "RU")
+        nymex = ExchangeInfo("XNYF", "NYMEX futures", "NYF", "US")
+        await self.repository.save_exchanges([moscow, nymex])
+        moscow_ng = await self._store_chain(moscow, "QG", 100.0, [
+            ("QGX6", "QGX6", dt.date(2026, 11, 25)), ("QGZ6", "QGZ6", dt.date(2026, 12, 23))])
+        nymex_ng = await self._store_chain(nymex, "QG", 10_000.0, [
+            ("QGZ26", "QGZ26", dt.date(2026, 11, 25))])
+
+        roots = await self.repository.get_futures_roots()
+        self.assertEqual(roots[("QG", "XMOF")].multiplier, 100.0)
+        self.assertEqual(roots[("QG", "XNYF")].multiplier, 10_000.0)
+
+        moscow_chain = await self.repository.get_exchange_futures_contracts_by_root("QG@XMOF")
+        nymex_chain = await self.repository.get_exchange_futures_contracts_by_root("QG", mic="XNYF")
+        self.assertEqual([c.sid for c in moscow_chain], [c.sid for c in moscow_ng])
+        self.assertEqual([c.sid for c in nymex_chain], [c.sid for c in nymex_ng])
+        self.assertEqual(nymex_chain[0].asset.multiplier, 10_000.0)
+
+        with self.assertRaises(AmbiguousRootSymbol):
+            await self.repository.get_exchange_futures_contracts_by_root("QG")
+        with unittest.mock.patch.dict(os.environ, {"ZIPLIME_FUTURES_DEFAULT_MIC": "XLON,XMOF"}):
+            preferred = await self.repository.get_exchange_futures_contracts_by_root("QG")
+        self.assertEqual([c.sid for c in preferred], [c.sid for c in moscow_ng])
+
+    async def test_a_reused_ticker_is_two_contracts(self):
+        # The Moscow Exchange writes the year as one digit, so SiH4 is both the March 2014 and the
+        # March 2024 delivery. The second used to be dropped as already stored.
+        exchange = ExchangeInfo("XMOR", "Moscow futures", "MOR", "RU")
+        await self.repository.save_exchanges([exchange])
+        listings = await self._store_chain(exchange, "Sx", 1.0, [
+            ("SxH4", "SxH14", dt.date(2014, 3, 17)), ("SxH4", "SxH4", dt.date(2024, 3, 21))])
+
+        chain = await self.repository.get_exchange_futures_contracts_by_root("Sx")
+        self.assertEqual(len({c.asset.id for c in chain}), 2)
+        self.assertEqual([c.asset.expiration_date for c in chain],
+                         [dt.date(2014, 3, 17), dt.date(2024, 3, 21)])
+        self.assertEqual([c.symbol for c in chain], [listing.symbol for listing in listings])
 
     async def test_generic_listing_dispatch_and_lifetimes(self):
         exchange = ExchangeInfo("XLIFE", "Lifetime Exchange", "LIFE", "ZZ")

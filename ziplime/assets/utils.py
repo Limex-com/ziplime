@@ -234,12 +234,14 @@ CONTINUOUS_FUTURE_ADJUSTMENT_STYLE_IDS = {
 }
 
 
-def _encode_continuous_future_sid(root_symbol, offset, roll_style, adjustment_style):
-    # Generate a unique int identifier
+def _encode_continuous_future_sid(root_symbol, offset, roll_style, adjustment_style, mic=None):
+    # Generate a unique int identifier. The exchange is part of it: NG on the Moscow Exchange and
+    # NG on NYMEX are two chains, and so are Si (Moscow) and SI (COMEX), which upper() made one.
     values = (
         SID_TYPE_IDS[ContinuousFuture],
         offset,
         *[ord(x) for x in root_symbol.upper()],
+        *([ord(x) for x in mic] if mic else []),
         CONTINUOUS_FUTURE_ROLL_STYLE_IDS[roll_style],
         CONTINUOUS_FUTURE_ADJUSTMENT_STYLE_IDS[adjustment_style],
     )

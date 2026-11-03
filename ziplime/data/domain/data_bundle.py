@@ -362,7 +362,7 @@ class DataBundle(DataSource):
         """Return the contract ``continuous_future`` holds at ``dt``."""
         roll_finder = self.get_roll_finder(continuous_future.roll_style)
         return await roll_finder.get_contract_center(
-            root_symbol=continuous_future.root_symbol, dt=dt, offset=continuous_future.offset)
+            root_symbol=continuous_future.chain, dt=dt, offset=continuous_future.offset)
 
     async def _get_continuous_future_data(self, continuous_future: ContinuousFuture,
                                           fields: frozenset[str] | None,
@@ -380,7 +380,7 @@ class DataBundle(DataSource):
         window_start = max(end_date - lookback, self._as_datetime(self.start_date))
 
         roll_finder = self.get_roll_finder(continuous_future.roll_style)
-        rolls = await roll_finder.get_rolls(root_symbol=continuous_future.root_symbol,
+        rolls = await roll_finder.get_rolls(root_symbol=continuous_future.chain,
                                             start=window_start, end=end_date,
                                             offset=continuous_future.offset)
         if not rolls:
@@ -632,10 +632,10 @@ class DataBundle(DataSource):
         """
         roll_finder = self.get_roll_finder(continuous_future.roll_style)
         contract = await roll_finder.get_contract_center(
-            root_symbol=continuous_future.root_symbol, dt=dt, offset=continuous_future.offset)
+            root_symbol=continuous_future.chain, dt=dt, offset=continuous_future.offset)
         if contract is None:
             return []
-        ordered_contracts = await roll_finder.get_ordered_contracts(continuous_future.root_symbol)
+        ordered_contracts = await roll_finder.get_ordered_contracts(continuous_future.chain)
         session = dt.date() if isinstance(dt, datetime.datetime) else dt
         return ordered_contracts.active_chain(starting_sid=contract.sid, dt=session)
 

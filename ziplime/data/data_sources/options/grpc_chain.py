@@ -297,6 +297,16 @@ class GrpcOptionChainSource(OptionChainSource):
         if not contracts or len(timestamps) == 0:
             return pl.DataFrame(schema=BAR_COLUMNS)
 
+        # The candle service answers for an option by its security id and mostly not by its OCC
+        # ticker, and `contracts` already has the id from GetOptions. A source that can be told
+        # ids (`security_ids`, private wheel 0.3.0) is told them.
+        known_ids = getattr(self._source, "security_ids", None)
+        if isinstance(known_ids, dict):
+            for spec in contracts:
+                if spec.vendor_id and str(spec.vendor_id).isdigit():
+                    symbol = self._tickers.get(spec.listing_symbol, spec.occ_symbol)
+                    known_ids[f"{symbol}@{spec.mic}"] = int(spec.vendor_id)
+
         stamps = timestamps.to_list()
         # The clock's instants, keyed by the session they belong to. The feed stamps a daily bar
         # at midnight UTC of its own session, so the *date* is the join key and the clock's

@@ -133,14 +133,19 @@ class StubAssetService:
         self._contracts = contracts
 
     async def get_ordered_contracts(self, root_symbol: str, mic: str | None = None):
+        # Chains are addressed as ROOT@MIC, as AssetService accepts them.
+        if "@" in root_symbol:
+            root_symbol, mic = root_symbol.split("@", 1)
         return OrderedContracts(root_symbol=root_symbol,
                                 contracts=[c for c in self._contracts
-                                           if c.asset.root_symbol == root_symbol])
+                                           if c.asset.root_symbol == root_symbol
+                                           and (mic is None or c.mic == mic)])
 
     async def create_continuous_future(self, root_symbol: str, offset: int = 0,
                                        roll_style: str = "volume",
-                                       adjustment: str | None = "mul") -> ContinuousFuture:
-        ordered = await self.get_ordered_contracts(root_symbol)
+                                       adjustment: str | None = "mul",
+                                       mic: str | None = None) -> ContinuousFuture:
+        ordered = await self.get_ordered_contracts(root_symbol, mic)
         return ContinuousFuture(
             sid=_encode_continuous_future_sid(
                 root_symbol=root_symbol, offset=offset, roll_style=roll_style,

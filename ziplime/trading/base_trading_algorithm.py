@@ -24,7 +24,8 @@ class BaseTradingAlgorithm:
     def record(self, *args, **kwargs): ...
 
     def continuous_future(
-            self, root_symbol_str: str, offset: int = 0, roll: str = "volume", adjustment: str = "mul"
+            self, root_symbol_str: str, offset: int = 0, roll: str = "volume", adjustment: str = "mul",
+            mic: str | None = None
     ): ...
 
     async def symbol(

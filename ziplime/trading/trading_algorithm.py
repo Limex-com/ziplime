@@ -890,14 +890,16 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     async def continuous_future(
-            self, root_symbol_str: str, offset: int = 0, roll: str = "volume", adjustment: str = "mul"
+            self, root_symbol_str: str, offset: int = 0, roll: str = "volume", adjustment: str = "mul",
+            mic: str | None = None
     ):
         """Create a specifier for a continuous contract.
 
         Parameters
         ----------
         root_symbol_str : str
-            The root symbol for the future chain.
+            The root symbol for the future chain. ``NG@XNYM`` names the exchange as well, which a
+            root listed on several exchanges needs.
 
         offset : int, optional
             The distance from the primary contract. Default is 0.
@@ -909,6 +911,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             Method for adjusting lookback prices between rolls. Options are
             'mul', 'add', and None. Default is 'mul'.
 
+        mic : str, optional
+            The exchange of the chain, when ``root_symbol_str`` does not name it.
+
         Returns
         -------
         continuous_future : ziplime.assets.ContinuousFuture
@@ -919,6 +924,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             offset=offset,
             roll_style=roll,
             adjustment=adjustment,
+            mic=mic,
         )
 
     @api_method
@@ -1427,6 +1433,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         This is the term structure: element 0 is the front contract, and each one after it is
         further out on the curve. Ordering by expiration rather than by ticker matters -- an
         alphabetical sort puts ``CLF27`` before ``CLX26``, which reverses the curve.
+
+        The chain is one exchange's. ``NG@XNYM`` or ``mic='XNYM'`` names it; a bare root listed on
+        several exchanges raises :class:`~ziplime.errors.AmbiguousRootSymbol` unless
+        ``ZIPLIME_FUTURES_DEFAULT_MIC`` picks one.
 
         Returns the listings, so the result can be passed straight to :meth:`order` and to
         ``data.current``; :attr:`ExchangeAsset.asset` on each one carries the multiplier and the

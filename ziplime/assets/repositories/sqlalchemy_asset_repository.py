@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import asyncio
+import os
 from pathlib import Path
 from typing import Any, Self
 import pathlib
@@ -51,6 +52,7 @@ from ziplime.assets.models.symbols_universe_asset import SymbolsUniverseAssetMod
 from ziplime.trading.models.trading_pair import TradingPair
 from ziplime.core.db.base_model import BaseModel
 from ziplime.errors import (
+    AmbiguousRootSymbol,
     IncompatibleAssetDatabase,
     SidsNotFound,
     RootSymbolNotFound,
@@ -72,6 +74,17 @@ from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES, OrderedCon
 from ziplime.assets.domain.continuous_future import ROLL_STYLES
 from ziplime.assets.repositories.asset_repository import AssetRepository
 from ziplime.assets.utils import _encode_continuous_future_sid, Lifetimes
+
+
+def _asset_identity(asset) -> tuple:
+    """What tells two stored assets apart before either has an id: type, ISIN and name -- and, for
+    a contract, its expiry.
+
+    Exchanges reuse contract tickers (the Moscow Exchange's ``SiH4`` is the March 2014 and the
+    March 2024 delivery) and few contracts carry an ISIN, so without the expiry both deliveries
+    resolved to one asset and the second listing was filed under the first contract.
+    """
+    return type(asset), asset.isin, asset.asset_name, getattr(asset, "expiration_date", None)
 
 
 class SqlAlchemyAssetRepository(AssetRepository):
@@ -260,15 +273,15 @@ class SqlAlchemyAssetRepository(AssetRepository):
             premium_style=PremiumStyle(option_contract_model.premium_style),
         )
 
-    async def _asset_ids_by_identity(self) -> dict[tuple[type, str | None, str], int]:
-        """Map ``(entity type, isin, asset_name)`` to the stored asset id.
+    async def _asset_ids_by_identity(self) -> dict[tuple, int]:
+        """Map :func:`_asset_identity` to the stored asset id.
 
         Callers hand in entities they built themselves, whose ``id`` is still ``None`` because the
         asset had not been written yet. This resolves those references the same way
         :meth:`save_exchange_assets` does.
         """
         return {
-            (type(asset), asset.isin, asset.asset_name): asset.id
+            _asset_identity(asset): asset.id
             for asset in (await self.get_all_assets()).values()
         }
 
@@ -479,7 +492,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         def resolve(event: BondEvent) -> int | None:
             if event.asset.id is not None:
                 return event.asset.id
-            return asset_ids.get((type(event.asset), event.asset.isin, event.asset.asset_name))
+            return asset_ids.get(_asset_identity(event.asset))
 
         resolved = [(event, resolve(event)) for event in bond_events]
         unknown = [event for event, asset_id in resolved if asset_id is None]
@@ -640,7 +653,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         all_assets = await self.get_all_assets()
 
         asset_keys = {
-            (type(asset), asset.isin, asset.asset_name): asset
+            _asset_identity(asset): asset
             for asset in all_assets.values()
         }
 
@@ -655,7 +668,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         exchange_assets = [
             ea for ea in exchange_assets
             if (ea.mic, ea.symbol,
-                asset_keys[(type(ea.asset), ea.asset.isin, ea.asset.asset_name)].id) not in existing
+                asset_keys[_asset_identity(ea.asset)].id) not in existing
         ]
         if not exchange_assets:
             return []
@@ -668,9 +681,9 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 end_date=exchange_asset.end_date,
                 symbol=exchange_asset.symbol,
                 asset_id=asset_keys[
-                    (type(exchange_asset.asset), exchange_asset.asset.isin, exchange_asset.asset.asset_name)].id,
+                    _asset_identity(exchange_asset.asset)].id,
                 quote_id=asset_keys[
-                    (type(exchange_asset.quote), exchange_asset.quote.isin, exchange_asset.quote.asset_name)].id,
+                    _asset_identity(exchange_asset.quote)].id,
                 mic=exchange_asset.mic,
                 first_traded=exchange_asset.first_traded,
                 sid=None,
@@ -733,17 +746,20 @@ class SqlAlchemyAssetRepository(AssetRepository):
         return [self._commodity_model_to_commodity(commodity_model=m) for m in stored]
 
     async def save_futures_roots(self, futures_roots: list[FuturesRoot]) -> list[FuturesRoot]:
-        """Persist futures chain metadata, skipping roots that are already stored."""
+        """Persist futures chain metadata, skipping chains that are already stored.
+
+        A chain is ``(root_symbol, mic)``. Keyed on the root alone, NYMEX ``NG`` was skipped as
+        already stored when the Moscow Exchange's ``NG`` was, and its contracts went in under the
+        Moscow specification.
+        """
         if not futures_roots:
             return []
         async with self.session_maker() as session:
-            existing = {
-                root for root in (await session.execute(
-                    select(FuturesRootSymbolModel.root_symbol).where(
-                        FuturesRootSymbolModel.root_symbol.in_([r.root_symbol for r in futures_roots]))
-                )).scalars()
-            }
-        new_roots = [r for r in futures_roots if r.root_symbol not in existing]
+            existing = set((await session.execute(
+                select(FuturesRootSymbolModel.root_symbol, FuturesRootSymbolModel.mic).where(
+                    FuturesRootSymbolModel.root_symbol.in_([r.root_symbol for r in futures_roots]))
+            )).all())
+        new_roots = [r for r in futures_roots if (r.root_symbol, r.mic) not in existing]
         if new_roots:
             asset_ids = await self._asset_ids_by_identity()
             async with self.session_maker() as session:
@@ -753,7 +769,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
                         description=r.description,
                         mic=r.mic,
                         root_asset_id=asset_ids[
-                            (type(r.root_asset), r.root_asset.isin, r.root_asset.asset_name)],
+                            _asset_identity(r.root_asset)],
                         multiplier=r.multiplier,
                         tick_size=r.tick_size,
                         quote_currency=r.quote_currency,
@@ -765,7 +781,11 @@ class SqlAlchemyAssetRepository(AssetRepository):
         return futures_roots
 
     async def save_futures_contracts(self, futures_contracts: list[FuturesContract]) -> list[FuturesContract]:
-        """Persist futures contracts, skipping ones already stored under the same name and root.
+        """Persist futures contracts, skipping ones already stored under the same name, root and expiry.
+
+        The expiry is part of the identity because exchanges reuse tickers: the Moscow Exchange
+        writes the year as one digit, so ``SiH4`` is both the March 2014 and the March 2024
+        delivery, and keyed on name and root the second was dropped as already stored.
 
         Every contract gets a row in ``asset_router`` (``asset_type='FUTURES_CONTRACT'``) whose
         autoincrement id becomes the contract's asset id, and a row in ``futures_contracts``.
@@ -775,15 +795,13 @@ class SqlAlchemyAssetRepository(AssetRepository):
         if not futures_contracts:
             return []
         async with self.session_maker() as session:
-            existing = {
-                (root_symbol, asset_name)
-                for root_symbol, asset_name in (await session.execute(
-                    select(FuturesContractModel.root_symbol, FuturesContractModel.asset_name).where(
-                        FuturesContractModel.asset_name.in_([c.asset_name for c in futures_contracts]))
-                )).all()
-            }
+            existing = set((await session.execute(
+                select(FuturesContractModel.root_symbol, FuturesContractModel.asset_name,
+                       FuturesContractModel.expiration_date).where(
+                    FuturesContractModel.asset_name.in_([c.asset_name for c in futures_contracts]))
+            )).all())
         new_contracts = [c for c in futures_contracts
-                         if (c.root_symbol, c.asset_name) not in existing]
+                         if (c.root_symbol, c.asset_name, c.expiration_date) not in existing]
         if not new_contracts:
             return futures_contracts
 
@@ -798,7 +816,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
             FuturesContractModel(
                 id=asset_routers[i].id,
                 root_asset_id=asset_ids[
-                    (type(c.root_asset), c.root_asset.isin, c.root_asset.asset_name)],
+                    _asset_identity(c.root_asset)],
                 root_symbol=c.root_symbol,
                 root_exchange_asset_sid=(c.root_exchange_asset.sid
                                          if c.root_exchange_asset is not None else None),
@@ -823,11 +841,11 @@ class SqlAlchemyAssetRepository(AssetRepository):
         self._invalidate_asset_cache()
 
         saved_by_name = {
-            m.asset_name: self._futures_contract_model_to_futures_contract(
+            (m.asset_name, m.expiration_date): self._futures_contract_model_to_futures_contract(
                 futures_contract_model=m, root_asset=new_contracts[i].root_asset)
             for i, m in enumerate(models)
         }
-        return [saved_by_name.get(c.asset_name, c) for c in futures_contracts]
+        return [saved_by_name.get((c.asset_name, c.expiration_date), c) for c in futures_contracts]
 
     async def save_option_contracts(self, option_contracts: list[OptionContract]) -> list[OptionContract]:
         """Persist option contracts, skipping ones already stored under the same name.
@@ -968,13 +986,13 @@ class SqlAlchemyAssetRepository(AssetRepository):
         contracts = await self.get_exchange_option_contracts_by_symbols(symbols=[symbol])
         return contracts[0] if contracts else None
 
-    async def get_futures_roots(self) -> dict[str, FuturesRoot]:
-        """Return every stored futures chain, keyed by root symbol."""
+    async def get_futures_roots(self) -> dict[tuple[str, str], FuturesRoot]:
+        """Return every stored futures chain, keyed by ``(root_symbol, mic)``."""
         all_assets = await self.get_all_assets()
         async with self.session_maker() as session:
             models = list((await session.execute(select(FuturesRootSymbolModel))).scalars())
         return {
-            model.root_symbol: FuturesRoot(
+            (model.root_symbol, model.mic): FuturesRoot(
                 root_symbol=model.root_symbol,
                 description=model.description,
                 exchange=await self.get_exchange_by_mic(mic=model.mic),
@@ -997,13 +1015,44 @@ class SqlAlchemyAssetRepository(AssetRepository):
         contracts = await self.get_exchange_futures_contracts_by_symbols(symbols=[symbol])
         return contracts[0] if contracts else None
 
+    async def resolve_futures_root(self, root_symbol: str, mic: str | None = None) -> tuple[str, str | None]:
+        """Name the chain ``root_symbol`` means: ``(root_symbol, mic)``.
+
+        ``NG@XNYM`` names its exchange, as ``mic='XNYM'`` does. A bare root that trades on one
+        exchange means that one. A bare root on several -- ``NG`` is a chain on both the Moscow
+        Exchange and NYMEX -- means the first of ``ZIPLIME_FUTURES_DEFAULT_MIC`` (a comma list) it
+        trades on, and is otherwise ambiguous: mixing the two chains would roll a position from
+        one contract size into another a hundred times larger.
+
+        A root that no exchange lists comes back with ``mic`` as given, so the caller finds an
+        empty chain rather than an error here.
+        """
+        if "@" in root_symbol:
+            root_symbol, named = root_symbol.split("@", 1)
+            mic = mic or named
+        if mic is not None:
+            return root_symbol, mic
+        async with self.session_maker() as session:
+            mics = sorted(set((await session.execute(
+                select(FuturesRootSymbolModel.mic).where(FuturesRootSymbolModel.root_symbol == root_symbol)
+            )).scalars()))
+        if len(mics) <= 1:
+            return root_symbol, (mics[0] if mics else None)
+        preferred = [m.strip() for m in os.environ.get("ZIPLIME_FUTURES_DEFAULT_MIC", "").split(",")]
+        for candidate in preferred:
+            if candidate in mics:
+                return root_symbol, candidate
+        raise AmbiguousRootSymbol(root_symbol=root_symbol, mics=", ".join(mics), first=mics[0])
+
     async def get_exchange_futures_contracts_by_root(self, root_symbol: str,
                                                      mic: str | None = None) -> list[ExchangeAsset]:
         """Return every listed contract of a chain, ordered by expiration.
 
         This is the input to :class:`~ziplime.assets.domain.ordered_contracts.OrderedContracts`
-        and therefore to every continuous-future roll.
+        and therefore to every continuous-future roll. The chain is one exchange's: see
+        :meth:`resolve_futures_root` for how a root without one is read.
         """
+        root_symbol, mic = await self.resolve_futures_root(root_symbol=root_symbol, mic=mic)
         async with self.session_maker() as session:
             q = select(FuturesContractModel.id).where(FuturesContractModel.root_symbol == root_symbol)
             contract_ids = list((await session.execute(q)).scalars())
@@ -1734,6 +1783,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         ``self.futures_root_symbols`` -- synchronous SQLAlchemy ``Table`` objects that were never
         assigned, so every call raised ``AttributeError``.
         """
+        root_symbol, mic = await self.resolve_futures_root(root_symbol=root_symbol, mic=mic)
         cache_key = (root_symbol, mic)
         if cache_key in self._ordered_contracts:
             return self._ordered_contracts[cache_key]
@@ -1747,12 +1797,16 @@ class SqlAlchemyAssetRepository(AssetRepository):
         return ordered_contracts
 
     async def create_continuous_future(self, root_symbol: str, offset: int, roll_style: str,
-                                       adjustment: str | None) -> ContinuousFuture:
+                                       adjustment: str | None, mic: str | None = None) -> ContinuousFuture:
         """Build a :class:`ContinuousFuture` specifier for a stored chain.
+
+        ``root_symbol`` may name its exchange (``NG@XNYM``), as ``mic`` does; see
+        :meth:`resolve_futures_root`.
 
         Raises:
             ValueError: if ``adjustment`` or ``roll_style`` is not supported.
             RootSymbolNotFound: if no contracts are stored for ``root_symbol``.
+            AmbiguousRootSymbol: if the root trades on several exchanges and none was named.
         """
         if adjustment not in ADJUSTMENT_STYLES:
             raise ValueError(
@@ -1765,12 +1819,13 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 f"{sorted(ROLL_STYLES)}."
             )
 
-        ordered_contracts = await self.get_ordered_contracts(root_symbol=root_symbol)
+        root_symbol, mic = await self.resolve_futures_root(root_symbol=root_symbol, mic=mic)
+        ordered_contracts = await self.get_ordered_contracts(root_symbol=root_symbol, mic=mic)
         if not len(ordered_contracts):
-            raise RootSymbolNotFound(root_symbol=root_symbol)
+            raise RootSymbolNotFound(root_symbol=root_symbol if mic is None else f"{root_symbol}@{mic}")
 
         roots = await self.get_futures_roots()
-        root = roots.get(root_symbol)
+        root = roots.get((root_symbol, mic))
         exchange_info = (root.exchange if root is not None
                          else ordered_contracts.contracts[0].exchange)
 
@@ -1779,7 +1834,8 @@ class SqlAlchemyAssetRepository(AssetRepository):
         return ContinuousFuture(
             sid=_encode_continuous_future_sid(root_symbol=root_symbol, offset=offset,
                                               roll_style=roll_style,
-                                              adjustment_style=adjustment_style_id),
+                                              adjustment_style=adjustment_style_id,
+                                              mic=exchange_info.mic),
             root_symbol=root_symbol,
             offset=offset,
             roll_style=roll_style,

@@ -51,6 +51,11 @@ class ContinuousFuture:
     def mic(self) -> str:
         return self.exchange_info.mic
 
+    @property
+    def chain(self) -> str:
+        """The chain as ``ROOT@MIC``: a root alone may name chains on several exchanges."""
+        return f"{self.root_symbol}@{self.mic}"
+
     def __int__(self) -> int:
         return self.sid
 
