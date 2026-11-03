@@ -96,10 +96,14 @@ Before an order is sent to `exchange.submit_order`, native consideration plus
 `commission.calculate_for_asset(...)` is checked against cash in that exchange/account/currency.
 Buy limits use their limit-price budget. The check reads the posted ledger balance; there is no
 separate order cash-reservation tracker. Insufficient cash raises `ValueError` before the broker
-call by default. Already-executed trades and fees are always recorded at their actual amounts.
+call unless automatic FX can fund the shortfall. Already-executed trades and fees are always
+recorded at their actual amounts.
 
-Set `context.automatic_currency_exchange = True` in `initialize` to acquire missing quote-currency
-cash automatically in simulation. The algorithm resolves a selected FX listing through the asset
+With native-currency accounting enabled, `SimulationExchange` acquires missing quote-currency cash
+automatically by default. Pass `automatic_currency_exchange=False` when constructing it to require
+manual funding. The base `Exchange` default remains `False`; each exchange has its own setting.
+Simulations without native-currency accounting keep their existing execution behavior.
+The algorithm resolves a selected FX listing through the asset
 service, includes its commission in the funding check, and submits `[FX order, asset order]` to
 `SimulationExchange.submit_orders()` in one call. Single orders use `submit_order()`.
 Both are normal open orders in the existing blotter. Currency

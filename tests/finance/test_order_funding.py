@@ -20,11 +20,13 @@ from ziplime.finance.execution import LimitOrder, MarketOrder
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 
 
-def algorithm(cash=None, commission=None, live=True, currency_commission=None):
+def algorithm(cash=None, commission=None, live=True, currency_commission=None,
+              automatic_currency_exchange=False):
     native, reporting = ledger(opening_cash={EUR: 101} if cash is None else cash)
     model = PerShare(cost=1, min_trade_cost=0) if commission is None else commission
     model.calculate_for_asset = Mock(wraps=model.calculate_for_asset)
-    exchange = simulation(native, model, currency_commission=currency_commission)
+    exchange = simulation(native, model, currency_commission=currency_commission,
+                          automatic_currency_exchange=automatic_currency_exchange)
     exchange.live = live
     exchange.submit_order = AsyncMock(wraps=exchange.submit_order)
     exchange.submit_orders = AsyncMock(wraps=exchange.submit_orders)
@@ -33,7 +35,6 @@ def algorithm(cash=None, commission=None, live=True, currency_commission=None):
     algo.currency_reporting = reporting
     algo.currency_conversion = reporting.conversion
     algo._monetary_valuation_service = native._monetary_valuation
-    algo.automatic_currency_exchange = False
     algo._in_before_trading_start = False
     algo.initialized = True
     algo.trading_controls = []
@@ -202,9 +203,9 @@ async def test_live_account_override_cannot_validate_one_account_and_submit_thro
     exchange.submit_order.assert_not_awaited()
 
 
-def automatic_fx_algorithm(cash, inverse=False, fx_commission=None):
-    algo, exchange, model = algorithm(cash=cash, live=False, currency_commission=fx_commission)
-    algo.automatic_currency_exchange = True
+def automatic_fx_algorithm(cash, inverse=False, fx_commission=None, automatic_currency_exchange=True):
+    algo, exchange, model = algorithm(cash=cash, live=False, currency_commission=fx_commission,
+                                      automatic_currency_exchange=automatic_currency_exchange)
     pair = replace(listing(asset=currency("USD", 1), quote=currency("EUR", 2)), symbol="USDEUR")
     if inverse:
         pair = replace(pair, asset=pair.quote, quote=pair.asset, symbol="EURUSD")
@@ -226,6 +227,57 @@ async def process_bar(algo):
     algo.metrics_tracker = SimpleNamespace(emission_rate=algo._ledger.position_tracker.data_frequency)
     async for _ in algo.every_bar(algo.simulation_dt, current_data=None, handle_data=AsyncMock()):
         pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("default_automatic_currency_exchange", [False, True])
+async def test_automatic_fx_uses_the_selected_exchanges_setting(default_automatic_currency_exchange):
+    algo, default, pair = automatic_fx_algorithm(
+        {EUR: 10000, ("OTHER", "account", "EUR"): 10000},
+        automatic_currency_exchange=default_automatic_currency_exchange)
+    other = simulation(algo._ledger, PerShare(cost=1, min_trade_cost=0),
+                       automatic_currency_exchange=not default_automatic_currency_exchange)
+    other.name, other.is_default = "OTHER", False
+    other.get_spot_value.side_effect = default.get_spot_value.side_effect
+    other.submit_order = AsyncMock(wraps=other.submit_order)
+    other.submit_orders = AsyncMock(wraps=other.submit_orders)
+    exchanges = {exchange.name: exchange for exchange in (default, other)}
+    algo.exchange_repository.get_exchange_by_mic.side_effect = lambda mic: exchanges[mic]
+    algo.exchange_repository.get_all_exchanges.return_value = list(exchanges.values())
+    algo.blotter = InMemoryBlotter(exchanges=list(exchanges.values()), cancel_policy=None)
+
+    for exchange_name, exchange in ((None, default), (other.name, other)):
+        if exchange.automatic_currency_exchange:
+            requested = await algo.order(USD_ASSET, 1, MarketOrder(), exchange_name=exchange_name)
+            exchange.submit_orders.assert_awaited_once()
+            fx, accepted = exchange.submit_orders.call_args.kwargs["orders"]
+            assert accepted is requested and fx.asset == pair
+            assert fx.exchange_name == requested.exchange_name == exchange.name
+        else:
+            with pytest.raises(ValueError, match="Insufficient USD cash"):
+                await algo.order(USD_ASSET, 1, MarketOrder(), exchange_name=exchange_name)
+            exchange.submit_order.assert_not_awaited()
+            exchange.submit_orders.assert_not_awaited()
+
+    await process_bar(algo)
+    for exchange in exchanges.values():
+        expected_eur = 1718 if exchange.automatic_currency_exchange else 10000
+        assert algo._ledger.cash_balance("EUR", exchange.name, "account") == expected_eur
+        assert algo._ledger.cash_balance("USD", exchange.name, "account") == 0
+
+
+@pytest.mark.asyncio
+async def test_simulation_automatic_fx_keeps_legacy_orders_working_without_native_accounting():
+    algo, exchange, _ = algorithm(live=False, automatic_currency_exchange=True)
+    algo._ledger.native_currency_accounting = False
+    algo.currency_reporting = None
+
+    submitted = await algo.order(USD_ASSET, 1, MarketOrder())
+
+    exchange.submit_order.assert_awaited_once_with(order=submitted)
+    exchange.submit_orders.assert_not_awaited()
+    exchange.get_spot_value.assert_not_awaited()
+    assert algo.get_order(submitted.id, "MOEX") is submitted
 
 
 @pytest.mark.asyncio

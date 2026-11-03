@@ -39,6 +39,9 @@ class SimulationExchange(Exchange):
     """Simulated venue with separate execution models for each instrument type.
 
     Currency trades default to independent NoSlippage and NoCommission models.
+    With native-currency accounting, the trading algorithm submits funding FX
+    orders by default when quote-currency cash is insufficient. Set
+    ``automatic_currency_exchange=False`` to require manual currency funding.
     """
 
     def __init__(self,
@@ -61,6 +64,7 @@ class SimulationExchange(Exchange):
                  price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
                  currency_slippage: SlippageModel | None = None,
                  currency_commission: CommissionModel | None = None,
+                 automatic_currency_exchange: bool = True,
                  ):
         super().__init__(name=name,
                          canonical_name=name,
@@ -68,7 +72,8 @@ class SimulationExchange(Exchange):
                          data_source=data_source,
                          country_code=country_code,
                          trading_calendar=trading_calendar,
-                         account_id=account_id, is_default=is_default)
+                         account_id=account_id, is_default=is_default,
+                         automatic_currency_exchange=automatic_currency_exchange)
         self.slippage_models = {
             Equity: equity_slippage,
             Currency: currency_slippage if currency_slippage is not None else NoSlippage(),

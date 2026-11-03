@@ -207,12 +207,14 @@ def test_unavailable_payment_fx_preserves_the_entire_income_batch():
     assert not native.reporting_events
 
 
-def simulation(native, commission, currency_commission=None, currency_slippage=None):
+def simulation(native, commission, currency_commission=None, currency_slippage=None,
+               automatic_currency_exchange=True):
     exchange = SimulationExchange(
         name="MOEX", country_code="US", trading_calendar=get_calendar("XNYS"), clock=None,
         cash_balance=100, equity_slippage=NoSlippage(), future_slippage=NoSlippage(),
         equity_commission=commission, future_commission=NoCommission(),
         currency_commission=currency_commission, currency_slippage=currency_slippage,
+        automatic_currency_exchange=automatic_currency_exchange,
         account_id="account", is_default=True)
     exchange.get_spot_value = AsyncMock(return_value=pl.DataFrame({
         "sid": [SBER.sid], "date": [START], "close": [100.0], "volume": [1000000.0]}))

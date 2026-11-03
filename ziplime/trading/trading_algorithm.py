@@ -248,10 +248,6 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         As-of FX service for monetary/order estimates without enabling currency
         metrics. Defaults to ``currency_reporting.conversion`` when configured;
         explicitly supplying a different service instance raises ``ValueError``.
-    automatic_currency_exchange : bool, optional
-        Submit FX and asset orders together through SimulationExchange when
-        quote-currency cash is missing. Defaults to ``False``; requires native
-        investment accounting. Live orders require the quote currency to be funded.
 
     Attributes
     ----------
@@ -285,7 +281,6 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             intraday_metrics: bool = False,
             currency_reporting: CurrencyReporting | None = None,
             currency_conversion: CurrencyConversionService | None = None,
-            automatic_currency_exchange: bool = False,
 
     ):
         self.algorithm = algorithm
@@ -403,7 +398,6 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         #: See MetricsTracker: the whole metric set on every intraday bar, or only at the close.
         self.intraday_metrics = intraday_metrics
         self.currency_reporting = currency_reporting
-        self.automatic_currency_exchange = automatic_currency_exchange
         self.currency_conversion = (currency_conversion if currency_conversion is not None
                                     else currency_reporting.conversion if currency_reporting is not None else None)
         if (currency_conversion is not None and currency_reporting is not None
@@ -2126,8 +2120,6 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             return None
 
         orders = [order]
-        if self.automatic_currency_exchange and not self._ledger.native_currency_accounting:
-            raise ValueError("Automatic currency exchange requires native investment accounting.")
         if self._ledger.native_currency_accounting:
             self._ledger.validate_reporting_asset(asset=asset)
             currency = asset.quote.asset_name
@@ -2149,7 +2141,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                 if -order.amount > self._ledger.cash_balance(source, exchange.name, order.trading_account_id):
                     raise ValueError(f"Insufficient {source} cash for currency sale.")
             if required > balance:
-                if not self.automatic_currency_exchange or isinstance(asset.asset, Currency):
+                if not exchange.automatic_currency_exchange or isinstance(asset.asset, Currency):
                     raise ValueError(f"Insufficient {currency} cash: need {required:g}, available {balance:g}.")
                 if not isinstance(exchange, SimulationExchange) or exchange.live:
                     raise ValueError(

@@ -18,6 +18,12 @@ from ziplime.constants.period import Period
 
 
 class Exchange(DataSource, ABC):
+    """Trading venue and its execution configuration.
+
+    ``automatic_currency_exchange`` lets the trading algorithm submit funding FX
+    orders for this venue with native-currency accounting. The base default is
+    False; SimulationExchange enables it by default.
+    """
 
     #: A venue that trades for real. Its market data comes from the venue itself, so any
     #: bundle behind it is a warm-up window, not a record of where instruments stop trading.
@@ -29,6 +35,7 @@ class Exchange(DataSource, ABC):
                  account_id: str,
                  is_default: bool,
                  data_source: DataBundle | None = None,
+                 automatic_currency_exchange: bool = False,
                  ):
         self.name = name
         self.canonical_name = canonical_name
@@ -38,6 +45,7 @@ class Exchange(DataSource, ABC):
         self.account_id = account_id
         self.is_default = is_default
         self.data_source = data_source
+        self.automatic_currency_exchange = automatic_currency_exchange
 
     def last_available_bar(self, sid: int | None = None) -> datetime.datetime | None:
         """Where the market data behind this venue stops. Delegated to the data source.

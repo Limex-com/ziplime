@@ -69,7 +69,7 @@ async def test_default_currency_fills_and_fees_are_independent_of_equity_models(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entrypoint", ["algorithm", "algorithm_iter", "simulation", "simulation_iter"])
 @pytest.mark.parametrize("preconfigured_exchange", [False, True])
-async def test_currency_models_reach_execution_through_all_entrypoints(
+async def test_currency_execution_configuration_reaches_all_entrypoints(
         tmp_path, monkeypatch, entrypoint, preconfigured_exchange):
     calendar = get_calendar("XNYS")
     clock = SimulationClock(start_date=START, end_date=START + DAY, trading_calendar=calendar, emission_rate=DAY)
@@ -79,6 +79,7 @@ async def test_currency_models_reach_execution_through_all_entrypoints(
     currency_commission = PerTrade(cost=7)
     models = {"currency_slippage": currency_slippage, "currency_commission": currency_commission}
     exchange = make_exchange(clock, equity_slippage, equity_commission,
+                             automatic_currency_exchange=False,
                              **(models if preconfigured_exchange else {}))
     algorithm_path = tmp_path / "strategy.py"
     algorithm_path.write_text("")
@@ -86,6 +87,8 @@ async def test_currency_models_reach_execution_through_all_entrypoints(
     class Executor:
         async def run_algorithm(self, trading_algorithm):
             prepared = await trading_algorithm.exchange_repository.get_default_exchange()
+            creates_default_exchange = entrypoint.startswith("simulation") and not preconfigured_exchange
+            assert prepared.automatic_currency_exchange is creates_default_exchange
             assert prepared.get_slippage_model(PAIR) is currency_slippage
             assert prepared.get_commission_model(PAIR) is currency_commission
             assert prepared.get_slippage_model(SBER) is equity_slippage
