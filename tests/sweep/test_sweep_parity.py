@@ -29,7 +29,7 @@ from ziplime.constants.data_type import DataType
 from ziplime.core.ingest_data import get_asset_service
 from ziplime.core.run_simulation import run_simulation
 from ziplime.data.domain.data_bundle import DataBundle
-from ziplime.sweep import SweepParams, run_sweep
+from ziplime.sweep import SweepError, SweepParams, run_sweep
 from ziplime.utils.calendar_utils import get_calendar
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -39,14 +39,18 @@ START, END = datetime.date(2024, 1, 2), datetime.date(2024, 5, 31)
 HISTORY_FROM = datetime.date(2023, 10, 2)
 
 
-#: The GPU backend the GPU tests run on: mlx (Apple, or NVIDIA with mlx[cuda]) or cupy
+#: The GPU backend the GPU tests run on: mlx (Apple, or NVIDIA with mlx[cuda]), cupy or dpnp
 GPU = __import__("os").environ.get("ZIPLIME_SWEEP_TEST_GPU", "mlx")
+
+
+#: The grid of signals_cross.py, the one fixture whose decisions are entries/exits signals.
+SIGNALS_GRID = {"fast": [3, 5, 8], "slow": [15, 25]}
 
 
 def mlx_available() -> bool:
     """Whether the GPU backend under test is installed (the name is kept for older imports)."""
     try:
-        __import__("mlx.core" if GPU == "mlx" else "cupy")
+        __import__({"mlx": "mlx.core"}.get(GPU, GPU))
         return True
     except ImportError:
         return False
@@ -109,7 +113,8 @@ class SweepParityCase(unittest.IsolatedAsyncioTestCase):
             data_type=DataType.MARKET_DATA, timestamp=data["date"].max(), data=data,
             sid_indexes={r["sid"]: (r["first"], r["last"] + 1) for r in spans.iter_rows(named=True)})
 
-    async def sweep(self, fixture, grid, bundle, *, backend="exact", **costs) -> pd.DataFrame:
+    async def sweep(self, fixture, grid, bundle, *, backend="exact", say=None,
+                    **costs) -> pd.DataFrame:
         # A strategy the sweep cannot convert would otherwise run on the engine and agree with it
         # trivially; the one test of that way out asks for it.
         costs.setdefault("on_unsupported", "refuse")
@@ -119,8 +124,23 @@ class SweepParityCase(unittest.IsolatedAsyncioTestCase):
             "grid": grid, "backend": backend, "verify": False, "refine_top": 0,
             "output_dir": str(self.folder / "results"), **costs})
         with contextlib.redirect_stdout(io.StringIO()):
-            return await run_sweep(params, self.folder, say=lambda message: None,
+            return await run_sweep(params, self.folder, say=say or (lambda message: None),
                                    market_data=bundle, asset_service=self.asset_service)
+
+    async def assert_signals_kernel_agrees(self, backend):
+        """signals_cross.py on a GPU backend against exact: the sweep takes the kernel's path,
+        and the fills and values agree."""
+        listings = [await self.listing(s) for s in ("JNJ@XNYS", "KO@XNYS", "PG@XNYS")]
+        bundle = self.bundle(listings, seed=23)
+        said = []
+        exact = (await self.sweep("signals_cross.py", SIGNALS_GRID, bundle)).sort_index()
+        gpu = (await self.sweep("signals_cross.py", SIGNALS_GRID, bundle, backend=backend,
+                                say=said.append)).sort_index()
+        self.assertTrue(any("decisions: entries/exits signals" in line for line in said),
+                        "the sweep did not take the signals kernel's path")
+        self.assertGreater(int(exact["fills"].sum()), 0)
+        np.testing.assert_array_equal(gpu["fills"].to_numpy(), exact["fills"].to_numpy())
+        np.testing.assert_allclose(gpu["final_value"], exact["final_value"], rtol=1e-6)
 
     async def engine(self, fixture, config: dict, bundle, *, timing="next_close", **costs):
         path = self.folder / "config.json"
@@ -371,6 +391,19 @@ class GpuAgreesWithExactTests(SweepParityCase):
     """float32 on the GPU against float64 on the CPU: the same fills, values within a cent per
     ten thousand dollars -- the path can only diverge through rounding, which refine_top repairs."""
 
+    async def test_signals_strategy_runs_the_kernel_on_the_gpu(self):
+        """entries/exits send a sweep to simulate_signals_batch, not through handle_data: a GPU
+        kernel of its own (Metal for mlx, CUDA for cupy), which the other fixtures never reach."""
+        from ziplime.vectorized.kernel import _mlx
+        if GPU == "mlx" and not _mlx._has_metal():
+            # MLX on CUDA has no Metal to run this kernel on; the refusal names the one that does
+            listings = [await self.listing(s) for s in ("JNJ@XNYS", "KO@XNYS", "PG@XNYS")]
+            with self.assertRaisesRegex(SweepError, "backend='cupy'"):
+                await self.sweep("signals_cross.py", SIGNALS_GRID, self.bundle(listings, seed=23),
+                                 backend=GPU)
+            return
+        await self.assert_signals_kernel_agrees(GPU)
+
     async def test_gpu_matches_exact(self):
         listings = [await self.listing(s) for s in ("JNJ@XNYS", "KO@XNYS", "PG@XNYS")]
         bundle = self.bundle(listings, seed=9)
@@ -436,6 +469,35 @@ class GpuAgreesWithExactTests(SweepParityCase):
             with self.subTest(fixture=fixture):
                 np.testing.assert_array_equal(gpu["fills"].to_numpy(), exact["fills"].to_numpy())
                 np.testing.assert_allclose(gpu["final_value"], exact["final_value"], rtol=1e-6)
+
+
+class OpenClSweepTests(SweepParityCase):
+    """backend opencl: the entries/exits kernel on any OpenCL GPU, and nothing else."""
+
+    @unittest.skipUnless(__import__("importlib").util.find_spec("pyopencl")
+                         and __import__("ziplime.vectorized.kernel._opencl",
+                                        fromlist=["x"])._gpu_devices(),
+                         "no OpenCL GPU: needs PyOpenCL and a GPU's OpenCL driver")
+    async def test_signals_strategy_runs_the_kernel_on_opencl(self):
+        await self.assert_signals_kernel_agrees("opencl")
+
+    async def test_a_handle_data_strategy_is_refused(self):
+        """The handle_data path needs an array library on the GPU, which PyOpenCL is not."""
+        listings = [await self.listing(s) for s in ("JNJ@XNYS", "KO@XNYS", "PG@XNYS")]
+        with self.assertRaisesRegex(SweepError, "entries/exits signals only"):
+            await self.sweep("trend.py", {"fast": [3, 5], "slow": [12, 20]},
+                             self.bundle(listings), backend="opencl")
+
+
+class BackendRefusalTests(unittest.TestCase):
+    def test_dpnp_without_dpnp_says_where_it_comes_from(self):
+        """dpnp is not on PyPI's index for most platforms; the refusal names Intel's."""
+        from unittest import mock
+
+        from ziplime.sweep.backends import Backend
+        with mock.patch.dict("sys.modules", {"dpnp": None}):
+            with self.assertRaisesRegex(SweepError, "software.repos.intel.com"):
+                Backend("dpnp")
 
 
 if __name__ == "__main__":

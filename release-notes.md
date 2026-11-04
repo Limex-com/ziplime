@@ -19,6 +19,14 @@ measured speeds in docs/backtesting/sweep-performance.md.
 
 #### New
 
+- **Sweeps on synthetic data.** `"synthetic": {"paths": 100, "families": [...]}` in a sweep file
+  (or `ziplime sweep run --paths 100 --family stationary:20 --family meboot`) also runs every
+  combination on synthetic price paths made from the real bars. The families are block bootstraps
+  (`block`, `circular`, `stationary`), the maximum entropy bootstrap (`meboot`, as R's meboot),
+  `iid`, `shuffle`, `gbm`, `student_t` and `garch` (filtered historical simulation). The report
+  compares the combination chosen on the paths with the real bars, and the real winner with every
+  family; it writes `synthetic_summary.csv`, `synthetic_paths.parquet` and
+  `best_synthetic_config.json`. See docs/backtesting/synthetic-data.md.
 - **`ziplime sweep run | check | init | doctor`.** `run` takes a sweep file and command-line
   overrides (`--backend`, `--grid fast=5,10,20`, `--set field=value`, `--no-compile`, `-o`...);
   `check` runs the grid's corners in seconds and says how the strategy converts; `init` writes a

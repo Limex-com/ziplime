@@ -14,18 +14,21 @@ A sweep asks one question many times: the same prices and costs, a different set
 time. :func:`~ziplime.vectorized.kernel.simulate_signals` answers it one set at a time, and the
 ``exact`` backend is exactly that -- a loop, kept so the other backend has something to be held to.
 
-The ``mlx`` backend answers every set at once on the Apple GPU, one thread per set. The kernel
-does not vectorise *within* a run: whether an order fits depends on the cash every fill before it
-left, so bar 200 cannot be decided before bar 199. But separate runs share nothing, and a GPU runs
-thousands of sequential loops side by side. Each thread takes the decisions
-:func:`ziplime.vectorized.kernel._core.run_events` takes, in the same order.
+The GPU backends answer every set at once, one thread per set: ``mlx`` on the Apple GPU through
+Metal, ``cupy`` on an NVIDIA GPU through CUDA, ``opencl`` on any GPU with an OpenCL driver (Intel
+Arc, AMD), all three compiling one kernel source. The kernel does not vectorise *within* a run:
+whether an order fits depends on the cash every fill before it left, so bar 200 cannot be decided
+before bar 199. But separate runs share nothing, and a GPU runs thousands of sequential loops side
+by side. Each thread takes the decisions :func:`ziplime.vectorized.kernel._core.run_events` takes,
+in the same order.
 
 **What the GPU gives up is float64.** Metal has no double precision, so cash and prices are
-float32 there -- about seven significant digits, a cent or so on a six-figure account. That is
-ample to rank combinations and not enough to report one, so the two jobs are kept apart: a batch
-result carries summaries -- value curves, counts, fees -- and never fills, and
-:meth:`BatchSimulationResult.rerun` runs the chosen set through the float64 kernel for the fills
-:func:`~ziplime.vectorized.to_execution_result` replays. The rerun is the one that counts.
+float32 there -- and on CUDA and OpenCL too, so every GPU ranks alike -- about seven significant
+digits, a cent or so on a six-figure account. That is ample to rank combinations and not enough
+to report one, so the two jobs are kept apart: a batch result carries summaries -- value curves,
+counts, fees -- and never fills, and :meth:`BatchSimulationResult.rerun` runs the chosen set
+through the float64 kernel for the fills :func:`~ziplime.vectorized.to_execution_result` replays.
+The rerun is the one that counts.
 
 On positions in whole units the two paths take the same decisions, fill for fill. They can part in
 two ways, both at the edge of float32's resolution:
@@ -66,7 +69,7 @@ from ziplime.vectorized.kernel.simulation import (
 
 _logger = structlog.get_logger(__name__)
 
-Backend = Literal["exact", "mlx"]
+Backend = Literal["exact", "mlx", "cupy", "opencl"]
 
 #: The columns of :attr:`BatchSimulationResult.rejects`, one per reason a run can record.
 REJECT_REASONS: tuple[str, ...] = typing.get_args(RejectReason)
@@ -158,9 +161,13 @@ def simulate_signals_batch(
         labels: One per combination and unique, typically the parameters that produced it. They
             index every result. Defaults to ``0 .. combinations - 1``.
         backend: ``"exact"`` runs :func:`simulate_signals` once per combination, in float64.
-            ``"mlx"`` runs all of them at once on the GPU, in float32. It needs the ``mlx``
-            package, which exists for Apple silicon only, and is refused rather than quietly
-            replaced when that is missing: the two do not produce identical numbers.
+            ``"mlx"`` runs all of them at once on the Apple GPU, in float32, and needs the
+            ``mlx`` package on Apple silicon. ``"cupy"`` runs the same kernel on an NVIDIA GPU
+            and needs CuPy (``pip install "ziplime[cuda]"``). ``"opencl"`` runs it on any GPU
+            with an OpenCL driver -- Intel Arc, AMD -- and needs PyOpenCL (``pip install
+            "ziplime[opencl]"``). A GPU backend this machine cannot
+            run is refused rather than quietly replaced: the two do not produce identical
+            numbers.
 
         The remaining arguments are :func:`simulate_signals`'s, applied to every combination.
 
@@ -174,13 +181,16 @@ def simulate_signals_batch(
     if backend not in typing.get_args(Backend):
         raise VectorKernelError(
             f"backend={backend!r} is not a backend. Use 'exact' (float64, one combination at a "
-            f"time) or 'mlx' (float32, all at once on the GPU).")
-    if backend == "mlx":
-        from ziplime.vectorized.kernel import _mlx
+            f"time), 'mlx' (float32, all at once on an Apple GPU), 'cupy' (the same on an "
+            f"NVIDIA GPU) or 'opencl' (the same on any OpenCL GPU: Intel Arc, AMD).")
+    gpu = None
+    if backend != "exact":
+        from ziplime.vectorized.kernel import _cupy, _mlx, _opencl
 
+        gpu = {"mlx": _mlx, "cupy": _cupy, "opencl": _opencl}[backend]
         # Before any validation: on a machine without a GPU path, nothing else about the call
         # is worth reporting first.
-        _mlx.require()
+        gpu.require()
     prices = _normalise_prices(prices, "prices")
     index, columns = prices.index, list(prices.columns)
     if len(index) == 0:
@@ -218,7 +228,7 @@ def simulate_signals_batch(
         summary = _run_exact(rerun, labels, len(index), len(columns))
         precision = "float64"
     else:
-        summary = _mlx.run_batch(
+        summary = gpu.run_batch(
             stacks, execution_prices.to_numpy(dtype=float), prices[columns].to_numpy(dtype=float),
             sizes.to_numpy(dtype=float),
             volume_frame.to_numpy(dtype=float) if volume_frame is not None else None,

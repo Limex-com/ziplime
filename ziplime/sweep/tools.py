@@ -50,6 +50,19 @@ def parse_grid(text: str) -> tuple[str, Any]:
     return name, [parse_value(part) for part in spec.split(",") if part.strip()]
 
 
+def parse_family(text: str) -> dict:
+    """``--family stationary:20`` -- the method and its block length; ``--family meboot``."""
+    method, separator, block = text.partition(":")
+    family = {"method": method.strip()}
+    if separator:
+        try:
+            family["block"] = int(block)
+        except ValueError:
+            raise SweepError(f"--family {text}: the block length after ':' is a whole number.") \
+                from None
+    return family
+
+
 # -- init -----------------------------------------------------------------------------------------
 
 def config_class(algorithm_file: Path):
@@ -119,6 +132,8 @@ def default_backend() -> str:
         return "mlx"
     if importlib.util.find_spec("cupy") is not None:
         return "cupy"
+    if importlib.util.find_spec("dpnp") is not None:
+        return "dpnp"
     return "cpu"
 
 
@@ -166,6 +181,8 @@ def doctor() -> list[tuple[str, str]]:
                                 f"results"))
     rows.append(("backend mlx", _mlx()))
     rows.append(("backend cupy", _cupy()))
+    rows.append(("backend dpnp", _dpnp()))
+    rows.append(("backend opencl", _opencl()))
     rows.append(("backend cpu / exact", f"numpy, float64, up to {os.cpu_count()} processes"))
     for name, module, distribution, use in (
             ("TA-Lib", "talib", "ta-lib", "talib.* on history rows"),
@@ -199,11 +216,43 @@ def _mlx() -> str:
 
 def _cupy() -> str:
     if importlib.util.find_spec("cupy") is None:
-        return 'not installed -- pip install "ziplime[cuda]" (NVIDIA)'
+        return 'not installed -- pip install "ziplime[cuda]" (NVIDIA); CuPy built for ROCm (AMD)'
     try:
         import cupy
         device = cupy.cuda.runtime.getDeviceProperties(0)
         name = device["name"].decode() if isinstance(device["name"], bytes) else device["name"]
-        return f"{cupy.__version__} on {name}, {device['totalGlobalMem'] / 2 ** 30:.0f} GB"
+        stack = "ROCm" if getattr(cupy.cuda.runtime, "is_hip", False) else "CUDA"
+        return (f"{cupy.__version__} ({stack}) on {name}, "
+                f"{device['totalGlobalMem'] / 2 ** 30:.0f} GB")
     except Exception as error:
         return f"installed, but no GPU: {type(error).__name__}: {str(error)[:100]}"
+
+
+def _dpnp() -> str:
+    if importlib.util.find_spec("dpnp") is None:
+        return ("not installed -- pip install --index-url "
+                "https://software.repos.intel.com/python/pypi dpnp (Intel GPU)")
+    try:
+        import dpctl
+        device = dpctl.SyclDevice()
+        kind = str(device.device_type).split(".")[-1]
+        return (f"{_version('dpnp')} on {device.name.strip()} ({kind}, "
+                f"{device.global_mem_size / 2 ** 30:.0f} GB)")
+    except Exception as error:
+        return f"installed, but no SYCL device: {type(error).__name__}: {str(error)[:100]}"
+
+
+def _opencl() -> str:
+    if importlib.util.find_spec("pyopencl") is None:
+        return ('not installed -- pip install "ziplime[opencl]" (Intel Arc, AMD; entries/exits '
+                'strategies only)')
+    try:
+        from ziplime.vectorized.kernel import _opencl as kernel
+        devices = kernel._gpu_devices()
+        if not devices:
+            return "installed, but no OpenCL GPU -- install the GPU vendor's OpenCL driver"
+        device = devices[0]
+        return (f"{_version('pyopencl')} on {device.name.strip()}, "
+                f"{device.global_mem_size / 2 ** 30:.0f} GB (entries/exits strategies only)")
+    except Exception as error:
+        return f"installed, but fails: {type(error).__name__}: {str(error)[:100]}"

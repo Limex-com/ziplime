@@ -15,9 +15,9 @@ or with a sweep file's fields::
     table = await run_sweep(SweepParams.model_validate_json(path.read_text()), path.parent)
 
 The strategy is the ordinary algorithm file run_simulation runs. Its ``handle_data`` is converted to
-run for every combination on a GPU (``backend: mlx`` on Apple silicon, ``cupy`` on NVIDIA) or across
-CPU cores (``backend: cpu``); the best combinations are recomputed exactly, and the best one is run
-through run_simulation and its trades compared. See ``docs/backtesting/parameter-sweeps.md``.
+run for every combination on a GPU (``backend: mlx`` on Apple silicon, ``cupy`` on NVIDIA, ``dpnp``
+on Intel) or across CPU cores (``backend: cpu``); the best combinations are recomputed exactly, and
+the best one is run through run_simulation and its trades compared. See ``docs/backtesting/parameter-sweeps.md``.
 """
 from ziplime.sweep.params import SweepError, SweepParams
 

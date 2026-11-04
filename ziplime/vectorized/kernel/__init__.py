@@ -19,7 +19,8 @@ its own, and why each is not vectorbt's.
 
 A parameter sweep runs many signal sets through the same decisions:
 :func:`~ziplime.vectorized.kernel.batch.simulate_signals_batch`, one combination at a time in
-float64 or all of them at once on the Apple GPU through MLX (``backend="mlx"``).
+float64 or all of them at once on a GPU: Apple through MLX (``backend="mlx"``), NVIDIA through
+CuPy (``backend="cupy"``), any other with an OpenCL driver through PyOpenCL (``backend="opencl"``).
 """
 from .batch import BatchSimulationResult, simulate_signals_batch
 from .comparison import ExecutionComparison, compare_execution_results

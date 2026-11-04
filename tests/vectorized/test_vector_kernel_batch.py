@@ -1,13 +1,14 @@
 """The batch kernel: many signal sets in one call, on the exact backend and on the GPU.
 
 Two different promises are pinned here. The exact backend is a loop over `simulate_signals` and
-nothing else, so its summaries have to be that function's numbers to the last bit. The GPU backend
-is a second spelling of the kernel's decisions in Metal, so on the same inputs it has to take the
-same decisions -- every fill, rejection and no-op, by count and by reason -- and land on the same
-account values to float32 precision.
+nothing else, so its summaries have to be that function's numbers to the last bit. The GPU backends
+are a second spelling of the kernel's decisions -- one source, compiled for Metal, CUDA and
+OpenCL -- so on the same inputs each has to take the same decisions -- every fill, rejection and
+no-op, by count and by reason -- and land on the same account values to float32 precision.
 
-The GPU tests are skipped where `mlx` is not installed, which is every machine but an Apple
-silicon Mac. The rest run everywhere.
+The Metal tests run only on an Apple silicon Mac with `mlx`, the CUDA tests only on an NVIDIA GPU
+with CuPy, the OpenCL tests on any GPU with PyOpenCL and an OpenCL driver; each class is skipped
+elsewhere. The rest run everywhere.
 """
 import unittest
 from unittest import mock
@@ -23,7 +24,7 @@ from ziplime.finance.slippage.fixed_slippage import FixedSlippage
 from ziplime.vectorized.kernel import (
     ExecutionTiming, VectorKernelError, simulate_signals, simulate_signals_batch,
 )
-from ziplime.vectorized.kernel import _mlx
+from ziplime.vectorized.kernel import _cupy, _gpu, _mlx, _opencl
 from ziplime.vectorized.kernel.batch import REJECT_REASONS
 
 TZ = "America/New_York"
@@ -160,7 +161,9 @@ class RefusalTests(unittest.TestCase):
         self.assertIn("one each", self.refused(labels=["a", "b"]))
 
     def test_an_unknown_backend(self):
-        self.assertIn("not a backend", self.refused(backend="cuda"))
+        message = self.refused(backend="cuda")
+        self.assertIn("not a backend", message)
+        self.assertIn("'cupy'", message)
 
     def test_a_cost_model_the_kernel_cannot_price(self):
         from ziplime.finance.slippage.volume_share_slippage import VolumeShareSlippage
@@ -175,12 +178,50 @@ class RefusalTests(unittest.TestCase):
         with mock.patch.object(_mlx, "HAVE_MLX", False):
             message = self.refused(backend="mlx")
         self.assertIn("pip install mlx", message)
+        self.assertIn("backend='cupy'", message)
         self.assertIn("backend='exact'", message)
 
+    def test_mlx_without_metal_points_at_cupy(self):
+        """MLX on Linux (mlx[cuda]) imports fine and has no Metal to run this kernel on."""
+        with mock.patch.object(_mlx, "HAVE_MLX", True), \
+                mock.patch.object(_mlx, "_has_metal", return_value=False):
+            message = self.refused(backend="mlx")
+        self.assertIn("no Metal device", message)
+        self.assertIn("backend='cupy'", message)
 
-@unittest.skipUnless(_mlx.HAVE_MLX, "mlx is not installed; the GPU backend needs Apple silicon")
-class GpuAgreesWithExactTests(unittest.TestCase):
-    """The Metal kernel against the reference, decision for decision.
+    def test_cuda_without_cupy_is_refused_rather_than_replaced(self):
+        with mock.patch.object(_cupy, "HAVE_CUPY", False):
+            message = self.refused(backend="cupy")
+        self.assertIn("ziplime[cuda]", message)
+        self.assertIn("backend='exact'", message)
+
+    def test_cupy_without_a_device(self):
+        with mock.patch.object(_cupy, "HAVE_CUPY", True), \
+                mock.patch.object(_cupy, "_device_count", return_value=0), \
+                mock.patch.object(_cupy, "is_rocm", return_value=False):
+            self.assertIn("no CUDA device", self.refused(backend="cupy"))
+
+    def test_cupy_for_rocm_without_a_device_points_at_rocm(self):
+        with mock.patch.object(_cupy, "HAVE_CUPY", True), \
+                mock.patch.object(_cupy, "_device_count", return_value=0), \
+                mock.patch.object(_cupy, "is_rocm", return_value=True):
+            self.assertIn("rocm-smi", self.refused(backend="cupy"))
+
+    def test_opencl_without_pyopencl_is_refused_rather_than_replaced(self):
+        with mock.patch.object(_opencl, "HAVE_PYOPENCL", False):
+            message = self.refused(backend="opencl")
+        self.assertIn("ziplime[opencl]", message)
+        self.assertIn("backend='exact'", message)
+
+    def test_opencl_without_a_gpu(self):
+        with mock.patch.object(_opencl, "HAVE_PYOPENCL", True), \
+                mock.patch.object(_opencl, "_gpu_devices", return_value=[]), \
+                mock.patch.dict("os.environ", {"PYOPENCL_CTX": ""}):
+            self.assertIn("no OpenCL GPU", self.refused(backend="opencl"))
+
+
+class GpuAgreesWithExact:
+    """A GPU kernel against the reference, decision for decision.
 
     Each scenario turns on the features that take a different branch in the loop. Counts have to
     match exactly: a decision is a decision. Values have to match to float32 precision, which on
@@ -189,7 +230,7 @@ class GpuAgreesWithExactTests(unittest.TestCase):
 
     def both(self, closes, **kwargs):
         exact = simulate_signals_batch(closes, backend="exact", **kwargs)
-        gpu = simulate_signals_batch(closes, backend="mlx", **kwargs)
+        gpu = simulate_signals_batch(closes, backend=self.backend, **kwargs)
         self.assertEqual(gpu.precision, "float32")
         return exact, gpu
 
@@ -286,8 +327,8 @@ class GpuAgreesWithExactTests(unittest.TestCase):
         runs part-full."""
         rng, closes, _, _ = market(seed=34, n_bars=40, n_assets=3)
         exact, gpu = self.both(
-            closes, entries=stack(rng, 3 * _mlx.THREADGROUP + 5, closes, 0.2),
-            exits=stack(rng, 3 * _mlx.THREADGROUP + 5, closes, 0.2), size=30,
+            closes, entries=stack(rng, 3 * _gpu.THREADGROUP + 5, closes, 0.2),
+            exits=stack(rng, 3 * _gpu.THREADGROUP + 5, closes, 0.2), size=30,
             initial_cash=2_500.0, execution=ExecutionTiming.next_close())
         self.assert_agree(exact, gpu)
 
@@ -295,7 +336,7 @@ class GpuAgreesWithExactTests(unittest.TestCase):
         rng, closes, _, _ = market(seed=55)
         gpu = simulate_signals_batch(
             closes, stack(rng, 10, closes, 0.2), stack(rng, 10, closes, 0.2), size=40,
-            initial_cash=10_000.0, execution=ExecutionTiming.same_close(), backend="mlx")
+            initial_cash=10_000.0, execution=ExecutionTiming.same_close(), backend=self.backend)
         best = gpu.final_value.idxmax()
         exact = gpu.rerun(best)
         self.assertEqual(len(exact.fills), gpu.fills[best])
@@ -305,8 +346,28 @@ class GpuAgreesWithExactTests(unittest.TestCase):
     def test_the_reject_columns_are_the_documented_reasons(self):
         rng, closes, _, _ = market(seed=1, n_bars=10, n_assets=2)
         gpu = simulate_signals_batch(closes, stack(rng, 2, closes, 0.3), size=1,
-                                     execution=ExecutionTiming.same_close(), backend="mlx")
+                                     execution=ExecutionTiming.same_close(),
+                                     backend=self.backend)
         self.assertEqual(list(gpu.rejects.columns), list(REJECT_REASONS))
+
+
+@unittest.skipUnless(_mlx.HAVE_MLX and _mlx._has_metal(),
+                     "no Metal: the mlx backend needs an Apple silicon Mac with mlx installed")
+class MetalAgreesWithExactTests(GpuAgreesWithExact, unittest.TestCase):
+    backend = "mlx"
+
+
+@unittest.skipUnless(_cupy.HAVE_CUPY and _cupy._device_count(),
+                     "no CuPy GPU: the cupy backend needs CuPy and an NVIDIA (CUDA) or AMD (ROCm) "
+                     "GPU")
+class CudaAgreesWithExactTests(GpuAgreesWithExact, unittest.TestCase):
+    backend = "cupy"
+
+
+@unittest.skipUnless(_opencl.HAVE_PYOPENCL and _opencl._gpu_devices(),
+                     "no OpenCL GPU: the opencl backend needs PyOpenCL and a GPU's OpenCL driver")
+class OpenClAgreesWithExactTests(GpuAgreesWithExact, unittest.TestCase):
+    backend = "opencl"
 
 
 if __name__ == "__main__":

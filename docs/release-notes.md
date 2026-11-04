@@ -19,6 +19,36 @@ measured speeds in docs/backtesting/sweep-performance.md.
 
 #### New
 
+- **The signals kernel on NVIDIA.** `simulate_signals_batch(..., backend="cupy")` runs every
+  combination at once on an NVIDIA GPU through CuPy (`ziplime[cuda]`), from the same kernel source
+  as `backend="mlx"` on Apple silicon, and a sweep file with `"backend": "cupy"` whose strategy
+  returns entries/exits now runs on it instead of being refused. `examples/vectorized/sweep_on_gpu.py`
+  takes whichever GPU backend the machine has. `backend="mlx"` on MLX without Metal (`mlx[cuda]`)
+  is refused up front with a pointer to `cupy`, where it used to fail inside MLX.
+- **The signals kernel on Intel Arc and AMD.** `backend="opencl"` runs the same kernel source on any
+  GPU with an OpenCL driver, through PyOpenCL (`ziplime[opencl]`), in `simulate_signals_batch` and
+  in a sweep whose strategy returns entries/exits. A strategy swept through `handle_data` is refused
+  on `opencl`: that path needs an array library on the GPU. `ziplime sweep doctor` lists the
+  OpenCL GPU.
+- **Intel Arc: `backend: dpnp`.** A strategy swept through `handle_data` runs on dpnp, Intel's
+  NumPy for SYCL; one that returns entries/exits runs the vector kernel through PyOpenCL on the same
+  GPU. Checked against exact on dpnp's CPU device; not yet on an Arc GPU. See "A sweep on an Intel
+  GPU" in docs/backtesting/sweep-performance.md.
+- **AMD through CuPy for ROCm.** `backend="cupy"` recognises a ROCm build of CuPy: the entries/exits
+  kernel launches in blocks of a whole wavefront there, and the refusals and `ziplime sweep doctor`
+  name ROCm. Checked on an AMD Instinct MI300X. See "A sweep on an AMD GPU" in
+  docs/backtesting/sweep-performance.md.
+- **GPUs and architectures.** docs/backtesting/gpu-architectures.md: which backend runs where, and
+  the same `handle_data` sweeps measured on an Apple M3, an RTX 5090, an RTX 3090 and an MI300X —
+  the same best combination on all of them, and how fast each was.
+- **Sweeps on synthetic data.** `"synthetic": {"paths": 100, "families": [...]}` in a sweep file
+  (or `ziplime sweep run --paths 100 --family stationary:20 --family meboot`) also runs every
+  combination on synthetic price paths made from the real bars. The families are block bootstraps
+  (`block`, `circular`, `stationary`), the maximum entropy bootstrap (`meboot`, as R's meboot),
+  `iid`, `shuffle`, `gbm`, `student_t` and `garch` (filtered historical simulation). The report
+  compares the combination chosen on the paths with the real bars, and the real winner with every
+  family; it writes `synthetic_summary.csv`, `synthetic_paths.parquet` and
+  `best_synthetic_config.json`. See docs/backtesting/synthetic-data.md.
 - **`ziplime sweep run | check | init | doctor`.** `run` takes a sweep file and command-line
   overrides (`--backend`, `--grid fast=5,10,20`, `--set field=value`, `--no-compile`, `-o`...);
   `check` runs the grid's corners in seconds and says how the strategy converts; `init` writes a

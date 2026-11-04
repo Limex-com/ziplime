@@ -144,6 +144,84 @@ class ConfigPath(Strict):
 
 GridValue = list[bool | int | float | str] | Range | ConfigPath | bool | int | float | str
 
+#: How a family of synthetic paths is made from the real bars; see ``ziplime/sweep/synthetic.py``.
+Method = Literal["iid", "shuffle", "block", "circular", "stationary", "meboot", "gbm", "student_t",
+                 "garch"]
+
+
+class Family(Strict):
+    """One family of synthetic paths: ``{"method": "stationary", "block": 20}``."""
+
+    method: Method
+    #: Shown in the report and the files; null -- the method and its settings
+    name: str | None = None
+    #: ``block``, ``circular``: bars per block; ``stationary``: the mean block length
+    block: int = 20
+    #: ``historical`` -- the paths drift as the real bars did; ``zero`` -- each instrument's mean
+    #: log return is taken out, so a strategy can only earn from the bars' shape, not the trend
+    drift: Literal["historical", "zero"] = "historical"
+    #: ``student_t``: degrees of freedom of the shocks (more than 2)
+    df: float = 4.0
+    #: ``meboot``: trimming of the mean absolute change that sets the tails; widen each
+    #: replicate whose spread came out narrower than the data's (R meboot's expand.sd)
+    trim: float = 0.10
+    expand_sd: bool = True
+
+    @model_validator(mode="after")
+    def check(self):
+        if self.block < 1:
+            raise ValueError("block has to be at least 1")
+        if self.df <= 2:
+            raise ValueError("df has to be more than 2")
+        if not 0 <= self.trim < 0.5:
+            raise ValueError("trim has to be in [0, 0.5)")
+        return self
+
+    @property
+    def label(self) -> str:
+        if self.name:
+            return self.name
+        settings = {"block": f"({self.block})", "circular": f"({self.block})",
+                    "stationary": f"({self.block})", "student_t": f"(df={self.df:g})"}
+        return self.method + settings.get(self.method, "") + \
+            (", zero drift" if self.drift == "zero" else "")
+
+
+class Synthetic(Strict):
+    """The sweep run again on synthetic price paths made from the real bars::
+
+        "synthetic": {"paths": 200, "families": [{"method": "stationary", "block": 20},
+                                                 {"method": "meboot"}, {"method": "garch"}]}
+
+    Every family's paths start from the real bars at ``start_date`` (the warm-up before it stays
+    real); every combination runs on every path."""
+
+    paths: int = 100
+    seed: int = 0
+    families: list[Family] = [Family(method="stationary")]
+    #: The bars a path is resampled or fitted from: ``history`` -- everything loaded, warm-up
+    #: included; ``run`` -- from ``start_date`` on
+    source: Literal["history", "run"] = "history"
+    #: How a combination's paths are summed up into one number to choose by: ``median``,
+    #: ``mean``, ``min``, or a percentile ``p5``, ``p10``, ``p25``...
+    select_by: str = "median"
+
+    @model_validator(mode="after")
+    def check(self):
+        if self.paths < 1:
+            raise ValueError("paths has to be at least 1")
+        if not self.families:
+            raise ValueError("families is empty")
+        labels = [family.label for family in self.families]
+        if len(set(labels)) != len(labels):
+            raise ValueError(f"two families share a name: {labels}; give them names")
+        statistic = self.select_by
+        if statistic not in ("median", "mean", "min") and not (
+                statistic.startswith("p") and statistic[1:].replace(".", "", 1).isdigit()
+                and 0 <= float(statistic[1:]) <= 100):
+            raise ValueError("select_by is median, mean, min or a percentile such as p10")
+        return self
+
 
 class SweepParams(Strict):
     # What to run -- as in run_simulation
@@ -177,9 +255,10 @@ class SweepParams(Strict):
 
     # How to compute and what to show
     #: ``mlx`` -- Apple GPU (and NVIDIA through mlx[cuda]); ``cupy`` -- NVIDIA GPU;
-    #: ``cpu`` -- numpy in float64 across ``workers`` processes; ``exact`` -- the same in one
-    #: process.
-    backend: Literal["mlx", "cupy", "cpu", "exact"] = "mlx"
+    #: ``dpnp`` -- Intel GPU (Arc) through SYCL; ``opencl`` -- any OpenCL GPU (Intel Arc, AMD),
+    #: for strategies whose decisions are entries/exits signals only; ``cpu`` -- numpy in float64 across ``workers`` processes;
+    #: ``exact`` -- the same in one process.
+    backend: Literal["mlx", "cupy", "dpnp", "opencl", "cpu", "exact"] = "mlx"
     #: Processes for ``backend: cpu`` and for engine runs; null -- one per core.
     workers: int | None = None
     #: A strategy the sweep cannot convert: ``engine`` -- run every combination through
@@ -201,6 +280,9 @@ class SweepParams(Strict):
     periods_per_year: int = 252
     #: Run the best combination through run_simulation and compare the trades.
     verify: bool = True
+    #: Also run every combination on synthetic price paths and compare the choices made on them
+    #: with the real data's; see docs/backtesting/synthetic-data.md
+    synthetic: Synthetic | None = None
     #: Asset database; null -- ``~/.ziplime/assets.sqlite``, as for the command line.
     asset_db: str | None = None
     #: Bundle to read bars from -- the market_data_source run_simulation would get. null --

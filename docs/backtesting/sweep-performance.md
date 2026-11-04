@@ -2,7 +2,8 @@
 
 What a sweep costs in time, which backend to use, and how to run one on a rented NVIDIA GPU. Every
 number on this page was measured; the hardware and the data are stated with it. How the sweep
-works is on [How a sweep works](sweep-internals.md).
+works is on [How a sweep works](sweep-internals.md). Which GPUs a sweep runs on, and how they compare
+on the same sweeps, is on [GPUs and architectures](gpu-architectures.md).
 
 ## What the time goes to
 
@@ -72,7 +73,9 @@ Rotation across 12 ETFs, 2,723 sessions: 8,568 combinations in 11.9 s.
 | Backend | When |
 |---|---|
 | `mlx` | Apple silicon; NVIDIA on Linux with `mlx[cuda]`. Compiles each bar; the fastest wherever it runs |
-| `cupy` | NVIDIA when MLX's CUDA backend is not available; slower than `mlx` on small arrays |
+| `cupy` | NVIDIA when MLX's CUDA backend is not available; slower than `mlx` on small arrays. AMD on Linux with CuPy built for ROCm (see below) |
+| `dpnp` | Intel Arc: `handle_data` on dpnp, entries/exits through PyOpenCL (see below) |
+| `opencl` | Intel Arc, AMD — any GPU with an OpenCL driver (`ziplime[opencl]`). Strategies that return entries/exits from `compute_signals` only; one swept through `handle_data` is refused |
 | `cpu` | no GPU: NumPy in float64 across `workers` processes |
 | `exact` | one process, float64 — small grids, `ziplime sweep check`, reference numbers |
 
@@ -115,11 +118,28 @@ ziplime sweep doctor
 ziplime needs pandas 2.x — pandas 3 changes the results. TA-Lib 0.6.4 has no Linux wheel; a later
 version has (`ta-lib` 0.8.3 was used, with the same results).
 
-**3. Run** with `ziplime sweep run sweep.json` (`--backend mlx`). The first run on a fresh machine is
+**3. Check both GPU paths** before measuring anything. A sweep reaches the GPU two ways: a strategy
+swept through its `handle_data` runs on `mlx` or `cupy` as array operations; a strategy that
+returns entries/exits runs `simulate_signals_batch`, a kernel of its own — Metal for `mlx`, CUDA for
+`cupy`. Each needs its own check:
+
+```bash
+cd ziplime
+python -m pytest tests/vectorized/test_vector_kernel_batch.py -rs    # CudaAgreesWithExactTests:
+                                                                     # passed, not skipped
+ZIPLIME_SWEEP_TEST_GPU=cupy python -m pytest tests/sweep -q
+ZIPLIME_SWEEP_TEST_GPU=mlx python -m pytest tests/sweep -q           # with mlx[cuda]
+python -m examples.vectorized.sweep_on_gpu                           # prints "GPU (cupy)"
+```
+
+With `mlx[cuda]` the entries/exits test expects a refusal that points at `cupy` — MLX on CUDA has no
+Metal for the kernel — and passes on it.
+
+**4. Run** with `ziplime sweep run sweep.json` (`--backend mlx`). The first run on a fresh machine is
 slow: MLX compiles its kernels and Python its bytecode — the sweep's own test suite took 19 minutes
 cold on the 4090 and its GPU tests 16 s warm.
 
-**4. Delete the pod** when done (`DELETE https://rest.runpod.io/v1/pods/{id}`) and check that none is
+**5. Delete the pod** when done (`DELETE https://rest.runpod.io/v1/pods/{id}`) and check that none is
 left (`GET https://rest.runpod.io/v1/pods` returns `[]`). Measured cost: 31 minutes on an RTX 4090 in secure cloud — setting up, the whole
 test suite on two backends and the benchmarks — $0.46.
 
@@ -143,3 +163,66 @@ bandwidth decides, which puts an A5000 at roughly 1.3× and an A4000 at 2.2× th
 under a third of its price. 16 GB is enough: MLX on CUDA keeps at most 2 GB cached, and a batch is
 about 500,000 numbers. Prefer a pod with many CPU cores — computations on history, refine and
 verification run on them.
+
+## A sweep on an Intel GPU (Arc)
+
+`backend: dpnp` runs a strategy swept through `handle_data` on dpnp, Intel's NumPy for SYCL; a
+strategy that returns entries/exits runs the vector kernel through PyOpenCL on the same GPU. Both in
+float32 — Arc GPUs have no double precision. Linux or Windows; dpnp comes from Intel's own index:
+
+```bash
+pip install --index-url https://software.repos.intel.com/python/pypi \
+    --extra-index-url https://pypi.org/simple dpnp
+pip install "./ziplime[opencl]"               # PyOpenCL, for entries/exits strategies
+sudo apt install intel-opencl-icd clinfo      # Linux: the GPU's OpenCL driver; clinfo lists it
+ziplime sweep doctor                          # backend dpnp: "... on Intel(R) Arc(TM) B580 (gpu ...)"
+```
+
+dpnp picks the GPU by itself; `ONEAPI_DEVICE_SELECTOR=level_zero:0` names one. Checks:
+
+```bash
+cd ziplime
+python -m pytest tests/vectorized/test_vector_kernel_batch.py -rs    # OpenClAgreesWithExactTests
+ZIPLIME_SWEEP_TEST_GPU=dpnp python -m pytest tests/sweep -q
+python -m examples.vectorized.sweep_on_gpu                           # prints "GPU (opencl)"
+```
+
+The sweep's GPU tests have run on dpnp 0.21 against Intel's OpenCL CPU device (x86 Linux in
+Docker), which checks that the numbers are right; no Arc GPU has run them yet, so nothing here
+says how fast it is.
+
+## A sweep on an AMD GPU (ROCm)
+
+Checked on an AMD Instinct MI300X (RunPod, image `rocm/dev-ubuntu-24.04:6.4.4-complete`): CuPy
+14.2.0 built from source in 6 minutes with the commands below. The kernel's parity tests and the
+sweep's GPU tests passed, and the `handle_data` sweeps agreed with the other GPUs — see
+[GPUs and architectures](gpu-architectures.md). No Radeon card has run it yet.
+
+CuPy built for ROCm is the same `cupy` backend: the `handle_data` path runs on its arrays, and the
+entries/exits kernel compiles through HIP, which reads the CUDA source as it is (in blocks of 64
+threads, a whole wavefront). Linux only, and on the GPUs ROCm supports — not every Radeon.
+
+Prebuilt CuPy wheels for ROCm on PyPI stop at ROCm 5.0, so build CuPy against the installed ROCm,
+and install ziplime without the `cuda` extra, which would bring CuPy for CUDA:
+
+```bash
+rocminfo | grep -m1 -o "gfx[0-9a-f]*"        # the GPU's architecture, e.g. gfx1100
+export CUPY_INSTALL_USE_HIP=1 ROCM_HOME=/opt/rocm HCC_AMDGPU_TARGET=gfx1100
+pip install cupy                              # compiles; takes a while
+pip install ./ziplime
+ziplime sweep doctor                          # backend cupy: "... (ROCm) on <the GPU>"
+```
+
+Then the same checks as on NVIDIA:
+
+```bash
+cd ziplime
+python -m pytest tests/vectorized/test_vector_kernel_batch.py -rs    # CudaAgreesWithExactTests:
+                                                                     # passed, not skipped
+ZIPLIME_SWEEP_TEST_GPU=cupy python -m pytest tests/sweep -q
+python -m examples.vectorized.sweep_on_gpu                           # prints "GPU (cupy)"
+```
+
+Where CuPy for ROCm will not build or the GPU is not supported, `backend: opencl` still runs the
+entries/exits kernel through AMD's OpenCL driver — on Windows as well — and a strategy swept
+through `handle_data` runs on `cpu`.

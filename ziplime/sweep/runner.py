@@ -58,6 +58,11 @@ CUDA_ELEMENTS = 2_000_000
 SMALL_RERUN = 5_000
 
 
+#: The entries/exits kernel each sweep backend runs. dpnp has no way to launch it, and every Intel
+#: GPU it runs on has OpenCL, so a dpnp sweep runs the kernel through PyOpenCL on the same GPU.
+KERNEL_BACKENDS = {"mlx": "mlx", "cupy": "cupy", "opencl": "opencl", "dpnp": "opencl"}
+
+
 def batch_size(params: SweepParams, n_columns: int) -> int:
     if params.batch_size != "auto":
         return int(params.batch_size)
@@ -121,27 +126,45 @@ async def _sweep(params, base, say, stages, started, combos, algorithm, combinat
         cache_dir=params.resolve(base, params.cache_dir), universe=universe, calendar=calendar,
         first=since, last=params.end_date, say=say, rate=parse_rate(params.emission_rate))
     _same_frequency(bundle, params)
-    panel, in_run = price_panel(bundle, universe, params.start_date, algorithm.warmup, say)
-    if first.datasets:
-        from ziplime.sweep.data import attach_datasets
-        last = min(params.end_date, bundle.data["date"].max().date())
-        panel = await attach_datasets(panel, first.datasets, universe, calendar, params.start_date,
-                                      last, asset_service, registered)
-    stages.add("preparation (algorithm, assets, data)", time.perf_counter() - started)
 
-    # Signals as decisions -> the vector kernel; anything else -> handle_data, converted
-    decisions = False
-    if algorithm.compute_signals is not None and not first.indicators:
-        decisions = "entries" in compute(algorithm, first_context(algorithm, asset_service, found),
-                                         panel, combinations.config(0), False)
-    common = dict(params=params, base=base, say=say, stages=stages, combos=combos,
-                  algorithm=algorithm, combinations=combinations, asset_service=asset_service,
-                  calendar=calendar, bundle=bundle, panel=panel, in_run=in_run, universe=universe,
-                  columns=columns, found=found, first=first)
-    if decisions:
-        return await _sweep_signals(**common)
-    common["registered"] = registered
-    return await _sweep_handle_data(**common)
+    memo = {}
+
+    async def once(bundle, rank_only: bool = False):
+        """The sweep on these bars; ``rank_only`` -- every combination's metrics and nothing
+        else: no printing, no refinement, no files, no verification (a synthetic path)."""
+        quiet = (lambda message: None) if rank_only else say
+        timed = report.Stages() if rank_only else stages
+        panel, in_run = price_panel(bundle, universe, params.start_date, algorithm.warmup, quiet)
+        if first.datasets:
+            from ziplime.sweep.data import attach_datasets
+            last = min(params.end_date, bundle.data["date"].max().date())
+            panel = await attach_datasets(panel, first.datasets, universe, calendar,
+                                          params.start_date, last, asset_service, registered)
+        if not rank_only:
+            timed.add("preparation (algorithm, assets, data)", time.perf_counter() - started)
+
+        # Signals as decisions -> the vector kernel; anything else -> handle_data, converted
+        decisions = False
+        if algorithm.compute_signals is not None and not first.indicators:
+            decisions = "entries" in compute(algorithm,
+                                             first_context(algorithm, asset_service, found),
+                                             panel, combinations.config(0), False)
+        common = dict(params=params, base=base, say=quiet, stages=timed, combos=combos,
+                      algorithm=algorithm, combinations=combinations,
+                      asset_service=asset_service, calendar=calendar, bundle=bundle, panel=panel,
+                      in_run=in_run, universe=universe, columns=columns, found=found,
+                      first=first, rank_only=rank_only)
+        if decisions:
+            return await _sweep_signals(**common)
+        return await _sweep_handle_data(**common, registered=registered, memo=memo)
+
+    if params.synthetic is not None:
+        from ziplime.sweep import synthetic
+        return await synthetic.run(params=params, say=say, bundle=bundle, universe=universe,
+                                   calendar=calendar, asset_service=asset_service, once=once,
+                                   config_of=combinations.config,
+                                   output=params.resolve(base, params.output_dir))
+    return await once(bundle)
 
 
 def first_context(algorithm, asset_service, found):
@@ -245,10 +268,16 @@ def remap(stacks: dict, rows: np.ndarray) -> dict:
 
 async def _sweep_handle_data(*, params, base, say, stages, combos, algorithm, combinations,
                              asset_service, calendar, bundle, panel, in_run, universe, columns,
-                             found, first, registered):
+                             found, first, registered, rank_only=False, memo=None):
+    if params.backend == "opencl":
+        raise SweepError("backend opencl runs the kernel for entries/exits signals only, and this "
+                         "strategy is swept through its handle_data. Use mlx (Apple GPU), cupy "
+                         "(NVIDIA GPU), dpnp (Intel GPU) or cpu; or return entries and exits from "
+                         "compute_signals.")
     on_engine = dict(params=params, base=base, say=say, stages=stages, combos=combos,
                      combinations=combinations, bundle=bundle, asset_service=asset_service,
-                     registered=registered)
+                     registered=registered, rank_only=rank_only)
+    memo = {} if memo is None else memo
     started = time.perf_counter()
     last = min(params.end_date, bundle.data["date"].max().date())
     market = await build_market(bundle.data, universe, calendar, params.start_date, last,
@@ -256,15 +285,20 @@ async def _sweep_handle_data(*, params, base, say, stages, combos, algorithm, co
     stages.add("market (spot rows, corporate actions)", time.perf_counter() - started)
 
     started = time.perf_counter()
-    initialized = await initialize_each(algorithm, asset_service, combinations, found)
-    try:
-        hooks, flags, which = hooks_of(algorithm, initialized, calendar, market)
-        check.check([f for hook in hooks.all()
-                     for f in (hook.original, *hook.helper_originals.values())],
-                    set(initialized[0].state), initialized[0].state, hooks=hooks.all(),
-                    universe=initialized[0].universe)
-    except SweepError as reason:
-        return await _on_engine(reason, **on_engine)
+    if "initialized" in memo:
+        # Another path of the same run: initialize, the conversion and the checks read no bars
+        initialized, (hooks, flags, which) = memo["initialized"], memo["hooks"]
+    else:
+        initialized = await initialize_each(algorithm, asset_service, combinations, found)
+        try:
+            hooks, flags, which = hooks_of(algorithm, initialized, calendar, market)
+            check.check([f for hook in hooks.all()
+                         for f in (hook.original, *hook.helper_originals.values())],
+                        set(initialized[0].state), initialized[0].state, hooks=hooks.all(),
+                        universe=initialized[0].universe)
+        except SweepError as reason:
+            return await _on_engine(reason, **on_engine)
+        memo.update(initialized=initialized, hooks=(hooks, flags, which))
     params = costs_for(params, initialized[0])
     costs = engine.resolve_costs(params, market)
     for each in {id(each): each for each in initialized}.values():
@@ -281,11 +315,14 @@ async def _sweep_handle_data(*, params, base, say, stages, combos, algorithm, co
             raise SweepError("Indicators are declared both in compute_signals and with "
                              "context.indicators() -- keep one.")
         indicators = IndicatorSignals(initialized, panel, in_run, columns)
-        check_indicators(initialized[0].indicators, panel, algorithm.warmup, combinations.config(0))
+        if not rank_only:
+            check_indicators(initialized[0].indicators, panel, algorithm.warmup,
+                             combinations.config(0))
     elif algorithm.compute_signals is not None:
         context = first_context(algorithm, asset_service, found)
         cache = SignalCache(algorithm, context, panel, in_run, columns, decisions=False)
-        check_causality(algorithm, context, panel, combinations.config(0), decisions=False)
+        if not rank_only:
+            check_causality(algorithm, context, panel, combinations.config(0), decisions=False)
     stages.add("initialize and indicators", time.perf_counter() - started)
 
     def signals_for(indices, configs):
@@ -409,11 +446,12 @@ async def _sweep_handle_data(*, params, base, say, stages, combos, algorithm, co
                          check_best=lambda best: _check_best(
                              indicators, cache, algorithm, asset_service, combinations, best,
                              panel, found, initialized),
-                         compiled=any(compiled_flags), warnings=nan_records)
+                         compiled=any(compiled_flags), warnings=nan_records,
+                         rank_only=rank_only)
 
 
 async def _on_engine(reason, *, params, base, say, stages, combos, combinations, bundle,
-                     asset_service, registered):
+                     asset_service, registered, rank_only=False):
     """The strategy cannot run for every combination at once: run each through the engine."""
     from ziplime.sweep import fallback
 
@@ -430,6 +468,8 @@ async def _on_engine(reason, *, params, base, say, stages, combos, combinations,
     table.index.name = "combo"
     table["precision"] = "engine"
     table = table.sort_values(params.sort_by, ascending=False)
+    if rank_only:
+        return table
     ranked = table[table["fills"] >= params.min_fills]
     if ranked.empty:
         raise SweepError(f"No combination made {params.min_fills} fills; lower min_fills.")
@@ -512,10 +552,7 @@ def _worker(job: dict) -> pd.DataFrame:
 
 async def _sweep_signals(*, params, base, say, stages, combos, algorithm, combinations,
                          asset_service, calendar, bundle, panel, in_run, universe, columns,
-                         found, first):
-    if params.backend == "cupy":
-        raise SweepError("The kernel for entries/exits signals exists for Metal (mlx) and the CPU "
-                         "(exact); on CUDA a strategy is swept through its handle_data.")
+                         found, first, rank_only=False):
     configs_all = None
     sizes = [params.size if params.size is not None else getattr(combinations.config(i), "size", None)
              for i in range(len(combos))] if len(combos) <= 200_000 else None
@@ -558,7 +595,7 @@ async def _sweep_signals(*, params, base, say, stages, combos, algorithm, combin
                 try:
                     batch = simulate_signals_batch(
                         close, **stacks, labels=chunk, size=order_size,
-                        backend="mlx" if backend == "mlx" else "exact",
+                        backend=KERNEL_BACKENDS.get(backend, "exact"),
                         allow_short="short_entries" in stacks or "short_exits" in stacks, **shared)
                 except VectorKernelError as error:
                     raise SweepError(f"ziplime refused: {error}") from None
@@ -589,16 +626,16 @@ async def _sweep_signals(*, params, base, say, stages, combos, algorithm, combin
                          variants=len(cache.variants), best_run=best_run,
                          check_best=lambda best: check_causality(
                              algorithm, context, panel, combinations.config(best)),
-                         compiled=False, close=close)
+                         compiled=False, close=close, rank_only=rank_only)
 
 
 # -- ranking, files, verification -----------------------------------------------------------------
 
 async def _finish(*, params, base, say, stages, table, combos, combinations, simulate, columns,
                   market, calendar, bundle, universe, asset_service, variants, best_run,
-                  check_best, compiled, close=None, warnings=()):
+                  check_best, compiled, close=None, warnings=(), rank_only=False):
     table.index.name = "combo"
-    gpu = params.backend in ("mlx", "cupy")
+    gpu = params.backend in ("mlx", "cupy", "dpnp", "opencl")
     table["precision"] = "float32" if gpu else "float64"
     unsupported = int(table["unsupported"].sum())
     if unsupported:
@@ -606,6 +643,8 @@ async def _finish(*, params, base, say, stages, table, combos, combinations, sim
             f"instrument at once -- more than the sweep keeps; they are left out of the ranking "
             f"rather than reported with numbers that may differ from the engine.")
     table = table.sort_values(params.sort_by, ascending=False)
+    if rank_only:
+        return table
 
     # The GPU computes in float32; when decisions depend on the portfolio value, one share's
     # difference changes the path, so the top of the ranking is recomputed exactly

@@ -6,7 +6,9 @@ thousand over fifty instruments -- a synthetic universe, so it runs offline -- t
 
 * `exact`: the float64 kernel, one combination at a time. Timed on a sample and extrapolated,
   because the whole grid takes minutes this way.
-* `mlx`: every combination at once on the Apple GPU, one thread each, in float32.
+* the GPU: every combination at once, one thread each, in float32 -- `mlx` on an Apple GPU,
+  `cupy` on an NVIDIA one, `opencl` on any other with an OpenCL driver (Intel Arc, AMD). All three
+  compile the same kernel; the example takes the first this machine has, in that order.
 
 Then it holds the two against each other on the sample, and reruns the GPU's winner through the
 float64 kernel. That rerun, not the GPU's number, is what `to_execution_result` replays into a
@@ -16,10 +18,12 @@ Run:
 
     python -m examples.vectorized.sweep_on_gpu
 
-Needs `pip install mlx`, which exists for Apple silicon only.
+Needs `pip install mlx` on Apple silicon, `pip install "ziplime[cuda]"` (CuPy) with an NVIDIA GPU,
+or `pip install "ziplime[opencl]"` (PyOpenCL) with any GPU that has an OpenCL driver.
 """
 import itertools
 import logging
+import sys
 import time
 
 import numpy as np
@@ -28,7 +32,8 @@ import structlog
 
 from ziplime.finance.commission.per_share import PerShare
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
-from ziplime.vectorized.kernel import ExecutionTiming, simulate_signals_batch
+from ziplime.vectorized.kernel import ExecutionTiming, VectorKernelError, simulate_signals_batch
+from ziplime.vectorized.kernel import _cupy, _mlx, _opencl
 
 N_INSTRUMENTS = 50
 N_SESSIONS = 1000
@@ -81,10 +86,23 @@ def signal_grid(closes: pd.DataFrame, grid: list[tuple[int, int]]):
     return entries, exits
 
 
+def gpu_backend() -> str:
+    """The GPU backend this machine can run, or the reason it can run neither."""
+    reasons = []
+    for backend, module in (("mlx", _mlx), ("cupy", _cupy), ("opencl", _opencl)):
+        try:
+            module.require()
+            return backend
+        except VectorKernelError as error:
+            reasons.append(f"  {error}")
+    sys.exit("No GPU backend runs on this machine:\n" + "\n".join(reasons))
+
+
 def main():
     # Every exact run logs a line; twenty of them would bury the comparison this prints.
     structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.WARNING))
 
+    backend = gpu_backend()
     closes = synthetic_closes()
     grid = [(fast, slow) for fast, slow in itertools.product(FAST_WINDOWS, SLOW_WINDOWS)
             if fast < slow]
@@ -98,11 +116,11 @@ def main():
                   commission=PerShare(cost=0.005, min_trade_cost=1.0),
                   slippage=FixedBasisPointsSlippage(basis_points=5.0))
 
-    # The first GPU call compiles the Metal kernel. Paid here, so it is not reported as speed.
-    simulate_signals_batch(entries=entries[:1], exits=exits[:1], backend="mlx", **shared)
+    # The first GPU call compiles the kernel. Paid here, so it is not reported as speed.
+    simulate_signals_batch(entries=entries[:1], exits=exits[:1], backend=backend, **shared)
 
     started = time.perf_counter()
-    gpu = simulate_signals_batch(entries=entries, exits=exits, labels=grid, backend="mlx",
+    gpu = simulate_signals_batch(entries=entries, exits=exits, labels=grid, backend=backend,
                                  **shared)
     gpu_seconds = time.perf_counter() - started
 
@@ -113,7 +131,7 @@ def main():
                                    labels=sample_labels, backend="exact", **shared)
     exact_each = (time.perf_counter() - started) / SAMPLE
 
-    print(f"\nGPU (mlx):    {len(grid):,} combinations in {gpu_seconds:.2f}s "
+    print(f"\n{f'GPU ({backend}):':<14}{len(grid):,} combinations in {gpu_seconds:.2f}s "
           f"({gpu_seconds / len(grid) * 1000:.2f} ms each)")
     print(f"CPU (exact):  {exact_each * 1000:.0f} ms each, measured on {SAMPLE}; the whole grid "
           f"would take about {exact_each * len(grid):.0f}s")

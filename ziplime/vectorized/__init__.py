@@ -26,10 +26,11 @@ are array work but whose decisions are not.
 Neither needs a third-party engine. The kernel is ziplime's own, and `numba` only compiles its
 inner loop -- absent, the same loop runs interpreted and reports the same numbers.
 
-A sweep of many combinations can also run on the Apple GPU:
-:func:`~ziplime.vectorized.kernel.simulate_signals_batch` with ``backend="mlx"`` runs every
-signal set at once, one GPU thread each, in float32 -- and reruns the one worth reporting through
-the float64 kernel.
+A sweep of many combinations can also run on a GPU:
+:func:`~ziplime.vectorized.kernel.simulate_signals_batch` with ``backend="mlx"`` (Apple),
+``backend="cupy"`` (NVIDIA) or ``backend="opencl"`` (Intel Arc, AMD) runs every signal set at
+once, one GPU thread each, in float32 -- and reruns the one worth reporting through the float64
+kernel.
 
 ``vectorbt`` is not a dependency of either. :func:`to_execution_result` still accepts a
 ``vectorbt`` portfolio, and that is deliberate: replaying one through this ledger is how a second

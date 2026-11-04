@@ -453,7 +453,7 @@ async def sweep():
 
 @sweep.command("run")
 @click.argument("sweep_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
-@click.option("--backend", type=click.Choice(["mlx", "cupy", "cpu", "exact"]),
+@click.option("--backend", type=click.Choice(["mlx", "cupy", "dpnp", "opencl", "cpu", "exact"]),
               help="Override the sweep file's backend.")
 @click.option("--grid", "grid", multiple=True, metavar="NAME=SPEC",
               help="Set one parameter's values: fast=5,10,20 or slow=30:90:10 (from:to:step). "
@@ -470,20 +470,28 @@ async def sweep():
               help="Stop if the strategy cannot be converted, instead of running every "
                    "combination through run_simulation.")
 @click.option("--no-verify", is_flag=True, help="Skip the run_simulation check of the best one.")
+@click.option("--paths", type=int,
+              help="Also run every combination on this many synthetic price paths per family "
+                   "(the file's synthetic families, or --family).")
+@click.option("--family", "families", multiple=True, metavar="METHOD[:BLOCK]",
+              help="A family of synthetic paths: stationary:20, block:10, circular:10, meboot, "
+                   "garch, gbm, student_t, iid, shuffle. Repeatable; replaces the file's families.")
 async def sweep_run(sweep_file, backend, grid, assignments, compile_, batch_size, workers,
-                    output_dir, refuse, no_verify):
+                    output_dir, refuse, no_verify, paths, families):
     """Run the sweep SWEEP_FILE describes.
 
     Every combination of the grid goes through the strategy at once; the best are recomputed
     exactly and the best one is run through run_simulation and its trades compared. Writes
     sweep_results.csv, best_config.json (a config file for run_simulation) and best_fills.csv.
+    With synthetic paths (the file's "synthetic", or --paths / --family) also
+    synthetic_summary.csv, synthetic_paths.parquet and best_synthetic_config.json.
     """
     from ziplime.sweep import SweepError, run_sweep
 
     params = _sweep_params(sweep_file, grid, assignments, backend=backend, compile=compile_,
                            batch_size=batch_size, workers=workers, output_dir=output_dir,
                            on_unsupported="refuse" if refuse else None,
-                           verify=False if no_verify else None)
+                           verify=False if no_verify else None, paths=paths, families=families)
     try:
         await run_sweep(params, sweep_file.resolve().parent, say=click.echo)
     except SweepError as error:
@@ -492,7 +500,8 @@ async def sweep_run(sweep_file, backend, grid, assignments, compile_, batch_size
 
 @sweep.command("check")
 @click.argument("sweep_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
-@click.option("--backend", type=click.Choice(["mlx", "cupy", "cpu", "exact"]), default="exact",
+@click.option("--backend", type=click.Choice(["mlx", "cupy", "dpnp", "opencl", "cpu", "exact"]),
+              default="exact",
               show_default=True, help="Where to run the few combinations.")
 @click.option("--set", "assignments", multiple=True, metavar="FIELD=VALUE",
               help="Override a field of the sweep file, as for run.")
@@ -512,7 +521,7 @@ async def sweep_check(sweep_file, backend, assignments):
     with tempfile.TemporaryDirectory(prefix="ziplime-sweep-check-") as folder:
         small = params.model_copy(update={
             "grid": corner_of(params.grid), "backend": backend, "verify": False, "refine_top": 0,
-            "on_unsupported": "refuse", "output_dir": folder, "min_fills": 0})
+            "on_unsupported": "refuse", "output_dir": folder, "min_fills": 0, "synthetic": None})
         try:
             await run_sweep(small, sweep_file.resolve().parent, say=click.echo)
         except SweepError as error:
@@ -572,14 +581,14 @@ async def sweep_doctor():
         click.echo(f"{name:<{width}}  {state}")
 
 
-def _sweep_params(sweep_file: Path, grid, assignments, **overrides):
+def _sweep_params(sweep_file: Path, grid, assignments, paths=None, families=(), **overrides):
     """The sweep file, with the command line's --grid, --set and options over it."""
     import json
 
     from pydantic import ValidationError
 
     from ziplime.sweep import SweepError, SweepParams
-    from ziplime.sweep.tools import parse_assignment, parse_grid, parse_value
+    from ziplime.sweep.tools import parse_assignment, parse_family, parse_grid, parse_value
 
     try:
         raw = json.loads(sweep_file.read_text(encoding="utf-8"))
@@ -590,6 +599,13 @@ def _sweep_params(sweep_file: Path, grid, assignments, **overrides):
             name, values = parse_grid(text)
             raw.setdefault("grid", {})[name] = values
         raw.update({name: value for name, value in overrides.items() if value is not None})
+        if paths is not None or families:
+            synthetic = raw.get("synthetic") or {}
+            if paths is not None:
+                synthetic["paths"] = paths
+            if families:
+                synthetic["families"] = [parse_family(text) for text in families]
+            raw["synthetic"] = synthetic
         return SweepParams.model_validate(raw)
     except json.JSONDecodeError as error:
         _fail(f"{sweep_file.name} is not JSON: {error}")

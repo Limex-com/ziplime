@@ -7,7 +7,9 @@ and the best one is run through `run_simulation` and its trades compared with th
 
 This page is how to run one. [How a sweep works](sweep-internals.md) explains why an ordinary
 `handle_data` can run on a GPU and what is computed where; [Sweep performance](sweep-performance.md)
-has the measured speeds and how to run a sweep on a rented NVIDIA GPU.
+has the measured speeds and how to run a sweep on a rented NVIDIA GPU; [GPUs and
+architectures](gpu-architectures.md) has which GPUs a sweep runs on — Apple, NVIDIA, AMD — and the
+same sweeps compared across them.
 
 ## Install
 
@@ -137,12 +139,13 @@ with NumPy, TA-Lib or a model fitted in `initialize`; the sweep computes that ah
 | `equity_commission`, `equity_slippage` | `{"type": "per_share" \| "per_dollar" \| "per_trade", "cost": ...}`; `{"type": "fixed_bps", "basis_points": 5, "volume_limit": 0.1}` or `fixed_spread` |
 | `future_commission`, `future_slippage` | For futures in the universe; `{"type": "per_contract", "cost": 0.85, "exchange_fee": 1.5}` |
 | `timing` | `same_close` (run_simulation's `same_bar_execution=True`), `next_close`, `next_open` |
-| `backend` | `mlx` (Apple GPU; NVIDIA with `mlx[cuda]`), `cupy` (NVIDIA), `cpu` (NumPy across `workers` processes), `exact` (NumPy, one process) |
+| `backend` | `mlx` (Apple GPU; NVIDIA with `mlx[cuda]`), `cupy` (NVIDIA; AMD with CuPy built for ROCm), `dpnp` (Intel Arc), `opencl` (any OpenCL GPU — Intel Arc, AMD — for strategies that return entries/exits only), `cpu` (NumPy across `workers` processes), `exact` (NumPy, one process) |
 | `compile` | Compile each bar into a few GPU kernels (MLX); on by default |
 | `batch_size` | Combinations per GPU call; `auto` sizes it from the number of instruments |
 | `sort_by`, `top`, `min_fills` | Ranking: `sharpe`, `total_return`, `final_value` or `max_drawdown`; rows shown; fewest fills to be ranked |
 | `refine_top` | How many of the best GPU results (float32) to recompute in float64 before the final ranking; 50 |
 | `verify` | Run the best combination through run_simulation and compare the trades |
+| `synthetic` | Also run every combination on synthetic price paths made from the real bars and compare the choices; see [Sweeps on synthetic data](synthetic-data.md) |
 | `on_unsupported` | A strategy that cannot be converted: `engine` (every combination through run_simulation, the default) or `refuse` |
 | `asset_db`, `bundle`, `bundle_version`, `bundle_storage` | As for the command line; without `bundle`, daily bars are downloaded from Yahoo and cached in `cache_dir` |
 | `output_dir` | Where the results go |
@@ -258,6 +261,17 @@ How the strategy runs in the sweep:
 Warnings:
   composer.py:63: talib.RSI(history(TQQQ, close, 250 bars)[-30:], timeperiod=30)[-1] is NaN at every bar: ...
   soxl_rsi changes nothing: combinations that differ in it alone have the same fills and final value. ...
+```
+
+## Synthetic data
+
+A sweep can also run the grid on many synthetic price paths made from the real bars: block
+bootstrap, maximum entropy bootstrap (meboot), GARCH, GBM and others. You can choose the
+combination on the paths and look at it on the real bars, or choose on the real bars and see how
+the winner does on each family of paths. See [Sweeps on synthetic data](synthetic-data.md).
+
+```bash
+ziplime sweep run sweep.json --paths 100 --family stationary:20 --family meboot --family garch
 ```
 
 ## Precision
