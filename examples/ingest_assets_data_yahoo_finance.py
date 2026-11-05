@@ -13,7 +13,7 @@ async def ingest_assets_data_yahoo_finance():
 
     # clear_asset_db stays False so this can be run alongside other connectors.
     asset_service = get_asset_service(db_path=ASSET_DB_PATH, clear_asset_db=False)
-    await ingest_assets(asset_service=asset_service, asset_data_source=asset_data_source)
+    await ingest_assets(asset_service=asset_service, asset_data_source=asset_data_source,)
 
 
 if __name__ == "__main__":
