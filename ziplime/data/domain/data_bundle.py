@@ -95,8 +95,11 @@ class DataBundle(DataSource):
             dates = df.filter(pl.col("sid") == sid)["date"]
         return None if dates.is_empty() else dates.max()
 
-    def get_roll_finder(self, roll_style: str):
+    def get_roll_finder(self, roll_style: str, roll_offset_days: int | None = None):
         """Return (and memoise) the roll finder for ``roll_style``.
+
+        ``roll_offset_days`` overrides the bundle's default offset for one continuous future: the
+        calendar style's days before auto close, and the volume style's latest roll.
 
         ``_roll_finders`` used to be read but never populated, which made every continuous-future
         lookup fail with ``AttributeError``.
@@ -106,19 +109,26 @@ class DataBundle(DataSource):
                 "This data bundle was loaded without an asset service, so continuous futures "
                 "cannot be resolved to a contract. Pass asset_service when loading the bundle."
             )
-        if roll_style not in self._roll_finders:
+        key = (roll_style, roll_offset_days)
+        if key not in self._roll_finders:
             finder_class = ROLL_FINDERS.get(roll_style)
             if finder_class is None:
                 raise ValueError(f"Unknown roll style {roll_style!r}. "
                                  f"Allowed roll styles are {sorted(ROLL_FINDERS)}.")
-            settings = self._roll_finder_settings.get(roll_style, {})
+            settings = dict(self._roll_finder_settings.get(roll_style, {}))
+            if roll_offset_days is not None:
+                if finder_class is VolumeRollFinder:
+                    settings["grace_period_days"] = roll_offset_days
+                else:
+                    settings.pop("roll_offset_sessions", None)
+                    settings["roll_offset_days"] = roll_offset_days
             if finder_class is VolumeRollFinder:
-                self._roll_finders[roll_style] = finder_class(asset_service=self.asset_service,
-                                                              data_source=self, **settings)
+                self._roll_finders[key] = finder_class(asset_service=self.asset_service,
+                                                       data_source=self, **settings)
             else:
-                self._roll_finders[roll_style] = finder_class(asset_service=self.asset_service,
-                                                              **settings)
-        return self._roll_finders[roll_style]
+                self._roll_finders[key] = finder_class(asset_service=self.asset_service,
+                                                       **settings)
+        return self._roll_finders[key]
 
     def get_dataframe(self) -> pl.DataFrame:
         return self.data
@@ -360,9 +370,10 @@ class DataBundle(DataSource):
     async def current_contract(self, continuous_future: ContinuousFuture,
                                dt: datetime.datetime) -> ExchangeAsset | None:
         """Return the contract ``continuous_future`` holds at ``dt``."""
-        roll_finder = self.get_roll_finder(continuous_future.roll_style)
+        roll_finder = self.get_roll_finder(continuous_future.roll_style,
+                                            getattr(continuous_future, "roll_offset_days", None))
         return await roll_finder.get_contract_center(
-            root_symbol=continuous_future.root_symbol, dt=dt, offset=continuous_future.offset)
+            root_symbol=continuous_future.chain, dt=dt, offset=continuous_future.offset)
 
     async def _get_continuous_future_data(self, continuous_future: ContinuousFuture,
                                           fields: frozenset[str] | None,
@@ -379,8 +390,9 @@ class DataBundle(DataSource):
         lookback = max(period_to_timedelta(frequency) * limit * 3, self.MIN_ROLL_LOOKBACK)
         window_start = max(end_date - lookback, self._as_datetime(self.start_date))
 
-        roll_finder = self.get_roll_finder(continuous_future.roll_style)
-        rolls = await roll_finder.get_rolls(root_symbol=continuous_future.root_symbol,
+        roll_finder = self.get_roll_finder(continuous_future.roll_style,
+                                            getattr(continuous_future, "roll_offset_days", None))
+        rolls = await roll_finder.get_rolls(root_symbol=continuous_future.chain,
                                             start=window_start, end=end_date,
                                             offset=continuous_future.offset)
         if not rolls:
@@ -630,12 +642,13 @@ class DataBundle(DataSource):
         Previously this read ``self._roll_finders`` and ``self.asset_repository``, neither of which
         was ever assigned.
         """
-        roll_finder = self.get_roll_finder(continuous_future.roll_style)
+        roll_finder = self.get_roll_finder(continuous_future.roll_style,
+                                            getattr(continuous_future, "roll_offset_days", None))
         contract = await roll_finder.get_contract_center(
-            root_symbol=continuous_future.root_symbol, dt=dt, offset=continuous_future.offset)
+            root_symbol=continuous_future.chain, dt=dt, offset=continuous_future.offset)
         if contract is None:
             return []
-        ordered_contracts = await roll_finder.get_ordered_contracts(continuous_future.root_symbol)
+        ordered_contracts = await roll_finder.get_ordered_contracts(continuous_future.chain)
         session = dt.date() if isinstance(dt, datetime.datetime) else dt
         return ordered_contracts.active_chain(starting_sid=contract.sid, dt=session)
 

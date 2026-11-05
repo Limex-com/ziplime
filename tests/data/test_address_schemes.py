@@ -140,6 +140,16 @@ class ResolutionTests(unittest.TestCase):
         self.assertEqual(kwargs["trading_calendar"].name, "XNYS")
         self.assertIn("asset_service", kwargs)
 
+    def test_the_runs_address_context_reaches_the_mount_but_cannot_override_the_engine(self):
+        mount = Recorder()
+        register_address_scheme("test", mount)
+        algo = algorithm()
+        algo._address_context = {"user_id": "u-1", "start_date": datetime.date(1999, 1, 1)}
+        asyncio.run(TradingAlgorithm._resolve_named_data_source(algo, "test://x"))
+        _, kwargs = mount.calls[0]
+        self.assertEqual(kwargs["user_id"], "u-1")
+        self.assertEqual(kwargs["start_date"], datetime.date(2025, 1, 2))
+
     def test_an_asynchronous_mount_is_awaited(self):
         mount = Recorder(asynchronous=True)
         register_address_scheme("test", mount)

@@ -174,6 +174,10 @@ class HuggingFaceDataSource(DataSource):
     :meth:`mount` has already resolved.
     """
 
+    #: Passed to ``LazyFrame.collect`` when materialising. A subclass reading a large object in
+    #: place (``dataset://``) asks for the streaming engine, so memory follows the rows kept.
+    _collect_kwargs: dict = {}
+
     def __init__(self, name: str, revision: hub.RepoRevision, manifest: DatasetManifest,
                  config: str, repo_files: tuple[str, ...], knowledge_column: str,
                  entity_column: str, event_column: str | None, asset_service,
@@ -358,13 +362,14 @@ class HuggingFaceDataSource(DataSource):
                                      str(self.trading_calendar.tz))
             knowledge_floored = pl.max_horizontal(knowledge, event)
             floored = int(
-                scan.select((knowledge < event).fill_null(False).sum()).collect().item() or 0)
+                scan.select((knowledge < event).fill_null(False).sum())
+                .collect(**self._collect_kwargs).item() or 0)
             knowledge = knowledge_floored
 
         frame = (
             scan.with_columns(knowledge.alias("date"))
             .filter(pl.col("date") >= window_start, pl.col("date") <= window_end)
-            .collect()
+            .collect(**self._collect_kwargs)
         )
         if floored:
             self._logger.warning(

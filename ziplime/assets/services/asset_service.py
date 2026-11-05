@@ -92,8 +92,13 @@ class AssetService:
         return await self._asset_repository.get_exchange_option_contracts(
             underlying_symbol=underlying_symbol, expiration_date=expiration_date, mic=mic)
 
-    async def get_futures_roots(self) -> dict[str, FuturesRoot]:
+    async def get_futures_roots(self) -> dict[tuple[str, str], FuturesRoot]:
+        """Every stored futures chain, keyed by ``(root_symbol, mic)``."""
         return await self._asset_repository.get_futures_roots()
+
+    async def resolve_futures_root(self, root_symbol: str, mic: str | None = None) -> tuple[str, str | None]:
+        """The chain a root names, as ``(root_symbol, mic)``; ``NG@XNYM`` names its exchange."""
+        return await self._asset_repository.resolve_futures_root(root_symbol=root_symbol, mic=mic)
 
     async def get_exchange_futures_contracts_by_root(self, root_symbol: str,
                                                      mic: str | None = None) -> list[ExchangeAsset]:
@@ -107,10 +112,13 @@ class AssetService:
 
     async def create_continuous_future(self, root_symbol: str, offset: int = 0,
                                        roll_style: str = "volume",
-                                       adjustment: str | None = "mul") -> ContinuousFuture:
+                                       adjustment: str | None = "mul",
+                                       mic: str | None = None,
+                                       roll_offset_days: int | None = None) -> ContinuousFuture:
         """Build a continuous future specifier over a stored chain."""
         return await self._asset_repository.create_continuous_future(
-            root_symbol=root_symbol, offset=offset, roll_style=roll_style, adjustment=adjustment)
+            root_symbol=root_symbol, offset=offset, roll_style=roll_style, adjustment=adjustment,
+            mic=mic, roll_offset_days=roll_offset_days)
 
     async def save_commodities(self, commodities: list[Commodity]) -> list[Commodity]:
         # The `return` was missing, so this alone among the save_* methods declared a list and

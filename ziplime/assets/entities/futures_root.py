@@ -27,7 +27,7 @@ class FuturesRoot:
     margin_currency: str = "RUB"
 
     def __hash__(self):
-        return hash(self.root_symbol)
+        return hash((self.root_symbol, self.exchange.mic))
 
     def __str__(self):
         return f"{self.root_symbol}-{self.exchange.mic}"

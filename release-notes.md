@@ -1,5 +1,117 @@
 # Release Notes
 
+### Version 2.11.3
+
+Private user datasets: `dataset://<name>`.
+
+A user's own Parquet file is read the way an `hf://` dataset is, and only by that user:
+
+```python
+rows = await data.history(assets=context.universe, fields=["score"], bar_count=20,
+                          data_source="dataset://my-signals")
+```
+
+#### Added
+
+- **`dataset://<name>`** (`ziplime.data.data_sources.user_datasets`). It reads
+  `s3://<bucket>/users/<user_id>/<name>.parquet` under the point-in-time rules of `hf://`, because it
+  hands a lazy frame to `HuggingFaceDataSource.from_frame`. Those rules are the knowledge-date index,
+  the event-date floor, tickers mapped to sids, and `data.current` by `Resolution`.
+  - **Isolation.** The user and the bucket come only from the run's address context, never from the
+    strategy. The address carries a name and nothing else: `dataset://<uuid>/x`, `dataset://../x`
+    and `dataset://X` are refused. Without a user or a bucket, as in a local run, the scheme refuses
+    instead of returning nothing.
+  - **Reading.** The object is scanned in place with the streaming engine. Only the role columns and
+    the fields the strategy reads are fetched; a later read of another field widens the scan. One
+    `HeadObject` per run gives the size, checked against a limit before any data is read
+    (`ZIPLIME_USER_DATASET_MAX_BYTES` or the context's `user_dataset_max_bytes`, 1 GiB by default),
+    and the ETag.
+  - **Cache.** Mounted frames are kept in memory keyed by `(user_id, name, ETag, window, fields,
+    resolution)`. A re-upload, which brings a new ETag, is read again and the old entry is dropped.
+    The cache is bounded by `ZIPLIME_USER_DATASET_CACHE_MB`, 512 MB by default.
+  - **Errors.** `UserDatasetError` carries one plain line. It never contains a traceback, the bucket
+    or the user: `403 - dataset does not exist: 'x'`, `invalid dataset address '...'`,
+    `dataset:// is only available in hosted backtests`, `dataset 'x' cannot be read: ...`,
+    `dataset 'x' is 1.3 GiB, over the 1.0 GiB limit`.
+- **`run_simulation(..., address_context={...})`** and the same parameter on `run_simulation_iter`.
+  The hosting runtime uses it to give the run what a mount needs to know about it, such as the
+  requesting user. It is set for the duration of the run only, and the algorithm copies it when it
+  is built. A worker that runs one user's job after another's therefore never hands the second user
+  the first user's context. Every scheme mount receives it as keyword arguments, and mounts ignore
+  the ones they do not use, so `hf://` and `algopack://` are unchanged.
+- **`context.user_dataset(name, fields=None, resolution=None)`** is the explicit form of the address.
+  Use it to fix the columns read, or to collapse a restated period with `Resolution.COALESCE`. The
+  default is `LATEST_ROW`.
+
+#### Changed
+
+- `HuggingFaceDataSource._collect_kwargs` lets a subclass choose the polars engine its materialise
+  step collects with. It is empty for `hf://`, which therefore behaves exactly as before.
+
+### Version 2.11.2
+
+Futures chains per exchange, and option bars by the vendor's security id.
+
+One asset database can now hold the same futures root on several exchanges. `NG` is natural gas
+on the Moscow Exchange (100 MMBtu) and on NYMEX (10,000 MMBtu). Before, the second chain was
+skipped on import without a word, and its contracts were filed under the first chain's
+specification.
+
+#### Upgrading from 2.11.0
+
+- **The asset database gains a migration** (`f3a9d6b2c814`). A chain is keyed by `(root_symbol, mic)`
+  and `futures_contracts.root_symbol` is no longer a foreign key. Older ziplime cannot open a
+  database migrated this way.
+- **A bare root on several exchanges is ambiguous.** `front_contract`, `futures_chain` and
+  `continuous_future` raise `AmbiguousRootSymbol` unless the exchange is named: `"NG@XNYM"` or
+  `mic="XNYM"`. `ZIPLIME_FUTURES_DEFAULT_MIC` (a comma-separated list) sets the exchange used when
+  none is named. A root listed on one exchange works as before.
+- **`get_futures_roots()` is keyed by `(root_symbol, mic)`.** It was keyed by root symbol.
+
+#### Added
+
+- **`context.symbol()` finds futures contracts.** `symbol("MMZ6@RTSX")` is the December
+  mini-index future and `symbol("IMOEXF@RTSX")` the perpetual one, with no `asset_type`. An equity
+  is still looked for first, so a ticker that is both keeps meaning the share. Passing
+  `asset_type` restricts the lookup to that kind, as before; its default is now `None`
+  (equity, then futures contract) instead of `AssetType.EQUITY`.
+- **A continuous future is traded as one instrument, and the engine rolls it.**
+  `si = await context.continuous_future("Si")` then `await context.order_target(si, 2, ...)` --
+  every order method and `rebalance` accept the specifier and trade the contract its roll rule
+  names for the bar. When the front changes, the position is moved at the start of that bar,
+  before `handle_data`: the outgoing contract is closed and the same amount opened in the incoming
+  one, as two market orders with the usual commission and slippage.
+  `portfolio.get_asset_positions_amount(si)` (and `get_asset_positions_value`) report the chain's
+  position. A strategy no longer has to remember which contract it holds, compare it with the front
+  and roll by hand; `front_contract` still works for one that wants to.
+- **`continuous_future(..., roll_before_days=7)`**: each specifier rolls on its own offset -- days
+  before the contract's auto close date for the `calendar` rule, the latest roll for `volume` --
+  instead of the data bundle's one setting. `None` keeps the bundle's.
+
+#### Changed
+
+- **`continuous_future` rolls by calendar by default** (`roll="calendar"`, seven days before auto
+  close). It rolled by volume, one day before auto close. Pass `roll="volume"` for the old rule.
+- **Ordering a continuous future no longer raises.** It used to be refused as a data specifier.
+- **A continuous future's sid is a 62-bit digest** (from 2**62 up) of the fields it was spelled
+  from. The spelled-out digits outgrew int64 for any root longer than a few letters -- splicing
+  the history of `IMOEXF@RTSX` died casting the sid -- and the new value never collides with a
+  listing's sid. Sids of continuous futures change; nothing stores them.
+
+#### Fixed
+
+- **A reused contract ticker is two contracts.** The Moscow Exchange writes the year as one digit,
+  so `SiH4` is both the March 2014 and the March 2024 delivery. A contract's identity now includes
+  its expiry. Before, the second contract was dropped on import, and its listing pointed at the
+  first contract.
+- **A continuous future's sid includes its exchange.** `NG@RTSX` and `NG@XNYM` got the same sid,
+  and so did `Si` (Moscow) and `SI` (COMEX).
+- **CBOT and CBOE Futures listings use their own calendars.** XCBT now maps to CMES and XCBF to
+  XCBF. Before, they used the simulation's calendar.
+- **gRPC option chains fetch bars by security id.** `GrpcOptionChainSource.bars` hands the ids
+  `GetOptions` returned to a source that accepts them (`security_ids`, in the private gRPC wheel
+  0.3.0). The candle service mostly does not answer an option by its OCC ticker.
+
 ### Version 2.11.0
 
 Each listing now keeps its own venue's trading hours, so one backtest can hold instruments from
