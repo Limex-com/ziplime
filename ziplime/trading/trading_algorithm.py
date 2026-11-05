@@ -371,6 +371,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.restrictions = NoRestrictions()
         for ds in custom_data_sources:
             data_sources[ds.name] = ds
+        # The run's address context (the requesting user, for dataset://), copied now: it belongs
+        # to this algorithm and goes away with it -- see address_schemes.address_context.
+        from ziplime.data.data_sources import address_schemes
+        self._address_context = address_schemes.current_address_context()
         self.current_data = BarData(
             simulation_dt_func=self.get_datetime,
             trading_calendar=self.clock.trading_calendar,
@@ -1472,9 +1476,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     f"run_simulation(custom_data_sources=[...]), or name a dataset by address: "
                     f"hf://owner/name/config{extensions}. Other schemes come with extensions -- "
                     f"algopack:// with zipfinam.")
-            source = mount(name, asset_service=self.asset_service,
-                           start_date=self.clock.start_session, end_date=self.clock.end_session,
-                           trading_calendar=self.clock.trading_calendar)
+            source = mount(name, **{**getattr(self, "_address_context", {}),
+                                    "asset_service": self.asset_service,
+                                    "start_date": self.clock.start_session,
+                                    "end_date": self.clock.end_session,
+                                    "trading_calendar": self.clock.trading_calendar})
             if inspect.isawaitable(source):
                 source = await source
             return source
@@ -1526,6 +1532,36 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             end_date=end_date or self.clock.end_session,
             fields=fields, name=name,
             trading_calendar=self.clock.trading_calendar)
+        self.current_data.data_sources[source.name] = source
+        return source
+
+    @api_method
+    async def user_dataset(self, name: str, fields: list[str] | None = None,
+                           resolution=None):
+        """Mount one of the requesting user's private datasets: the explicit ``dataset://<name>``.
+
+        The same as ``data.history(..., data_source="dataset://my-signals")``, for an author who
+        wants to pass options -- the columns to read, which keeps a wide file cheap, or how revisions
+        of one period collapse::
+
+            from ziplime.data.data_sources.huggingface.huggingface_data_source import Resolution
+            context.fundamentals = await context.user_dataset(
+                "company-fundamentals", fields=["revenue", "net_income"],
+                resolution=Resolution.COALESCE)
+
+        Only the hosted runtime knows the user; in a local run this raises.
+        """
+        from ziplime.data.data_sources.huggingface.huggingface_data_source import Resolution
+        from ziplime.data.data_sources.user_datasets import SCHEME, mount_user_dataset
+        address = name if str(name).startswith(SCHEME) else f"{SCHEME}{name}"
+        source = mount_user_dataset(
+            address, **{**getattr(self, "_address_context", {}),
+                        "asset_service": self.asset_service,
+                        "start_date": self.clock.start_session,
+                        "end_date": self.clock.end_session,
+                        "trading_calendar": self.clock.trading_calendar,
+                        "fields": fields,
+                        "resolution": resolution or Resolution.LATEST_ROW})
         self.current_data.data_sources[source.name] = source
         return source
 

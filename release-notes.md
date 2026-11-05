@@ -1,5 +1,53 @@
 # Release Notes
 
+### Version 2.11.3
+
+Private user datasets: `dataset://<name>`.
+
+A user's own Parquet file is read the way an `hf://` dataset is, and only by that user:
+
+```python
+rows = await data.history(assets=context.universe, fields=["score"], bar_count=20,
+                          data_source="dataset://my-signals")
+```
+
+#### Added
+
+- **`dataset://<name>`** (`ziplime.data.data_sources.user_datasets`). It reads
+  `s3://<bucket>/users/<user_id>/<name>.parquet` under the point-in-time rules of `hf://`, because it
+  hands a lazy frame to `HuggingFaceDataSource.from_frame`. Those rules are the knowledge-date index,
+  the event-date floor, tickers mapped to sids, and `data.current` by `Resolution`.
+  - **Isolation.** The user and the bucket come only from the run's address context, never from the
+    strategy. The address carries a name and nothing else: `dataset://<uuid>/x`, `dataset://../x`
+    and `dataset://X` are refused. Without a user or a bucket, as in a local run, the scheme refuses
+    instead of returning nothing.
+  - **Reading.** The object is scanned in place with the streaming engine. Only the role columns and
+    the fields the strategy reads are fetched; a later read of another field widens the scan. One
+    `HeadObject` per run gives the size, checked against a limit before any data is read
+    (`ZIPLIME_USER_DATASET_MAX_BYTES` or the context's `user_dataset_max_bytes`, 1 GiB by default),
+    and the ETag.
+  - **Cache.** Mounted frames are kept in memory keyed by `(user_id, name, ETag, window, fields,
+    resolution)`. A re-upload, which brings a new ETag, is read again and the old entry is dropped.
+    The cache is bounded by `ZIPLIME_USER_DATASET_CACHE_MB`, 512 MB by default.
+  - **Errors.** `UserDatasetError` carries one plain line. It never contains a traceback, the bucket
+    or the user: `403 - dataset does not exist: 'x'`, `invalid dataset address '...'`,
+    `dataset:// is only available in hosted backtests`, `dataset 'x' cannot be read: ...`,
+    `dataset 'x' is 1.3 GiB, over the 1.0 GiB limit`.
+- **`run_simulation(..., address_context={...})`** and the same parameter on `run_simulation_iter`.
+  The hosting runtime uses it to give the run what a mount needs to know about it, such as the
+  requesting user. It is set for the duration of the run only, and the algorithm copies it when it
+  is built. A worker that runs one user's job after another's therefore never hands the second user
+  the first user's context. Every scheme mount receives it as keyword arguments, and mounts ignore
+  the ones they do not use, so `hf://` and `algopack://` are unchanged.
+- **`context.user_dataset(name, fields=None, resolution=None)`** is the explicit form of the address.
+  Use it to fix the columns read, or to collapse a restated period with `Resolution.COALESCE`. The
+  default is `LATEST_ROW`.
+
+#### Changed
+
+- `HuggingFaceDataSource._collect_kwargs` lets a subclass choose the polars engine its materialise
+  step collects with. It is empty for `hf://`, which therefore behaves exactly as before.
+
 ### Version 2.11.2
 
 Futures chains per exchange, and option bars by the vendor's security id.
