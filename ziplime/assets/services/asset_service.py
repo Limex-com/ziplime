@@ -113,11 +113,12 @@ class AssetService:
     async def create_continuous_future(self, root_symbol: str, offset: int = 0,
                                        roll_style: str = "volume",
                                        adjustment: str | None = "mul",
-                                       mic: str | None = None) -> ContinuousFuture:
+                                       mic: str | None = None,
+                                       roll_offset_days: int | None = None) -> ContinuousFuture:
         """Build a continuous future specifier over a stored chain."""
         return await self._asset_repository.create_continuous_future(
             root_symbol=root_symbol, offset=offset, roll_style=roll_style, adjustment=adjustment,
-            mic=mic)
+            mic=mic, roll_offset_days=roll_offset_days)
 
     async def save_commodities(self, commodities: list[Commodity]) -> list[Commodity]:
         # The `return` was missing, so this alone among the save_* methods declared a list and

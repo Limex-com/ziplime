@@ -144,14 +144,17 @@ class StubAssetService:
     async def create_continuous_future(self, root_symbol: str, offset: int = 0,
                                        roll_style: str = "volume",
                                        adjustment: str | None = "mul",
-                                       mic: str | None = None) -> ContinuousFuture:
+                                       mic: str | None = None,
+                                       roll_offset_days: int | None = None) -> ContinuousFuture:
         ordered = await self.get_ordered_contracts(root_symbol, mic)
         return ContinuousFuture(
             sid=_encode_continuous_future_sid(
                 root_symbol=root_symbol, offset=offset, roll_style=roll_style,
-                adjustment_style={"mul": "div"}.get(adjustment, adjustment)),
+                adjustment_style={"mul": "div"}.get(adjustment, adjustment),
+                roll_offset_days=roll_offset_days),
             root_symbol=root_symbol, offset=offset, roll_style=roll_style, adjustment=adjustment,
-            start_date=ordered.start_date, end_date=ordered.end_date, exchange_info=EXCHANGE)
+            start_date=ordered.start_date, end_date=ordered.end_date, exchange_info=EXCHANGE,
+            roll_offset_days=roll_offset_days)
 
 
 def make_bundle(bars: dict[ExchangeAsset, list[tuple[datetime.date, float, float]]],

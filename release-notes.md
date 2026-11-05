@@ -20,6 +20,36 @@ specification.
   none is named. A root listed on one exchange works as before.
 - **`get_futures_roots()` is keyed by `(root_symbol, mic)`.** It was keyed by root symbol.
 
+#### Added
+
+- **`context.symbol()` finds futures contracts.** `symbol("MMZ6@RTSX")` is the December
+  mini-index future and `symbol("IMOEXF@RTSX")` the perpetual one, with no `asset_type`. An equity
+  is still looked for first, so a ticker that is both keeps meaning the share. Passing
+  `asset_type` restricts the lookup to that kind, as before; its default is now `None`
+  (equity, then futures contract) instead of `AssetType.EQUITY`.
+- **A continuous future is traded as one instrument, and the engine rolls it.**
+  `si = await context.continuous_future("Si")` then `await context.order_target(si, 2, ...)` --
+  every order method and `rebalance` accept the specifier and trade the contract its roll rule
+  names for the bar. When the front changes, the position is moved at the start of that bar,
+  before `handle_data`: the outgoing contract is closed and the same amount opened in the incoming
+  one, as two market orders with the usual commission and slippage.
+  `portfolio.get_asset_positions_amount(si)` (and `get_asset_positions_value`) report the chain's
+  position. A strategy no longer has to remember which contract it holds, compare it with the front
+  and roll by hand; `front_contract` still works for one that wants to.
+- **`continuous_future(..., roll_before_days=7)`**: each specifier rolls on its own offset -- days
+  before the contract's auto close date for the `calendar` rule, the latest roll for `volume` --
+  instead of the data bundle's one setting. `None` keeps the bundle's.
+
+#### Changed
+
+- **`continuous_future` rolls by calendar by default** (`roll="calendar"`, seven days before auto
+  close). It rolled by volume, one day before auto close. Pass `roll="volume"` for the old rule.
+- **Ordering a continuous future no longer raises.** It used to be refused as a data specifier.
+- **A continuous future's sid is a 62-bit digest** (from 2**62 up) of the fields it was spelled
+  from. The spelled-out digits outgrew int64 for any root longer than a few letters -- splicing
+  the history of `IMOEXF@RTSX` died casting the sid -- and the new value never collides with a
+  listing's sid. Sids of continuous futures change; nothing stores them.
+
 #### Fixed
 
 - **A reused contract ticker is two contracts.** The Moscow Exchange writes the year as one digit,

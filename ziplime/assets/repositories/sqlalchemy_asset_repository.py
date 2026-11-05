@@ -1797,7 +1797,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         return ordered_contracts
 
     async def create_continuous_future(self, root_symbol: str, offset: int, roll_style: str,
-                                       adjustment: str | None, mic: str | None = None) -> ContinuousFuture:
+                                       adjustment: str | None, mic: str | None = None, roll_offset_days: int | None = None) -> ContinuousFuture:
         """Build a :class:`ContinuousFuture` specifier for a stored chain.
 
         ``root_symbol`` may name its exchange (``NG@XNYM``), as ``mic`` does; see
@@ -1835,7 +1835,8 @@ class SqlAlchemyAssetRepository(AssetRepository):
             sid=_encode_continuous_future_sid(root_symbol=root_symbol, offset=offset,
                                               roll_style=roll_style,
                                               adjustment_style=adjustment_style_id,
-                                              mic=exchange_info.mic),
+                                              mic=exchange_info.mic,
+                                              roll_offset_days=roll_offset_days),
             root_symbol=root_symbol,
             offset=offset,
             roll_style=roll_style,
@@ -1843,6 +1844,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
             start_date=ordered_contracts.start_date,
             end_date=ordered_contracts.end_date,
             exchange_info=exchange_info,
+            roll_offset_days=roll_offset_days,
         )
 
     @aiocache.cached(cache=Cache.MEMORY)

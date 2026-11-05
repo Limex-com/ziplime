@@ -1,3 +1,4 @@
+import hashlib
 import re
 from collections import namedtuple
 
@@ -234,7 +235,8 @@ CONTINUOUS_FUTURE_ADJUSTMENT_STYLE_IDS = {
 }
 
 
-def _encode_continuous_future_sid(root_symbol, offset, roll_style, adjustment_style, mic=None):
+def _encode_continuous_future_sid(root_symbol, offset, roll_style, adjustment_style, mic=None,
+                                  roll_offset_days=None):
     # Generate a unique int identifier. The exchange is part of it: NG on the Moscow Exchange and
     # NG on NYMEX are two chains, and so are Si (Moscow) and SI (COMEX), which upper() made one.
     values = (
@@ -244,8 +246,16 @@ def _encode_continuous_future_sid(root_symbol, offset, roll_style, adjustment_st
         *([ord(x) for x in mic] if mic else []),
         CONTINUOUS_FUTURE_ROLL_STYLE_IDS[roll_style],
         CONTINUOUS_FUTURE_ADJUSTMENT_STYLE_IDS[adjustment_style],
+        # Two specifiers rolling on different days hold different contracts near expiry, so
+        # their series differ. Absent when the bundle's default applies, keeping older sids.
+        *([] if roll_offset_days is None else [9, roll_offset_days]),
     )
-    return int("".join([str(x) for x in values]))
+    # The digits used to be the sid itself, which outgrew int64 for any root longer than a few
+    # letters -- IMOEXF@RTSX is 27 digits, and splicing its history died casting the sid to
+    # Int64. A 62-bit digest of the same digits is as deterministic, always fits, and sits far
+    # above any listing's sid (2**62 and up), so a specifier can never be mistaken for one.
+    digest = hashlib.blake2b("".join(str(x) for x in values).encode(), digest_size=8).digest()
+    return (1 << 62) | (int.from_bytes(digest, "big") & ((1 << 62) - 1))
 
 
 Lifetimes = namedtuple("Lifetimes", "sid start end")
