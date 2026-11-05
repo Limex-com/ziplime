@@ -102,6 +102,24 @@ class CommandLineHelperTests(unittest.TestCase):
         self.assertEqual(args, ["sweep.json", "--backend", "cpu"])
         self.assertEqual(resolve(["doctor"])[0], "doctor")
 
+    def test_suggested_backend_prefers_cupy_over_mlx_without_metal(self):
+        """On NVIDIA with mlx[cuda] and CuPy both installed, MLX cannot run the entries/exits
+        kernel, so the suggestion is CuPy; on Apple silicon it stays MLX."""
+        from unittest import mock
+
+        from ziplime.vectorized.kernel import _mlx
+
+        def installed(*names):
+            return lambda name: object() if name in names else None
+
+        cases = [(True, ("mlx", "cupy"), "mlx"), (False, ("mlx", "cupy"), "cupy"),
+                 (False, ("mlx",), "mlx"), (False, ("dpnp",), "dpnp"), (False, (), "cpu")]
+        for metal, names, expected in cases:
+            with self.subTest(metal=metal, installed=names), \
+                    mock.patch.object(_mlx, "_has_metal", return_value=metal), \
+                    mock.patch.object(tools.importlib.util, "find_spec", installed(*names)):
+                self.assertEqual(tools.default_backend(), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

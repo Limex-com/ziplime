@@ -127,11 +127,21 @@ def template(algorithm_file: Path, output: Path, *, bundle: str | None, start: d
 
 
 def default_backend() -> str:
-    """The fastest backend this machine has."""
-    if importlib.util.find_spec("mlx") is not None:
-        return "mlx"
+    """The fastest backend this machine has.
+
+    MLX first on Apple silicon. On NVIDIA, CuPy comes before MLX on CUDA: it runs every strategy,
+    while MLX without Metal cannot run the entries/exits kernel and compiles each strategy on
+    its first run.
+    """
+    has_mlx = importlib.util.find_spec("mlx") is not None
+    if has_mlx:
+        from ziplime.vectorized.kernel import _mlx
+        if _mlx._has_metal():
+            return "mlx"
     if importlib.util.find_spec("cupy") is not None:
         return "cupy"
+    if has_mlx:
+        return "mlx"
     if importlib.util.find_spec("dpnp") is not None:
         return "dpnp"
     return "cpu"

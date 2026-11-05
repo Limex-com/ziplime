@@ -16,7 +16,7 @@ A sweep reaches the GPU in one of two ways, depending on the strategy:
 | GPU | `handle_data` strategies | entries/exits strategies | Checked on |
 |---|---|---|---|
 | Apple silicon | `mlx` | `mlx`, `opencl` | Apple M3 |
-| NVIDIA | `cupy`, `mlx` (`mlx[cuda]`, Linux) | `cupy`, `opencl` | RTX 5090 (Blackwell, sm_120), RTX 3090 (Ampere, sm_86); earlier RTX 4090 (Ada) |
+| NVIDIA | `cupy`, `mlx` (`mlx[cuda]`, Linux) | `cupy`, `opencl` | RTX 5090 (Blackwell, sm_120: a cloud pod and a developer's desktop), RTX 3090 (Ampere, sm_86); earlier RTX 4090 (Ada) |
 | AMD | `cupy` (CuPy built for ROCm, Linux) | `cupy`, `opencl` | Instinct MI300X (CDNA3, gfx942) |
 | Intel Arc | `dpnp` | `opencl` (also under `dpnp`) | not yet on an Arc GPU (see below) |
 | no GPU | `cpu`, `exact` | `exact` | every machine |
@@ -98,14 +98,18 @@ sessions, all in one kernel launch:
 | Machine | Backend | 2,508 combinations | Fills against the float64 kernel |
 |---|---|---:|---|
 | MI300X | `cupy` (ROCm) | **0.08 s** | identical |
+| RTX 5090, desktop | `cupy` | **0.08 s** | identical |
 | Apple M3 | `mlx` | 0.13 s | identical |
-| RTX 5090 | `cupy` | 0.14 s | identical |
+| RTX 5090, cloud pod | `cupy` | 0.14 s | identical |
+| RTX 5090, desktop | `opencl` | 0.20 s | identical |
 | Apple M3 | `opencl` | 0.36 s | identical |
 | RTX 3090 | `cupy` | 0.39 s | identical |
 | any CPU core | `exact` | about 52 s | (the reference) |
 
 Here each combination is a GPU thread looping over every bar, so the work grows with the GPU and
-not with the number of operations. The MI300X, the largest GPU here, was the fastest.
+not with the number of operations. The MI300X, the largest GPU here, was the fastest, tied with an
+RTX 5090 in a developer's desktop (32 cores, Python 3.13), which was 275 times faster than one CPU
+core. The same card in a cloud pod took 0.14 s: at this size the host CPU and driver still count.
 
 ## Not checked yet
 
@@ -115,7 +119,6 @@ not with the number of operations. The MI300X, the largest GPU here, was the fas
 * **AMD Radeon.** Only the MI300X was checked. ROCm supports some Radeon models, and on those CuPy
   is expected to work the same way.
 * **Volta (V100) and Turing GPUs.** None were available at the time.
-* **The `opencl` backend on NVIDIA.** It ran on Apple and on the MI300X.
 
 ## Running the same check
 
