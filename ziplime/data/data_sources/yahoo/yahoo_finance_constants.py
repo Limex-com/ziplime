@@ -1,4 +1,6 @@
 YAHOO_EXCHANGE_MAP = {
+    # Yahoo's currency venue identifier (FX pairs have no exchange MIC).
+    "CCY": {"name": "Currency", "mic": "CCY", "country_code": "US"},
     # United States
     "NYQ": {"name": "New York Stock Exchange", "mic": "XNYS", "country_code": "US"},
     "NMS": {"name": "NASDAQ Global Market", "mic": "XNMS", "country_code": "US"},

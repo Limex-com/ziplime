@@ -276,7 +276,7 @@ class NoPriceForAnOpenPositionTests(unittest.TestCase):
             first_traded=far_past, auto_close_date=far_future, external_id="", exchange=exchange,
             asset=Equity(id=11, isin=None, asset_name="DSKY", start_date=far_past,
                          end_date=far_future, first_traded=far_past, auto_close_date=far_future),
-            quote=Currency(id=2, isin=None, asset_name="RUB", start_date=far_past,
+            quote=Currency(id=2, isin=None, asset_name="EUR", start_date=far_past,
                            end_date=far_future, first_traded=far_past,
                            auto_close_date=far_future))
         self.dt = datetime.datetime(2022, 2, 28, tzinfo=datetime.timezone.utc)

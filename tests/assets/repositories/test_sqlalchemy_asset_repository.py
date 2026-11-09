@@ -201,6 +201,7 @@ class SqlAlchemyAssetRepositoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_dividends_and_splits_round_trip_and_preload(self):
         [equity] = await self.repository.save_equities([make_equity()])
+        [currency] = await self.repository.save_currencies([make_currency("EUR")])
         dividend = DividendPayout(
             asset=equity,
             amount=1.25,
@@ -208,15 +209,15 @@ class SqlAlchemyAssetRepositoryTests(unittest.IsolatedAsyncioTestCase):
             declared_date=dt.date(2023, 12, 1),
             record_date=dt.date(2024, 1, 5),
             ex_date=dt.date(2024, 1, 8),
-            currency=None,
+            currency=currency,
         )
         split = Split(asset=equity, effective_date=dt.date(2024, 1, 9), ratio=2.0)
-        await self.repository.save_dividends([dividend])
+        self.assertEqual(await self.repository.save_dividends([dividend]), [dividend])
         await self.repository.save_splits([split])
 
         self.assertEqual(
-            len(await self.repository.get_cash_dividends_with_ex_date([equity], dt.date(2024, 1, 8))),
-            1,
+            await self.repository.get_cash_dividends_with_ex_date([equity], dt.date(2024, 1, 8)),
+            [dividend],
         )
         self.assertEqual(
             len(await self.repository.get_splits([equity], dt.date(2024, 1, 9))),
@@ -225,17 +226,21 @@ class SqlAlchemyAssetRepositoryTests(unittest.IsolatedAsyncioTestCase):
         await self.repository.preload_corporate_actions(
             [equity], dt.date(2024, 1, 1), dt.date(2024, 1, 31))
         self.assertEqual(
-            len(await self.repository.get_all_dividends([equity])),
-            1,
+            await self.repository.get_cash_dividends_with_ex_date([equity], dt.date(2024, 1, 8)),
+            [dividend],
+        )
+        self.assertEqual(
+            await self.repository.get_all_dividends([equity]),
+            [dividend],
         )
         self.assertEqual(
             len(await self.repository.get_all_splits([equity])),
             1,
         )
         self.assertEqual(
-            len(await self.repository.get_dividends_by_assets_and_ex_date_between(
-                [equity], dt.date(2024, 1, 1), dt.date(2024, 1, 31))),
-            1,
+            await self.repository.get_dividends_by_assets_and_ex_date_between(
+                [equity], dt.date(2024, 1, 1), dt.date(2024, 1, 31)),
+            [dividend],
         )
         self.assertEqual(
             len(await self.repository.get_splits_by_assets_and_effective_date_between(

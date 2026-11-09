@@ -36,32 +36,67 @@ class YahooFinanceAssetDataSource(AssetDataSource):
             self._maximum_threads = multiprocessing.cpu_count() * 2
 
     async def get_assets(self, exchanges: list[ExchangeInfo], **kwargs) -> AssetsImport:
+        """Discover stocks and FX listings; ``currency_symbols`` defaults to EURUSD=X."""
         exchanges_by_code = {exchange.mic: exchange for exchange in exchanges}
-        lookup_letters = list(string.ascii_lowercase)
-        result_df = None
-        for letter in lookup_letters:
+        asset_start_date = datetime.datetime(year=1900, month=1, day=1, tzinfo=datetime.timezone.utc)
+        asset_end_date = datetime.datetime(year=2099, month=1, day=1, tzinfo=datetime.timezone.utc)
+        currency_by_name: dict[str, Currency] = {}
+
+        def get_currency(code: str) -> Currency:
+            if code not in currency_by_name:
+                currency_by_name[code] = Currency(
+                    asset_name=code, id=None, start_date=asset_start_date, end_date=asset_end_date,
+                    auto_close_date=asset_end_date, first_traded=asset_start_date, isin=None)
+            return currency_by_name[code]
+
+        currency_symbols = kwargs.get("currency_symbols", ["EURUSD=X", "USDEUR=X"])
+        currency_listings: dict[tuple[str, str], ExchangeAsset] = {}
+        for currency_symbol in currency_symbols:
+            try:
+                currencies_res = yf.Lookup(currency_symbol.upper()).get_currency(count=1000)
+            except YFException:
+                continue
+            for symbol, row in currencies_res.iterrows():
+                # Yahoo uses BASEQUOTE=X, or QUOTE=X with an implicit USD base.
+                pair = symbol.removesuffix("=X")
+                if not symbol.endswith("=X") or len(pair) not in (3, 6) or not pair.isalpha():
+                    self._logger.warning("Skipping unrecognised Yahoo currency pair", symbol=symbol)
+                    continue
+                base, quote = (pair[:3], pair[3:]) if len(pair) == 6 else ("USD", pair)
+                exchange_code = row.get("exchange") or "CCY"
+                mic = YAHOO_EXCHANGE_MAP.get(exchange_code, {"mic": exchange_code})["mic"]
+                currency_listings[(symbol, mic)] = ExchangeAsset(
+                    sid=None, symbol=symbol,
+                    exchange=exchanges_by_code.get(mic, ExchangeInfo(
+                        mic=mic, name=mic, canonical_name=mic, country_code="US")),
+                    start_date=asset_start_date, end_date=asset_end_date,
+                    auto_close_date=asset_end_date, first_traded=asset_start_date,
+                    asset=get_currency(base), quote=get_currency(quote), external_id="")
+
+        result_df = pl.DataFrame(schema={
+            "symbol": pl.String, "exchange": pl.String, "mic": pl.String, "currency": pl.String})
+        for letter in string.ascii_lowercase:
             try:
                 res = yf.Lookup(letter.upper()).get_stock(count=1000)
             except YFException:
                 time.sleep(20)
                 res = yf.Lookup(letter.upper()).get_stock(count=1000)
 
-            yahoo_df = pl.from_pandas(res, include_index=True).select("symbol", "exchange").with_columns(
+            if res.empty:
+                continue
+            yahoo_df = pl.from_pandas(res, include_index=True)
+            # Lookup responses may omit the quote currency; retain the existing USD fallback.
+            if "currency" not in yahoo_df.columns:
+                yahoo_df = yahoo_df.with_columns(pl.lit("USD").alias("currency"))
+            yahoo_df = yahoo_df.select("symbol", "exchange", "currency").with_columns(
+                pl.col("currency").fill_null("USD"),
                 pl.col("exchange").replace({k: v["mic"] for k, v in YAHOO_EXCHANGE_MAP.items()}).alias("mic")
             )
-            if result_df is None:
-                result_df = yahoo_df
-            else:
-                result_df.extend(yahoo_df)
+            result_df.extend(yahoo_df.select(result_df.columns))
             self._logger.info(f"Fetched {len(result_df)} from YahooFinance with lookup for {letter.upper()}")
             print(f"Fetched {len(result_df)} from YahooFinance with lookup for {letter.upper()}")
             time.sleep(1)
         assets_df = result_df.unique()
-
-        asset_start_date = datetime.datetime(year=1900, month=1, day=1, tzinfo=datetime.timezone.utc)
-        asset_end_date = datetime.datetime(year=2099, month=1, day=1, tzinfo=datetime.timezone.utc)
-
-        assets_df = assets_df.with_columns(pl.lit('USD').alias('currency'))
 
         equities = [
             Equity(
@@ -75,19 +110,10 @@ class YahooFinanceAssetDataSource(AssetDataSource):
             ) for asset in assets_df.iter_rows(named=True)
         ]
 
-        currencies = [Currency(
-            asset_name=currency,
-            id=None,
-            start_date=asset_start_date,
-            end_date=asset_end_date,
-            auto_close_date=asset_end_date,
-            first_traded=asset_start_date,
-            isin=None
-        ) for currency in assets_df["currency"].unique()]
-
-        currency_by_name = {
-            c.asset_name: c for c in currencies
-        }
+        # Fetched pairs establish the currencies first; stock quotes extend that set.
+        for code in assets_df["currency"].unique(maintain_order=True):
+            get_currency(code)
+        currencies = list(currency_by_name.values())
 
         exchange_assets = [
             ExchangeAsset(
@@ -106,6 +132,7 @@ class YahooFinanceAssetDataSource(AssetDataSource):
             )
             for asset, asset_df in zip(equities, assets_df.iter_rows(named=True))
         ]
+        exchange_assets.extend(currency_listings.values())
 
         return AssetsImport(
             currencies=currencies, equities=equities, exchange_assets=exchange_assets

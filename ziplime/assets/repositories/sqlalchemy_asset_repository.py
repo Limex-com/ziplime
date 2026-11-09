@@ -288,7 +288,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
         """Persist currencies, skipping ones already stored under the same name.
 
         Ingesting a second market re-declares its quote currency, so this has to be idempotent or
-        repeated ingests accumulate duplicate USD/RUB rows that then make quote lookups ambiguous.
+        repeated ingests accumulate duplicate USD/EUR rows that then make quote lookups ambiguous.
         """
         currencies = currencies or []
         async with self.session_maker() as session:
@@ -1073,10 +1073,12 @@ class SqlAlchemyAssetRepository(AssetRepository):
             declared_date=d.declared_date,
             record_date=d.record_date,
             pay_date=d.pay_date,
-            amount=d.amount
+            amount=d.amount,
+            currency_id=d.currency.id,
         ) for d in dividends]
 
         await self.add_all_and_commit(dividends_db)
+        return dividends
 
     async def save_splits(self, splits: list[Split]) -> list[Split]:
         splits_db = [SplitModel(
@@ -1443,8 +1445,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 declared_date=d.declared_date,
                 record_date=d.record_date,
                 ex_date=d.ex_date,
-                currency=None
-                # currency
+                currency=all_assets[d.currency_id],
             )
             for d in dividends_r]
 
@@ -1582,7 +1583,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 declared_date=d.declared_date,
                 record_date=d.record_date,
                 ex_date=d.ex_date,
-                currency=None
+                currency=all_assets[d.currency_id],
             )
             for d in dividends_r]
 
@@ -1630,7 +1631,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
                 declared_date=d.declared_date,
                 record_date=d.record_date,
                 ex_date=d.ex_date,
-                currency=None
+                currency=all_assets[d.currency_id],
             )
             for d in dividends_r]
 

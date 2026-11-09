@@ -58,6 +58,18 @@ class SimulationExchangeTests(unittest.IsolatedAsyncioTestCase):
         await exchange.cancel_order(order.id)
         self.assertTrue(order.open)
 
+    async def test_submit_orders_returns_the_batch_in_order(self):
+        exchange = make_exchange()
+        first = await exchange.order(Mock(symbol="FIRST", mic="SIM"), 3, MarketOrder())
+        second = await exchange.order(Mock(symbol="SECOND", mic="SIM"), -2, MarketOrder())
+
+        returned = await exchange.submit_orders([first, second])
+
+        self.assertEqual(returned, [first, second])
+        self.assertNotEqual(first.id, second.id)
+        self.assertEqual([order.amount for order in returned], [3, -2])
+        self.assertTrue(all(order.open and order.filled == 0 for order in returned))
+
     async def test_get_data_by_period_forwards_date_bounds_to_sync_source(self):
         exchange = make_exchange()
         start = datetime.datetime(2024, 1, 2, tzinfo=datetime.UTC)
