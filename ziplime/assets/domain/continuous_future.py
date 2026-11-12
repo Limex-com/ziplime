@@ -28,6 +28,9 @@ class ContinuousFuture:
         start_date: First date the chain has data for.
         end_date: Last date the chain has data for.
         exchange_info: Exchange the chain trades on.
+        roll_offset_days: Days before the contract's auto close to move to the next one -- the
+            calendar style's offset, and the volume style's latest roll. ``None`` takes the
+            data bundle's default.
     """
 
     sid: int
@@ -38,6 +41,7 @@ class ContinuousFuture:
     end_date: datetime.date
     exchange_info: ExchangeInfo
     adjustment: str | None = None
+    roll_offset_days: int | None = None
 
     @property
     def exchange(self) -> str:
@@ -51,6 +55,11 @@ class ContinuousFuture:
     def mic(self) -> str:
         return self.exchange_info.mic
 
+    @property
+    def chain(self) -> str:
+        """The chain as ``ROOT@MIC``: a root alone may name chains on several exchanges."""
+        return f"{self.root_symbol}@{self.mic}"
+
     def __int__(self) -> int:
         return self.sid
 
@@ -62,7 +71,8 @@ class ContinuousFuture:
 
     def __str__(self) -> str:
         return (f"ContinuousFuture({self.root_symbol}, offset={self.offset}, "
-                f"roll={self.roll_style}, adjustment={self.adjustment})")
+                f"roll={self.roll_style}, adjustment={self.adjustment}, "
+                f"roll_offset_days={self.roll_offset_days})")
 
     def is_alive_for_session(self, session_label: datetime.date) -> bool:
         """Whether the chain has data for the given session."""

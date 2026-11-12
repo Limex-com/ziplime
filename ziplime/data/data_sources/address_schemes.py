@@ -24,9 +24,16 @@ A mount is called as ``mount(address, *, asset_service, start_date, end_date, tr
 needs to map its rows onto listings and onto the simulation clock -- and returns the source, or an
 awaitable of it. It should accept and ignore keyword arguments it does not use, so that ziplime
 can pass more in later without breaking it.
+
+Every mount also receives the run's *address context* as keyword arguments: whatever the hosting
+runtime passed as ``run_simulation(address_context={...})`` -- the requesting user, for one, which
+``dataset://`` (private user datasets, served by ziplime itself) needs. See
+:func:`address_context`.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import structlog
@@ -93,6 +100,14 @@ def _load_extensions() -> None:
                             entry_point=entry_point.name, error=str(error))
 
 
+def _builtin_mount(scheme: str) -> Mount | None:
+    """Schemes ziplime serves itself, imported only when a strategy names one."""
+    if scheme == "dataset":
+        from ziplime.data.data_sources.user_datasets import mount_user_dataset
+        return mount_user_dataset
+    return None
+
+
 def mount_for(address: str) -> Mount | None:
     """The mount registered for ``address``'s scheme, or ``None``."""
     scheme = scheme_of(address)
@@ -100,7 +115,32 @@ def mount_for(address: str) -> Mount | None:
         return None
     if scheme not in _mounts:
         _load_extensions()
-    return _mounts.get(scheme)
+    return _mounts.get(scheme) or _builtin_mount(scheme)
+
+
+# ---------------------------------------------------------------------------- the run's context
+
+#: What the hosting runtime knows about *this* run and a mount may need -- the requesting user for
+#: ``dataset://``, for one. Set by ``run_simulation(address_context=...)`` for the duration of the
+#: run and copied into the algorithm when it is built, so it travels with the run and never through
+#: a process-wide registration: a worker that runs one user's job after another's cannot hand the
+#: second the first's context.
+_run_context: ContextVar[Mapping[str, Any] | None] = ContextVar("ziplime_address_context", default=None)
+
+
+def current_address_context() -> dict[str, Any]:
+    """The address context of the run being built, or an empty one."""
+    return dict(_run_context.get() or {})
+
+
+@contextmanager
+def address_context(values: Mapping[str, Any] | None):
+    """Make ``values`` the address context while the block runs; restore the previous one after."""
+    token = _run_context.set(dict(values) if values else None)
+    try:
+        yield
+    finally:
+        _run_context.reset(token)
 
 
 def registered_schemes() -> list[str]:

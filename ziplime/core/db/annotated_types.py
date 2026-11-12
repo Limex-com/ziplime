@@ -32,6 +32,7 @@ IntegerDefaultZero = Annotated[int, mapped_column(default=0, server_default="0")
 IntegerIndexed = Annotated[int, mapped_column(index=True)]
 
 ExchangeFK = Annotated[str, mapped_column(ForeignKey("exchanges.mic"), index=True)]
+ExchangeFKPK = Annotated[str, mapped_column(ForeignKey("exchanges.mic"), primary_key=True, index=True)]
 EquityFK = Annotated[int, mapped_column(ForeignKey("equities.id"), index=True)]
 AssetFK = Annotated[int, mapped_column(ForeignKey("assets.id"), index=True)]
 AssetRouterFK = Annotated[int, mapped_column(ForeignKey("asset_router.id"), index=True)]
@@ -41,5 +42,3 @@ ExchangeAssetFK = Annotated[str, mapped_column(ForeignKey("exchange_assets.sid")
 AssetRouterFKPK = Annotated[int, mapped_column(ForeignKey("asset_router.id"), primary_key=True)]
 SymbolsUniverseFKPK = Annotated[str, mapped_column(ForeignKey("symbols_universe.name"), primary_key=True)]
 SymbolUniverseAssetStartDatePK = Annotated[datetime.date, mapped_column(primary_key=True)]
-
-FuturesRootSymbolFK = Annotated[str, mapped_column(ForeignKey("futures_root_symbols.root_symbol"), index=True)]

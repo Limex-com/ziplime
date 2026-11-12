@@ -1,6 +1,8 @@
 import datetime
 import structlog
 
+from ziplime.data.data_sources import address_schemes
+
 from ziplime.finance.slippage.equity_slippage_model import EquitySlippageModel
 from ziplime.finance.slippage.future_slippage_model import FutureSlippageModel
 from ziplime.gens.domain.trading_clock import TradingClock
@@ -72,6 +74,7 @@ async def run_simulation(
         currency_conversion: CurrencyConversionService | None = None,
         currency_slippage: SlippageModel | None = None,
         currency_commission: CommissionModel | None = None,
+        address_context: dict | None = None,
 ) -> TradingAlgorithmExecutionResult:
     """
     Run a trading algorithm simulation within a defined time period and trading environment.
@@ -190,28 +193,31 @@ async def run_simulation(
 
     exchange_repository = InMemoryExchangeRepository()
     await exchange_repository.add_exchange(exchange)
-    return await run_algorithm(
-        algorithm=algo,
-        asset_service=asset_service,
-        print_algo=print_algo,
-        metrics_set=default_metrics(),
-        custom_loader=None,
-        clock=clock,
-        benchmark_returns=benchmark_returns,
-        benchmark_asset_symbol=benchmark_asset_symbol,
-        stop_on_error=stop_on_error,
-        custom_data_sources=custom_data_sources,
-        max_leverage=max_leverage,
-        same_bar_execution=same_bar_execution,
-        futures_margin_model=futures_margin_model,
-        price_used_in_order_execution=price_used_in_order_execution,
-        exchange_repository=exchange_repository,
-        intraday_metrics=intraday_metrics,
-        currency_reporting=currency_reporting,
-        currency_conversion=currency_conversion,
-        currency_slippage=currency_slippage,
-        currency_commission=currency_commission,
-    )
+    # What the hosting runtime knows about this run (the requesting user, for dataset://), for
+    # the duration of the run only; the algorithm copies it when it is built.
+    with address_schemes.address_context(address_context):
+        return await run_algorithm(
+            algorithm=algo,
+            asset_service=asset_service,
+            print_algo=print_algo,
+            metrics_set=default_metrics(),
+            custom_loader=None,
+            clock=clock,
+            benchmark_returns=benchmark_returns,
+            benchmark_asset_symbol=benchmark_asset_symbol,
+            stop_on_error=stop_on_error,
+            custom_data_sources=custom_data_sources,
+            max_leverage=max_leverage,
+            same_bar_execution=same_bar_execution,
+            futures_margin_model=futures_margin_model,
+            price_used_in_order_execution=price_used_in_order_execution,
+            exchange_repository=exchange_repository,
+            intraday_metrics=intraday_metrics,
+            currency_reporting=currency_reporting,
+            currency_conversion=currency_conversion,
+            currency_slippage=currency_slippage,
+            currency_commission=currency_commission,
+        )
 
 
 async def run_simulation_iter(
@@ -249,6 +255,7 @@ async def run_simulation_iter(
         currency_conversion: CurrencyConversionService | None = None,
         currency_slippage: SlippageModel | None = None,
         currency_commission: CommissionModel | None = None,
+        address_context: dict | None = None,
 ) -> AsyncIterator[TradingAlgorithmExecutionStatus]:
     """
     Run a trading algorithm simulation within a defined time period and trading environment.
@@ -367,26 +374,27 @@ async def run_simulation_iter(
     exchange_repository = InMemoryExchangeRepository()
     await exchange_repository.add_exchange(exchange)
 
-    async for status in run_algorithm_iter(
-            algorithm=algo,
-            asset_service=asset_service,
-            print_algo=print_algo,
-            metrics_set=default_metrics(),
-            custom_loader=None,
-            clock=clock,
-            benchmark_returns=benchmark_returns,
-            benchmark_asset_symbol=benchmark_asset_symbol,
-            stop_on_error=stop_on_error,
-            custom_data_sources=custom_data_sources,
-            max_leverage=max_leverage,
-            same_bar_execution=same_bar_execution,
-            futures_margin_model=futures_margin_model,
-            price_used_in_order_execution=price_used_in_order_execution,
-            exchange_repository=exchange_repository,
-            intraday_metrics=intraday_metrics,
-            currency_reporting=currency_reporting,
-            currency_conversion=currency_conversion,
-            currency_slippage=currency_slippage,
-            currency_commission=currency_commission,
-    ):
-        yield status
+    with address_schemes.address_context(address_context):
+        async for status in run_algorithm_iter(
+                algorithm=algo,
+                asset_service=asset_service,
+                print_algo=print_algo,
+                metrics_set=default_metrics(),
+                custom_loader=None,
+                clock=clock,
+                benchmark_returns=benchmark_returns,
+                benchmark_asset_symbol=benchmark_asset_symbol,
+                stop_on_error=stop_on_error,
+                custom_data_sources=custom_data_sources,
+                max_leverage=max_leverage,
+                same_bar_execution=same_bar_execution,
+                futures_margin_model=futures_margin_model,
+                price_used_in_order_execution=price_used_in_order_execution,
+                exchange_repository=exchange_repository,
+                intraday_metrics=intraday_metrics,
+                currency_reporting=currency_reporting,
+                currency_conversion=currency_conversion,
+                currency_slippage=currency_slippage,
+                currency_commission=currency_commission,
+        ):
+            yield status

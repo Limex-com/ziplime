@@ -346,6 +346,15 @@ Root symbol '{root_symbol}' was not found.
 """.strip()
 
 
+class AmbiguousRootSymbol(ZiplineError):
+    """Raised when a futures root trades on more than one exchange and none was named."""
+
+    msg = """
+Root symbol '{root_symbol}' is a futures chain on {mics}. Name the exchange: pass mic='{first}' or
+write '{root_symbol}@{first}'. ZIPLIME_FUTURES_DEFAULT_MIC sets the exchange to use when none is named.
+""".strip()
+
+
 class ValueNotFoundForField(ZiplineError):
     """Raised when a lookup_by_supplementary_mapping() call contains a
     value does not exist for the specified mapping type.

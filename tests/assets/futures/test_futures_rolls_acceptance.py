@@ -26,17 +26,19 @@ def build_chain(expirations, root="CL", multiplier=1000.0):
 class ContinuousFutureIsNotTradableTests(unittest.IsolatedAsyncioTestCase):
     """#1: a continuous future is a data specifier, not an instrument."""
 
-    async def test_ordering_a_continuous_future_is_rejected(self):
+    async def test_the_contract_guard_still_refuses_a_specifier(self):
+        """`order` itself never receives a specifier: the order methods resolve it first
+        (test_continuous_future_trading). The guard behind them stays, for any path that does not."""
         from ziplime.trading.trading_algorithm import TradingAlgorithm
         cf = ContinuousFuture(sid=1, root_symbol="CL", offset=0, roll_style="volume",
                               start_date=SESSIONS[0], end_date=SESSIONS[-1],
                               exchange_info=make_future(1).exchange, adjustment="mul")
-        # The guard is the first thing order() does, so it can be exercised without a simulation.
         algorithm = TradingAlgorithm.__new__(TradingAlgorithm)
+        inner = TradingAlgorithm.order
+        while hasattr(inner, "__wrapped__"):
+            inner = inner.__wrapped__
         with self.assertRaises(ValueError) as caught:
-            await TradingAlgorithm.order.__wrapped__(algorithm, asset=cf, amount=1, style=None) \
-                if hasattr(TradingAlgorithm.order, "__wrapped__") \
-                else TradingAlgorithm.order(algorithm, asset=cf, amount=1, style=None)
+            await inner(algorithm, asset=cf, amount=1, style=None)
         self.assertIn("not a tradeable contract", str(caught.exception))
 
     async def test_current_contract_returns_a_tradable_future(self):

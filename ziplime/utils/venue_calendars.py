@@ -57,9 +57,11 @@ VENUE_CALENDARS: dict[str, str] = {
     "XNYS": "XNYS",
     # United States, futures. CME Globex runs nearly around the clock, which is why a spread
     # against it needs a clock wider than either equity session.
+    "XCBT": "CMES",
     "XCEC": "CMES",
     "XCME": "CMES",
     "XNYM": "NYMEX",
+    "XCBF": "XCBF",
     # Moscow is not here: zipfinam registers MISX (XMOS) and RTSX (its FORTS calendar).
     # ICE.
     "IFEU": "IEPA",

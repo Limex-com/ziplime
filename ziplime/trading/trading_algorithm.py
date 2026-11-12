@@ -1,3 +1,4 @@
+import functools
 import datetime
 import inspect
 import math
@@ -179,6 +180,30 @@ def _as_datetime(value, tz, default: datetime.date) -> datetime.datetime:
         return datetime.datetime.combine(value, datetime.time.min, tzinfo=tz)
     return datetime.datetime.combine(default, datetime.time.min, tzinfo=tz)
 
+
+
+def _resolves_continuous_future(method):
+    """Let an order method take a continuous future: it is placed in the contract held right now.
+
+    The specifier itself is a data request, not a listing, so the order goes to the contract the
+    chain's roll rule names for the current bar, and that contract is remembered as the one the
+    position lives in -- :meth:`TradingAlgorithm._roll_continuous_futures` moves it when the
+    front changes. ``None`` (no order) when the chain has no live contract.
+    """
+    @functools.wraps(method)
+    async def wrapper(self, *args, **kwargs):
+        if args and isinstance(args[0], ContinuousFuture):
+            contract = await self._contract_for(args[0])
+            if contract is None:
+                return None
+            args = (contract, *args[1:])
+        elif isinstance(kwargs.get("asset"), ContinuousFuture):
+            contract = await self._contract_for(kwargs["asset"])
+            if contract is None:
+                return None
+            kwargs["asset"] = contract
+        return await method(self, *args, **kwargs)
+    return wrapper
 
 class TradingAlgorithm(BaseTradingAlgorithm):
     """A class that represents a trading strategy and parameters to execute
@@ -381,6 +406,10 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.restrictions = NoRestrictions()
         for ds in custom_data_sources:
             data_sources[ds.name] = ds
+        # The run's address context (the requesting user, for dataset://), copied now: it belongs
+        # to this algorithm and goes away with it -- see address_schemes.address_context.
+        from ziplime.data.data_sources import address_schemes
+        self._address_context = address_schemes.current_address_context()
         self.current_data = BarData(
             simulation_dt_func=self.get_datetime,
             trading_calendar=self.clock.trading_calendar,
@@ -397,6 +426,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.clock = clock
 
         self.same_bar_execution = same_bar_execution
+        #: ``{continuous future sid: (specifier, contract the position is in)}`` -- see
+        #: :meth:`_roll_continuous_futures`.
+        self._continuous_holdings: dict[int, tuple[ContinuousFuture, ExchangeAsset]] = {}
         #: See MetricsTracker: the whole metric set on every intraday bar, or only at the close.
         self.intraday_metrics = intraday_metrics
         self.currency_reporting = currency_reporting
@@ -1249,14 +1281,26 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     async def continuous_future(
-            self, root_symbol_str: str, offset: int = 0, roll: str = "volume", adjustment: str = "mul"
+            self, root_symbol_str: str, offset: int = 0, roll: str = "calendar", adjustment: str = "mul",
+            mic: str | None = None, roll_before_days: int | None = 7
     ):
-        """Create a specifier for a continuous contract.
+        """A futures chain traded as one instrument: history across rolls, and positions rolled.
+
+        ``data.history(assets=[cf], ...)`` returns the chain's contracts spliced into one series,
+        back-adjusted at each roll. ``context.order_target(cf, 2, ...)`` -- and every other order
+        method, and ``rebalance`` -- trades the contract held right now, and the engine moves the
+        position to the next contract when the front changes, at the start of that bar, with
+        the usual commission and slippage on both legs. ``portfolio.get_asset_positions_amount(cf)``
+        is the position in the chain. A perpetual future is a chain of one and never rolls.
+
+            si = await context.continuous_future("Si", roll_before_days=7)
+            await context.order_target(si, 2, style=MarketOrder())
 
         Parameters
         ----------
         root_symbol_str : str
-            The root symbol for the future chain.
+            The root symbol for the future chain. ``NG@XNYM`` names the exchange as well, which a
+            root listed on several exchanges needs.
 
         offset : int, optional
             The distance from the primary contract. Default is 0.
@@ -1268,6 +1312,15 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             Method for adjusting lookback prices between rolls. Options are
             'mul', 'add', and None. Default is 'mul'.
 
+        mic : str, optional
+            The exchange of the chain, when ``root_symbol_str`` does not name it.
+
+        roll_before_days : int or None, optional
+            Days before the contract is closed out (its auto close date: the day after the last
+            trading day for a cash-settled contract, the notice day for a deliverable one) to
+            roll -- the ``calendar`` rule's offset, and the latest roll for ``volume``. Default 7.
+            ``None`` takes the data bundle's own.
+
         Returns
         -------
         continuous_future : ziplime.assets.ContinuousFuture
@@ -1278,23 +1331,67 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             offset=offset,
             roll_style=roll,
             adjustment=adjustment,
+            mic=mic,
+            roll_offset_days=roll_before_days,
         )
+
+    async def _contract_for(self, continuous_future: ContinuousFuture) -> ExchangeAsset | None:
+        """The contract an order on ``continuous_future`` goes to now, remembered for the roll."""
+        contract = await self.current_data.current_contract(continuous_future)
+        if contract is None:
+            self._logger.warning("A continuous future has no live contract; the order is not placed",
+                                 continuous_future=str(continuous_future), dt=self.simulation_dt)
+            return None
+        self._continuous_holdings[continuous_future.sid] = (continuous_future, contract)
+        return contract
+
+    async def _roll_continuous_futures(self) -> None:
+        """Move each position held through a continuous future onto the chain's new front.
+
+        Runs at the start of every bar, before ``handle_data``, so the strategy always sees the
+        position in the current contract. The outgoing contract is closed and the same amount
+        opened in the incoming one, as market orders that pay commission and slippage like any
+        other -- which is what a roll costs.
+        """
+        for sid, (continuous_future, held) in list(self._continuous_holdings.items()):
+            front = await self.current_data.current_contract(continuous_future)
+            if front is None or front.sid == held.sid:
+                continue
+            self._continuous_holdings[sid] = (continuous_future, front)
+            amount = await self.portfolio.get_asset_positions_amount(held)
+            if not amount:
+                continue
+            await self.order(asset=held, amount=-amount, style=MarketOrder())
+            await self.order(asset=front, amount=amount, style=MarketOrder())
+            self._logger.info("Rolled a continuous future", root=continuous_future.chain,
+                                 outgoing=held.symbol, incoming=front.symbol, amount=amount,
+                                 dt=self.simulation_dt)
 
     @api_method
     async def symbol(
             self,
             symbol: str,
             mic: str = None,
-            asset_type: AssetType = AssetType.EQUITY,
+            asset_type: AssetType | None = None,
             # exchange_name: str = None,
             country_code: str | None = None
     ) -> ExchangeAsset | None:
-        """Lookup an Equity by its ticker symbol.
+        """Lookup a tradeable listing by its ticker: an equity, or else a futures contract.
+
+        ``symbol("SBER@MISX")`` is the share, ``symbol("MMZ6@RTSX")`` the December mini-index
+        future and ``symbol("IMOEXF@RTSX")`` the perpetual one -- the same call for both, because
+        a strategy names what it trades and should not have to say what kind of thing it is.
+        An equity is looked for first, so a ticker that is both keeps meaning the share; a
+        contract is found only when no equity holds the ticker. ``asset_type`` restricts the
+        lookup to one kind.
 
         Parameters
         ----------
         symbol : str
-            The ticker symbol for the equity to lookup.
+            The ticker, ``TICKER@MIC`` or bare. A futures contract is written with the exchange's
+            own ticker (``MMZ6``, ``SiH7``, ``CLZ26``), not its short name (``MXI-12.26``).
+        asset_type : AssetType or None, optional
+            Look for this kind only. By default an equity, then a futures contract.
         country_code : str or None, optional
             A country to limit symbol searches to.
 
@@ -1329,13 +1426,23 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         #     if mic is None:
         #         raise ValueError("You must supply MIC or use symbol in format ticker@MIC")
 
-        asset = await self.asset_service.get_exchange_asset_by_symbol(
-            symbol=AssetSymbol(symbol=symbol, mic=mic),
-            asset_type=asset_type,
-        )
-        if asset is None:
-            raise SymbolNotFound(symbol=symbol)
-        return asset
+        kinds = (asset_type,) if asset_type is not None else (AssetType.EQUITY,
+                                                              AssetType.FUTURES_CONTRACT)
+        for kind in kinds:
+            try:
+                asset = await self.asset_service.get_exchange_asset_by_symbol(
+                    symbol=AssetSymbol(symbol=symbol, mic=mic),
+                    asset_type=kind,
+                )
+            except Exception:
+                # The equity lookup is the one every strategy relies on; let it raise as before.
+                # The fallback is a second chance and an asset DB without futures is not an error.
+                if kind is kinds[0]:
+                    raise
+                asset = None
+            if asset is not None:
+                return asset
+        raise SymbolNotFound(symbol=symbol)
 
     @api_method
     async def symbols(self, *args, **kwargs):
@@ -1536,7 +1643,13 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         checked against 1.0, because a futures book is levered by construction.
         """
         style = make_execution_style(style=style)
-        wanted = {listing: weight for listing, weight in (weights or {}).items()}
+        wanted = {}
+        for listing, weight in (weights or {}).items():
+            if isinstance(listing, ContinuousFuture):
+                listing = await self._contract_for(listing)
+                if listing is None:
+                    continue
+            wanted[listing] = weight
 
         held = {position.asset for position in self.portfolio.positions.values()
                 if position.amount}
@@ -1722,9 +1835,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     f"run_simulation(custom_data_sources=[...]), or name a dataset by address: "
                     f"hf://owner/name/config{extensions}. Other schemes come with extensions -- "
                     f"algopack:// with zipfinam.")
-            source = mount(name, asset_service=self.asset_service,
-                           start_date=self.clock.start_session, end_date=self.clock.end_session,
-                           trading_calendar=self.clock.trading_calendar)
+            source = mount(name, **{**getattr(self, "_address_context", {}),
+                                    "asset_service": self.asset_service,
+                                    "start_date": self.clock.start_session,
+                                    "end_date": self.clock.end_session,
+                                    "trading_calendar": self.clock.trading_calendar})
             if inspect.isawaitable(source):
                 source = await source
             return source
@@ -1780,12 +1895,46 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         return source
 
     @api_method
+    async def user_dataset(self, name: str, fields: list[str] | None = None,
+                           resolution=None):
+        """Mount one of the requesting user's private datasets: the explicit ``dataset://<name>``.
+
+        The same as ``data.history(..., data_source="dataset://my-signals")``, for an author who
+        wants to pass options -- the columns to read, which keeps a wide file cheap, or how revisions
+        of one period collapse::
+
+            from ziplime.data.data_sources.huggingface.huggingface_data_source import Resolution
+            context.fundamentals = await context.user_dataset(
+                "company-fundamentals", fields=["revenue", "net_income"],
+                resolution=Resolution.COALESCE)
+
+        Only the hosted runtime knows the user; in a local run this raises.
+        """
+        from ziplime.data.data_sources.huggingface.huggingface_data_source import Resolution
+        from ziplime.data.data_sources.user_datasets import SCHEME, mount_user_dataset
+        address = name if str(name).startswith(SCHEME) else f"{SCHEME}{name}"
+        source = mount_user_dataset(
+            address, **{**getattr(self, "_address_context", {}),
+                        "asset_service": self.asset_service,
+                        "start_date": self.clock.start_session,
+                        "end_date": self.clock.end_session,
+                        "trading_calendar": self.clock.trading_calendar,
+                        "fields": fields,
+                        "resolution": resolution or Resolution.LATEST_ROW})
+        self.current_data.data_sources[source.name] = source
+        return source
+
+    @api_method
     async def futures_chain(self, root_symbol: str, mic: str = None) -> list[ExchangeAsset]:
         """The contract chain of ``root_symbol`` as **listings**, ordered by expiration.
 
         This is the term structure: element 0 is the front contract, and each one after it is
         further out on the curve. Ordering by expiration rather than by ticker matters -- an
         alphabetical sort puts ``CLF27`` before ``CLX26``, which reverses the curve.
+
+        The chain is one exchange's. ``NG@XNYM`` or ``mic='XNYM'`` names it; a bare root listed on
+        several exchanges raises :class:`~ziplime.errors.AmbiguousRootSymbol` unless
+        ``ZIPLIME_FUTURES_DEFAULT_MIC`` picks one.
 
         Returns the listings, so the result can be passed straight to :meth:`order` and to
         ``data.current``; :attr:`ExchangeAsset.asset` on each one carries the multiplier and the
@@ -2055,6 +2204,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     @disallowed_in_before_trading_start(OrderInBeforeTradingStart())
+    @_resolves_continuous_future
     async def order(self, asset: ExchangeAsset, amount: int, style: ExecutionStyle,
                     account_id: str | None = None,
                     exchange_name: str | None = None) -> Order | None:
@@ -2262,6 +2412,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     @disallowed_in_before_trading_start(OrderInBeforeTradingStart())
+    @_resolves_continuous_future
     async def order_value(self, asset: ExchangeAsset, value: float, limit_price: float | None = None,
                           stop_price: float | None = None,
                           style: ExecutionStyle | None = None,
@@ -2563,6 +2714,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     @disallowed_in_before_trading_start(OrderInBeforeTradingStart())
+    @_resolves_continuous_future
     async def order_percent(
             self, asset: ExchangeAsset, percent: float, style: ExecutionStyle,
             exchange_name: str | None = None
@@ -2641,6 +2793,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     @disallowed_in_before_trading_start(OrderInBeforeTradingStart())
+    @_resolves_continuous_future
     async def order_target(
             self, asset: ExchangeAsset, target: int, style: ExecutionStyle,
             exchange_name: str | None = None
@@ -2724,6 +2877,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     @disallowed_in_before_trading_start(OrderInBeforeTradingStart())
+    @_resolves_continuous_future
     async def order_target_value(
             self, asset: ExchangeAsset, target: float, style: ExecutionStyle,
             exchange_name: str | None = None
@@ -2794,6 +2948,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     @disallowed_in_before_trading_start(OrderInBeforeTradingStart())
+    @_resolves_continuous_future
     async def order_target_percent(
             self, asset: ExchangeAsset, target: float,
             style: ExecutionStyle, exchange_name: str | None = None,
@@ -3350,6 +3505,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         # called every tick (minute or day).
         # self.on_dt_changed(dt=dt_to_use)
         if self.same_bar_execution:
+            await self._roll_continuous_futures()
             await handle_data(context=self, data=current_data, dt=dt_to_use)
 
         # Record each exchange's executions before fetching the next exchange.
@@ -3375,6 +3531,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             if has_executions:
                 await self._ledger.update_portfolio()
                 self._ledger.update_account()
+            await self._roll_continuous_futures()
             await handle_data(context=self, data=current_data, dt=dt_to_use)
         # print("LEVERAGE: AFTER 4", self.account.leverage, self.account.net_leverage)
 

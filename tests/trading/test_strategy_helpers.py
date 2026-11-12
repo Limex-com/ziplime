@@ -276,5 +276,65 @@ class FrontContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await TradingAlgorithm.front_contract(stub, "Si"))
 
 
+class SymbolTests(unittest.IsolatedAsyncioTestCase):
+    """`symbol` names what a strategy trades -- a share or a futures contract, one call for both."""
+
+    @staticmethod
+    def _algorithm(stored: dict):
+        from ziplime.assets.domain.asset_type import AssetType  # noqa: F401  (keys below)
+
+        asked = []
+
+        async def get_exchange_asset_by_symbol(symbol, asset_type):
+            asked.append((symbol.symbol, symbol.mic, asset_type))
+            return stored.get((symbol.symbol, asset_type))
+
+        return types.SimpleNamespace(asset_service=types.SimpleNamespace(
+            get_exchange_asset_by_symbol=get_exchange_asset_by_symbol)), asked
+
+    async def test_a_contract_is_found_by_its_ticker(self):
+        from ziplime.assets.domain.asset_type import AssetType
+        contract = Listing(7, "MMZ6", "RTSX")
+        stub, asked = self._algorithm({("MMZ6", AssetType.FUTURES_CONTRACT): contract})
+
+        self.assertIs(await TradingAlgorithm.symbol(stub, "MMZ6@RTSX"), contract)
+        self.assertEqual([a[2] for a in asked], [AssetType.EQUITY, AssetType.FUTURES_CONTRACT])
+        self.assertEqual(asked[-1][1], "RTSX", "the venue travels with the ticker")
+
+    async def test_a_perpetual_is_found_the_same_way(self):
+        from ziplime.assets.domain.asset_type import AssetType
+        perpetual = Listing(8, "IMOEXF", "RTSX")
+        stub, _ = self._algorithm({("IMOEXF", AssetType.FUTURES_CONTRACT): perpetual})
+
+        self.assertIs(await TradingAlgorithm.symbol(stub, "IMOEXF@RTSX"), perpetual)
+
+    async def test_an_equity_wins_over_a_contract_of_the_same_ticker(self):
+        from ziplime.assets.domain.asset_type import AssetType
+        share, contract = Listing(1, "BR", "XNYS"), Listing(2, "BR", "XNYS")
+        stub, asked = self._algorithm({("BR", AssetType.EQUITY): share,
+                                       ("BR", AssetType.FUTURES_CONTRACT): contract})
+
+        self.assertIs(await TradingAlgorithm.symbol(stub, "BR@XNYS"), share)
+        self.assertEqual(len(asked), 1, "a share found is not looked for again as a contract")
+
+    async def test_an_explicit_kind_is_the_only_one_looked_for(self):
+        from ziplime.assets.domain.asset_type import AssetType
+        from ziplime.errors import SymbolNotFound
+        contract = Listing(7, "MMZ6", "RTSX")
+        stub, _ = self._algorithm({("MMZ6", AssetType.FUTURES_CONTRACT): contract})
+
+        with self.assertRaises(SymbolNotFound):
+            await TradingAlgorithm.symbol(stub, "MMZ6@RTSX", asset_type=AssetType.EQUITY)
+        self.assertIs(await TradingAlgorithm.symbol(
+            stub, "MMZ6@RTSX", asset_type=AssetType.FUTURES_CONTRACT), contract)
+
+    async def test_nothing_of_either_kind_is_still_symbol_not_found(self):
+        from ziplime.errors import SymbolNotFound
+        stub, _ = self._algorithm({})
+
+        with self.assertRaises(SymbolNotFound):
+            await TradingAlgorithm.symbol(stub, "NOPE@MISX")
+
+
 if __name__ == "__main__":
     unittest.main()
