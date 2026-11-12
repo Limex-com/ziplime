@@ -335,13 +335,14 @@ class ScheduleParityTests(SweepParityCase):
 class CorporateActionParityTests(SweepParityCase):
     async def test_split_with_cash_in_lieu_and_a_dividend(self):
         jnj, ko = await self.listing("JNJ@XNYS"), await self.listing("KO@XNYS")
+        self.assertEqual(ko.quote.asset_name, "USD")
         with sqlite3.connect(self.db) as connection:
             connection.execute("INSERT INTO splits (asset_id, effective_date, ratio) VALUES (?, ?, ?)",
                                (jnj.asset.id, "2024-03-04", 1.5))
             connection.execute(
                 "INSERT INTO dividend_payouts (asset_id, ex_date, declared_date, record_date, "
-                "pay_date, amount) VALUES (?, ?, ?, ?, ?, ?)",
-                (ko.asset.id, "2024-02-14", "2024-02-01", "2024-02-15", "2024-04-01", 0.97))
+                "pay_date, amount, currency_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (ko.asset.id, "2024-02-14", "2024-02-01", "2024-02-15", "2024-04-01", 0.97, ko.quote.id))
         await self.asset_service._asset_repository.engine.dispose()
         self.asset_service = get_asset_service(db_path=str(self.db))
         jnj, ko = await self.listing("JNJ@XNYS"), await self.listing("KO@XNYS")

@@ -279,6 +279,7 @@ async def test_later_exchange_failure_keeps_earlier_successful_fills_reconciled(
         "OTHER": {SBER: {second_order.id: second_order}},
     }
     algorithm = TradingAlgorithm.__new__(TradingAlgorithm)
+    algorithm._continuous_holdings = {}
     algorithm._ledger = native
     algorithm.same_bar_execution = True
     algorithm.capital_changes = {}

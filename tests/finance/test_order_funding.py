@@ -31,6 +31,7 @@ def algorithm(cash=None, commission=None, live=True, currency_commission=None,
     exchange.submit_order = AsyncMock(wraps=exchange.submit_order)
     exchange.submit_orders = AsyncMock(wraps=exchange.submit_orders)
     algo = TradingAlgorithm.__new__(TradingAlgorithm)
+    algo._continuous_holdings = {}
     algo._ledger = native
     algo.currency_reporting = reporting
     algo.currency_conversion = reporting.conversion
