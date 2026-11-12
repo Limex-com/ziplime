@@ -129,7 +129,9 @@ class StopOrder(ExecutionStyle):
         self.stop_price = stop_price
         self.tick_size = tick_size
 
-    def get_limit_price(self, _is_buy):
+    def get_limit_price(self, is_buy):
+        # Named `_is_buy` before, while Order passes it by keyword (`is_buy=`): every StopOrder
+        # raised TypeError the moment it was placed.
         return None
 
     def get_stop_price(self, is_buy):

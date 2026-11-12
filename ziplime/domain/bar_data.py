@@ -173,7 +173,11 @@ class BarData:
         dt = self.simulation_dt_func()
 
         if self._adjust_minutes:
-            dt = self._trading_calendar.previous_minute(dt)
+            # exchange_calendars answers in UTC; the bundle's dates are in the calendar's zone, and
+            # polars refuses to compare the two -- every read in an intraday before_trading_start
+            # raised instead of returning the previous session's close.
+            dt = (self._trading_calendar.previous_minute(dt)
+                  .tz_convert(self._trading_calendar.tz).to_pydatetime())
 
         # TODO: check this, is it different for daily?
         #

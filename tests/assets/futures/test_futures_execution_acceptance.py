@@ -284,7 +284,8 @@ class CommissionCostBasisTests(unittest.IsolatedAsyncioTestCase):
         basis_before = ledger.position_tracker.get_position(
             future, EXCHANGE.mic, ACCOUNT).cost_basis
 
-        ledger.process_commission(Commission(asset=future, order=None, amount=15.0), tr=None)
+        ledger.process_commission(Commission(asset=future, order=None, amount=15.0,
+                                             transaction=ledger.transaction_history[-1]), tr=None)
         basis_after = ledger.position_tracker.get_position(
             future, EXCHANGE.mic, ACCOUNT).cost_basis
 
@@ -300,7 +301,8 @@ class CommissionCostBasisTests(unittest.IsolatedAsyncioTestCase):
         trade(ledger, future, amount=1, price=70.0)
         await settle(ledger)
         cash_before = ledger.portfolio.cash
-        ledger.process_commission(Commission(asset=future, order=None, amount=4.5), tr=None)
+        ledger.process_commission(Commission(asset=future, order=None, amount=4.5,
+                                             transaction=ledger.transaction_history[-1]), tr=None)
         self.assertAlmostEqual(ledger.portfolio.cash, cash_before - 4.5)
 
 
@@ -314,7 +316,7 @@ class MarginCurrencyTests(unittest.IsolatedAsyncioTestCase):
     def _dollar_quoted_local_margin(self):
         # Quoted in USD, margined in a local currency -- a common commodity case.
         return make_future(sid=1, symbol="NGZ5", root_symbol="NG", multiplier=100.0,
-                           margin_currency="RUB")
+                           margin_currency="EUR")
 
     def _cme(self):
         return make_future(sid=2, symbol="NGZ25", root_symbol="NG.XNYM", multiplier=10_000.0,
@@ -327,12 +329,12 @@ class MarginCurrencyTests(unittest.IsolatedAsyncioTestCase):
             model.initial_margin(self._dollar_quoted_local_margin(), amount=10, price=4.0)
         message = str(caught.exception)
         self.assertIn("USD", message)
-        self.assertIn("RUB", message)
+        self.assertIn("EUR", message)
 
     async def test_a_rate_model_converts_when_given_a_rate(self):
         from ziplime.finance.margin import FixedRateFuturesMarginModel
-        model = FixedRateFuturesMarginModel(initial_rate=0.27, fx_rates={("USD", "RUB"): 80.0})
-        # 10 contracts x $4.00 x 100 = $4 000 notional -> 27% -> $1 080 -> 86 400 RUB
+        model = FixedRateFuturesMarginModel(initial_rate=0.27, fx_rates={("USD", "EUR"): 80.0})
+        # 10 contracts x $4.00 x 100 = $4 000 notional -> 27% -> $1 080 -> 86 400 EUR
         self.assertAlmostEqual(
             model.initial_margin(self._dollar_quoted_local_margin(), amount=10, price=4.0), 86_400.0)
 
@@ -355,7 +357,7 @@ class MarginCurrencyTests(unittest.IsolatedAsyncioTestCase):
         await settle(ledger)
 
         by_currency = ledger.futures_margin_by_currency()
-        self.assertAlmostEqual(by_currency["RUB"], 100 * 6_556.48)
+        self.assertAlmostEqual(by_currency["EUR"], 100 * 6_556.48)
         self.assertAlmostEqual(by_currency["USD"], 1 * 3_500.0)
 
     async def test_asking_for_one_number_across_two_currencies_raises(self):

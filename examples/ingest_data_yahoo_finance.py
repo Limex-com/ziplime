@@ -11,7 +11,9 @@ from ziplime.core.ingest_data import get_asset_service, ingest_market_data
 from ziplime.utils.bundle_utils import get_market_data_source
 from ziplime.utils.logging_utils import configure_logging
 
-SYMBOLS = ["META", "AAPL", "AMZN", "NFLX", "GOOGL"]
+SYMBOLS_STOCK = ["META", "AAPL", "AMZN", "NFLX", "GOOGL"]
+SYMBOLS_CURRENCIES = ["EURUSD=X"]
+
 BUNDLE_NAME = "yahoo_finance_daily_data"
 
 
@@ -23,20 +25,24 @@ async def ingest_data_yahoo_finance():
 
     # Yahoo does not return the exchange alongside the bars, so hand the connector the listings we
     # already have; otherwise it falls back to one Ticker.info lookup per symbol.
-    listings = await asset_service.get_exchange_assets_by_symbols(
-        symbols=[AssetSymbol(symbol=s, mic=None) for s in SYMBOLS], asset_type=AssetType.EQUITY)
-    known = [listing for listing in listings if listing is not None]
+    stock_listings = await asset_service.get_exchange_assets_by_symbols(
+        symbols=[AssetSymbol(symbol=s, mic=None) for s in SYMBOLS_STOCK], asset_type=AssetType.EQUITY)
+    currency_listings = await asset_service.get_exchange_assets_by_symbols(
+        symbols=[AssetSymbol(symbol=s, mic=None) for s in SYMBOLS_CURRENCIES], asset_type=AssetType.CURRENCY)
+    known = [listing
+             for listing in stock_listings + currency_listings
+             if listing is not None]
 
     await ingest_market_data(
         start_date=start_date,
         end_date=end_date,
-        symbols=SYMBOLS,
+        symbols=SYMBOLS_STOCK + SYMBOLS_CURRENCIES,
         trading_calendar="NYSE",
         bundle_name=BUNDLE_NAME,
         data_bundle_source=get_market_data_source("yahoo", assets=known),
         data_frequency=datetime.timedelta(days=1),
         asset_service=asset_service,
-        asset_type=AssetType.EQUITY,
+        assets=known
     )
 
 

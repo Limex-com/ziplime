@@ -1,5 +1,108 @@
 # Release Notes
 
+### Version 2.12.0
+
+Parameter sweeps: one strategy run for every combination of its parameters at once -- on an Apple
+GPU, an NVIDIA GPU or across CPU cores -- from the ordinary algorithm file, with the best
+combination checked against run_simulation. A million combinations take seconds to minutes. See
+docs/backtesting/parameter-sweeps.md, how it works in docs/backtesting/sweep-internals.md and the
+measured speeds in docs/backtesting/sweep-performance.md.
+
+#### Upgrading from 2.11.0
+
+- **Backtests are unchanged** except for the fixes below; a strategy that looks a position up by
+  its asset now finds it (see *Backtest results that change*).
+- **`ziplime sweep` is a group of commands.** `ziplime sweep sweep.json` still runs the file, as
+  `ziplime sweep run sweep.json` does.
+- **Extras.** `ziplime[mlx]` (Apple silicon) and `ziplime[cuda]` (NVIDIA, CuPy). MLX on NVIDIA:
+  `mlx[cuda]` with `nvidia-cuda-runtime-cu12>=12.8`. ziplime needs pandas 2.x.
+
+#### New
+
+- **The signals kernel on NVIDIA.** `simulate_signals_batch(..., backend="cupy")` runs every
+  combination at once on an NVIDIA GPU through CuPy (`ziplime[cuda]`), from the same kernel source
+  as `backend="mlx"` on Apple silicon, and a sweep file with `"backend": "cupy"` whose strategy
+  returns entries/exits now runs on it instead of being refused. `examples/vectorized/sweep_on_gpu.py`
+  takes whichever GPU backend the machine has. `backend="mlx"` on MLX without Metal (`mlx[cuda]`)
+  is refused up front with a pointer to `cupy`, where it used to fail inside MLX.
+- **The signals kernel on Intel Arc and AMD.** `backend="opencl"` runs the same kernel source on any
+  GPU with an OpenCL driver, through PyOpenCL (`ziplime[opencl]`), in `simulate_signals_batch` and
+  in a sweep whose strategy returns entries/exits. A strategy swept through `handle_data` is refused
+  on `opencl`: that path needs an array library on the GPU. `ziplime sweep doctor` lists the
+  OpenCL GPU.
+- **Intel Arc: `backend: dpnp`.** A strategy swept through `handle_data` runs on dpnp, Intel's
+  NumPy for SYCL; one that returns entries/exits runs the vector kernel through PyOpenCL on the same
+  GPU. Checked against exact on dpnp's CPU device; not yet on an Arc GPU. See "A sweep on an Intel
+  GPU" in docs/backtesting/sweep-performance.md.
+- **AMD through CuPy for ROCm.** `backend="cupy"` recognises a ROCm build of CuPy: the entries/exits
+  kernel launches in blocks of a whole wavefront there, and the refusals and `ziplime sweep doctor`
+  name ROCm. Checked on an AMD Instinct MI300X. See "A sweep on an AMD GPU" in
+  docs/backtesting/sweep-performance.md.
+- **GPUs and architectures.** docs/backtesting/gpu-architectures.md: which backend runs where, and
+  the same `handle_data` sweeps measured on an Apple M3, an RTX 5090, an RTX 3090 and an MI300X —
+  the same best combination on all of them, and how fast each was.
+- **Sweeps on synthetic data.** `"synthetic": {"paths": 100, "families": [...]}` in a sweep file
+  (or `ziplime sweep run --paths 100 --family stationary:20 --family meboot`) also runs every
+  combination on synthetic price paths made from the real bars. The families are block bootstraps
+  (`block`, `circular`, `stationary`), the maximum entropy bootstrap (`meboot`, as R's meboot),
+  `iid`, `shuffle`, `gbm`, `student_t` and `garch` (filtered historical simulation). The report
+  compares the combination chosen on the paths with the real bars, and the real winner with every
+  family; it writes `synthetic_summary.csv`, `synthetic_paths.parquet` and
+  `best_synthetic_config.json`. See docs/backtesting/synthetic-data.md.
+- **`ziplime sweep run | check | init | doctor`.** `run` takes a sweep file and command-line
+  overrides (`--backend`, `--grid fast=5,10,20`, `--set field=value`, `--no-compile`, `-o`...);
+  `check` runs the grid's corners in seconds and says how the strategy converts; `init` writes a
+  sweep file around a strategy's defaults; `doctor` lists the backends this machine has.
+- **`ziplime.sweep.sweep_simulation(...)`** takes run_simulation's arguments and a grid;
+  `run_sweep(SweepParams(...))` a sweep file's fields.
+- **`ziplime run --config-file`** runs a strategy with a config file -- `best_config.json` from a
+  sweep, for one.
+- **What a sweep converts.** `handle_data`, `before_trading_start` and scheduled functions run for
+  every combination at once, including: `data.history` over several instruments (`filter`,
+  `group_by("sid").agg(...)`); history read as an array with NumPy, TA-Lib or SciPy on it, and
+  models fitted in `initialize` (`context.model.predict_proba(...)`) -- computed on the CPU before
+  the run, TA-Lib's window-local functions once over the whole history; lists of instruments
+  sorted and cut per combination (`cands.sort(key=...)`, `cands[:2]`); `portfolio.positions`
+  looked up by asset; `context.symbol` in `handle_data`; functions defined inside `handle_data`.
+  What cannot be converted is named with its line before the first bar, and the sweep runs every
+  combination through run_simulation instead.
+- **The sweep explains itself.** Next to the results: how each part of the strategy was computed,
+  whether the bars were compiled and why not, and warnings for a computation that is NaN at every
+  bar and for a parameter that changes nothing.
+- **`context.indicators(...)` in `initialize`.** Indicators declared as polars expressions, computed
+  once before the first bar and read as `context.signals` -- an alternative to `compute_signals`.
+
+#### Backtest results that change
+
+- **`portfolio.positions.get(asset)`, `positions[asset]`, `asset in positions`.** The map is keyed
+  by (exchange, account, asset), and a lookup by the asset alone missed every time: `get`
+  returned its default and `in` was False whatever was held, so a strategy that closed what it held
+  by checking its position never closed anything. An asset now finds its position; the tuple keys
+  and iteration are unchanged.
+- **`order_target_percent` / `order_percent` with `FixedBasisPointsSlippage`.** The volume cap
+  subtracted what the *last instrument simulated* had filled in the bar rather than this
+  instrument's fills, so a busy bar in one stock could cut an order in another to zero. It now
+  subtracts this instrument's own fills.
+- **`EODCancel`.** Cancelling at the session end raised "dictionary changed size during iteration"
+  at the first session with an open order, which skipped that session's end-of-day bookkeeping.
+  Every open order is now cancelled.
+
+#### Fixed
+
+- **`data.current` / `data.history` in `before_trading_start` on intraday runs** raised: the
+  previous market minute came back in UTC and the bundle's dates are in the calendar's zone. They
+  now read as of the previous session's close.
+- **`data.history(frequency=1 day)` on an intraday bundle** built each day from the last minute of
+  every field -- a daily "open" was the last minute's, "volume" one minute's -- and with several
+  instruments cut the result across all of them, so only the last came back. Days are now OHLCV
+  (first, max, min, last, sum) and cut per instrument.
+- **`StopOrder`** raised TypeError when placed (`get_limit_price` took `_is_buy` while `Order`
+  passes `is_buy=`).
+- **`FixedSlippage`** raised TypeError on every fill (`process_order` had no `price`); it now fills
+  the open amount at the bar's price plus half the spread.
+- **Algorithm and config files** are read as UTF-8 whatever the system locale; on a server with an
+  ASCII locale a strategy with non-ASCII comments failed to load.
+
 ### Version 2.11.0
 
 Each listing now keeps its own venue's trading hours, so one backtest can hold instruments from

@@ -36,7 +36,7 @@ FUTURE_PRICE = 100_000.0
 def coupon(bond_listing, date=datetime.date(2025, 3, 3), value=40.0, record_lag=1):
     return BondEvent(
         asset=bond_listing.asset, event_type=BondEventType.COUPON, date=date, value=value,
-        currency="RUB", record_date=date - datetime.timedelta(days=record_lag),
+        currency="EUR", record_date=date - datetime.timedelta(days=record_lag),
         period_start_date=date - datetime.timedelta(days=182), face_value=1000.0)
 
 
@@ -44,7 +44,7 @@ def dividend(equity_listing, ex_date=datetime.date(2025, 3, 3),
              pay_date=datetime.date(2025, 3, 4), amount=30.0):
     return DividendPayout(
         asset=equity_listing.asset, amount=amount, declared_date=ex_date,
-        record_date=ex_date, ex_date=ex_date, pay_date=pay_date, currency=None)
+        record_date=ex_date, ex_date=ex_date, pay_date=pay_date, currency=equity_listing.quote)
 
 
 class OneBookThreeClassesTests(unittest.IsolatedAsyncioTestCase):
@@ -154,7 +154,7 @@ class OneBookThreeClassesTests(unittest.IsolatedAsyncioTestCase):
         mark(ledger, self.bond, BOND_QUOTE + 1.0)
         await settle(ledger)
 
-        # One point on a 1000 nominal is 10 roubles a bond, not one.
+        # One point on a 1000 nominal is 10 euros a bond, not one.
         self.assertAlmostEqual(
             ledger.position_tracker.stats.net_value - value_before, 1_000 * 10.0)
 

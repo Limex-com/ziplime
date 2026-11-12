@@ -7,12 +7,14 @@ opposite situations.
 |---|---|---|---|---|---|
 | **Signals inside a run** | the strategy's arithmetic | **ziplime**, bar by bar | ziplime's models | yes | one strategy that has to run faster |
 | **Sweep, then report** | the whole run | **ziplime's kernel** | ziplime's models | **no, refused** | hundreds of parameter combinations |
+| **Sweep on the GPU** | the whole run, every combination at once | **ziplime's kernel**, in Metal, CUDA or OpenCL | ziplime's models | **no, refused** | thousands of combinations, on Apple silicon, NVIDIA, Intel Arc or AMD |
 
 Run these commands from the repository root with ziplime installed:
 
 ```bash
 python -m examples.vectorized.signals_in_run      # the first
 python -m examples.vectorized.sweep_then_report   # the second
+python -m examples.vectorized.sweep_on_gpu        # the third; needs `pip install mlx`
 ```
 
 Both are ziplime all the way down. Neither needs an outside engine: the sweep is computed by
@@ -249,6 +251,103 @@ overfitting. "+61%" describes the sweep, not a strategy. The example is about th
 2. `prices` is not the series the book was valued with;
 3. the source holds several books (a sweep, or ungrouped columns) — caught separately and before
    the replay, or the error would read as "no listing" for columns like `(3, 10, 'JNJ')`.
+
+---
+
+# 3. Sweep on the GPU (MLX, CuPy or OpenCL)
+
+The same job as the second mechanism, at a different scale. The kernel cannot be vectorised
+*within* a run — whether an order fits depends on the cash every fill before it left — but separate
+runs share nothing. `simulate_signals_batch` takes every combination's signals at once and, with
+`backend="mlx"` on Apple silicon, `backend="cupy"` on an NVIDIA GPU or `backend="opencl"` on any
+GPU with an OpenCL driver (Intel Arc, AMD), runs each on its own GPU thread. The decisions are the
+kernel's, written a second time in C that Metal, CUDA and OpenCL all compile; the tests hold every
+backend to the same fills, rejections and no-ops.
+
+```bash
+pip install mlx                  # Apple silicon
+pip install "ziplime[cuda]"      # NVIDIA: CuPy
+                                 # AMD on Linux: CuPy built for ROCm, also backend="cupy" --
+                                 # see docs/backtesting/sweep-performance.md
+pip install "ziplime[opencl]"    # Intel Arc, AMD: PyOpenCL, with the vendor's OpenCL driver
+```
+
+`opencl` picks the first GPU any OpenCL platform offers; `PYOPENCL_CTX=0:1` names another
+(platform 0, device 1). On Linux, Intel Arc needs `intel-opencl-icd`; `clinfo` should list the GPU.
+
+```python
+from ziplime.vectorized.kernel import ExecutionTiming, simulate_signals_batch
+
+batch = simulate_signals_batch(
+    prices=closes,
+    entries=entries, exits=exits,      # (combinations, sessions, instruments) booleans
+    labels=grid,                       # one per combination: [(5, 60), (5, 80), ...]
+    size=100, initial_cash=1_000_000.0,
+    execution=ExecutionTiming.next_close(),
+    commission=PerShare(cost=0.005, min_trade_cost=1.0),
+    slippage=FixedBasisPointsSlippage(basis_points=5.0),
+    backend="mlx")                     # "cupy", "opencl"; "exact": float64, one at a time
+
+batch.final_value.sort_values()        # one number per combination, indexed by label
+best = batch.final_value.idxmax()
+result = batch.rerun(best)             # simulate_signals on that one: float64, every fill
+report = await to_execution_result(portfolio=result, ...)   # exactly as in the second mechanism
+```
+
+### What was measured
+
+On `sweep_on_gpu.py`: 2,508 moving-average pairs, 50 instruments, 1,000 sessions, Apple M3.
+
+```
+GPU (mlx):    2,508 combinations in 0.21s      0.08 ms each
+CPU (exact):  22 ms each, measured on 20       about 54s for the whole grid
+```
+
+**The CPU number is the interpreted kernel.** Numba was not installed on that machine (NumPy 2.4 is
+newer than numba 0.67 accepts). The repository's own measurement puts the compiled loop at about
+5.7× the interpreted one, so against numba the GPU's lead would be closer to 50× than 250×. That is
+an estimate, not a measurement.
+
+**Throughput grows with the batch until the GPU is full:**
+
+```
+     1 combination     27 ms      no faster than the CPU: one GPU thread is slower than one core
+   320 combinations    48 ms      320 runs for less than twice the price of one
+ 2,508 combinations   107 ms
+ 5,016 combinations   172 ms      0.034 ms each
+10,032 combinations   321 ms      0.032 ms each: the GPU is full, and time now grows linearly
+```
+
+So the GPU is worth it from a few hundred combinations, and below that `backend="exact"` is as good.
+
+### Why the GPU ranks and the CPU reports
+
+Metal has no double precision, so the GPU keeps cash and prices in float32 — about seven
+significant digits. CUDA and OpenCL run the same float32 source, so every GPU ranks a sweep alike. On the sweep above the ending values differ from the float64 kernel's by $1.14
+at most on a million, and the fills are identical. That is plenty to rank by and not enough to
+report, so a batch result holds summaries — value curves, fills, fees, rejections by reason — and
+**no fills at all**. `rerun(label)` produces those, in float64, for the one combination worth
+reporting.
+
+The two paths take the same decisions on positions in whole units. They can part in two ways, both
+at the edge of float32's resolution, and both are pinned by tests:
+
+* an order whose cost lands within rounding of the cash left fits on one path and not the other;
+* a fractional position — a 10% volume cap on 23 units of volume buys 2.3 — can be sold down to a
+  residue of about 1e-15 units in float64 and to exactly zero in float32. The exact kernel closes
+  that residue as one more fill; the GPU sees a flat book.
+
+### What it will not do
+
+Everything the second mechanism refuses, it refuses: futures, options, and cost models that need an
+order book. A GPU backend this machine cannot run — `mlx` without Metal, `cupy` without CuPy or a
+CUDA device, `opencl` without PyOpenCL or an OpenCL GPU — is refused rather than quietly run on the CPU, because the two backends do not
+produce identical numbers. The refusal names the backend that does run here.
+
+Memory is the limit to watch: each signal stack is `combinations × sessions × instruments` bytes —
+the grid above is 125 MB per stack. Split a larger grid into batches. OpenCL drivers also cap a
+single buffer (often a quarter of the GPU's memory); `opencl` refuses a batch over that cap and
+says so.
 
 ---
 

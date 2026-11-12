@@ -166,6 +166,24 @@ def _normalise_prices(prices, name: str) -> pd.DataFrame:
     return prices
 
 
+def _execution_prices(timing: ExecutionTiming, prices: pd.DataFrame, opens,
+                      index: pd.DatetimeIndex, columns: list[str]) -> pd.DataFrame:
+    """The frame fills are priced from: the closes, or the opens when the timing says so."""
+    opens = _normalise_prices(opens, "opens") if opens is not None else None
+    if timing.price_field == "open":
+        if opens is None:
+            raise VectorKernelError(
+                "execute_at='next_open' needs open prices, and none were given. Pass "
+                "opens=<DataFrame of opens>, or use next_close/same_close, which fill at the "
+                "closes already in `prices`.")
+        missing = set(columns) - set(opens.columns)
+        if missing:
+            raise VectorKernelError(f"opens is missing {sorted(missing)}.")
+        if not opens.index.equals(index):
+            raise VectorKernelError("opens is indexed differently from prices.")
+    return (opens if timing.price_field == "open" else prices)[columns]
+
+
 def simulate_signals(
     prices,
     entries=None,
@@ -265,20 +283,7 @@ def simulate_signals(
 
     # Last, because it is the only check about a *prerequisite* rather than about an argument the
     # caller already passed: everything above can be wrong on its own terms.
-    opens = _normalise_prices(opens, "opens") if opens is not None else None
-    if timing.price_field == "open":
-        if opens is None:
-            raise VectorKernelError(
-                "execute_at='next_open' needs open prices, and none were given. Pass "
-                "opens=<DataFrame of opens>, or use next_close/same_close, which fill at the "
-                "closes already in `prices`.")
-        missing = set(columns) - set(opens.columns)
-        if missing:
-            raise VectorKernelError(f"opens is missing {sorted(missing)}.")
-        if not opens.index.equals(index):
-            raise VectorKernelError("opens is indexed differently from prices.")
-
-    execution_prices = (opens if timing.price_field == "open" else prices)[columns]
+    execution_prices = _execution_prices(timing, prices, opens, index, columns)
     close_values = prices[columns].to_numpy(dtype=float)
     execution_values = execution_prices.to_numpy(dtype=float)
     size_values = sizes.to_numpy(dtype=float)

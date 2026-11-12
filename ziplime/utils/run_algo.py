@@ -1,4 +1,6 @@
 from ziplime.finance.margin import FuturesMarginModel
+from ziplime.finance.domain.currency_reporting import CurrencyReporting
+from ziplime.data.services.currency_conversion_service import CurrencyConversionService
 import datetime
 import sys
 
@@ -10,6 +12,10 @@ from ziplime.assets.services.asset_service import AssetService
 from ziplime.core.algorithm_file import AlgorithmFile
 from ziplime.data.services.data_source import DataSource
 from ziplime.exchanges.exchange import Exchange
+from ziplime.exchanges.simulation_exchange import SimulationExchange
+from ziplime.assets.entities.currency import Currency
+from ziplime.finance.commission.commission_model import CommissionModel
+from ziplime.finance.slippage.slippage_model import SlippageModel
 from ziplime.finance.controls.max_leverage import MaxLeverage
 
 from ziplime.finance.blotter.in_memory_blotter import InMemoryBlotter
@@ -75,9 +81,32 @@ async def run_algorithm(
         intraday_metrics: bool = False,
         futures_margin_model: FuturesMarginModel | None = None,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
+        currency_reporting: CurrencyReporting | None = None,
+        currency_conversion: CurrencyConversionService | None = None,
+        currency_slippage: SlippageModel | None = None,
+        currency_commission: CommissionModel | None = None,
 ) -> TradingAlgorithmExecutionResult:
-    """Run a backtest for the given algorithm.
-    This is shared between the cli and :func:`ziplime.run_algo`.
+    """Run a backtest for the given algorithm, shared by CLI and simulation entry points.
+
+    Parameters
+    ----------
+    currency_slippage : SlippageModel or None, optional
+        Override currency slippage on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
+    currency_commission : CommissionModel or None, optional
+        Override currency commission on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
+    currency_reporting : CurrencyReporting or None, optional
+        Independent reporting currencies and optional investment accounting,
+        forwarded unchanged to ``TradingAlgorithm``.
+    currency_conversion : CurrencyConversionService or None, optional
+        Standalone monetary/order conversion service. Defaults to the reporting
+        service when present; a different simultaneous service is rejected.
+
+    Returns
+    -------
+    TradingAlgorithmExecutionResult
+        Default performance plus configured currency performance/risk mappings.
     """
     tr = await _prepare_algorithm(algorithm=algorithm, asset_service=asset_service, print_algo=print_algo,
                                   metrics_set=metrics_set, custom_loader=custom_loader,
@@ -89,7 +118,10 @@ async def run_algorithm(
                                   futures_margin_model=futures_margin_model,
                                   exchange_repository=exchange_repository,
                                   price_used_in_order_execution=price_used_in_order_execution,
-                                  intraday_metrics=intraday_metrics)
+                                  intraday_metrics=intraday_metrics, currency_reporting=currency_reporting,
+                                  currency_conversion=currency_conversion,
+                                  currency_slippage=currency_slippage,
+                                  currency_commission=currency_commission)
     trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
     result = await trading_algorithm_executor.run_algorithm(trading_algorithm=tr)
@@ -117,9 +149,33 @@ async def run_algorithm_iter(
         futures_margin_model: FuturesMarginModel | None = None,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
         intraday_metrics: bool = False,
+        currency_reporting: CurrencyReporting | None = None,
+        currency_conversion: CurrencyConversionService | None = None,
+        currency_slippage: SlippageModel | None = None,
+        currency_commission: CommissionModel | None = None,
 ) -> AsyncIterator[TradingAlgorithmExecutionStatus]:
-    """Run a backtest for the given algorithm.
-    This is shared between the cli and :func:`ziplime.run_algo`.
+    """Stream a backtest using the same preparation as ``run_algorithm``.
+
+    Parameters
+    ----------
+    currency_slippage : SlippageModel or None, optional
+        Override currency slippage on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
+    currency_commission : CommissionModel or None, optional
+        Override currency commission on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
+    currency_reporting : CurrencyReporting or None, optional
+        Independent currency metrics and optional investment accounting. Child
+        performance packets are attached under ``metrics_by_currency``.
+    currency_conversion : CurrencyConversionService or None, optional
+        Standalone monetary/order converter, or the reporting service when omitted.
+        Supplying a different service alongside reporting raises ``ValueError``.
+
+    Yields
+    ------
+    TradingAlgorithmExecutionStatus
+        Native progress/performance with configured currency packets. The final
+        status contains currency performance/risk mappings on its result.
     """
     tr = await _prepare_algorithm(algorithm=algorithm, asset_service=asset_service, print_algo=print_algo,
                                   metrics_set=metrics_set, custom_loader=custom_loader,
@@ -129,7 +185,11 @@ async def run_algorithm_iter(
                                   futures_margin_model=futures_margin_model,
                                   price_used_in_order_execution=price_used_in_order_execution,
                                   exchange_repository=exchange_repository,
-                                  intraday_metrics=intraday_metrics)
+                                  intraday_metrics=intraday_metrics,
+                                  currency_reporting=currency_reporting,
+                                  currency_conversion=currency_conversion,
+                                  currency_slippage=currency_slippage,
+                                  currency_commission=currency_commission)
     trading_algorithm_executor = TradingAlgorithmExecutor()
     start_time = datetime.datetime.now(tz=clock.trading_calendar.tz)
     async for status in trading_algorithm_executor.run_algorithm_iter(trading_algorithm=tr):
@@ -157,9 +217,32 @@ async def _prepare_algorithm(
         futures_margin_model: FuturesMarginModel | None = None,
         price_used_in_order_execution: Literal["open", "close", "low", "high"] = "close",
         intraday_metrics: bool = False,
-) -> TradingAlgorithmExecutionResult:
-    """Run a backtest for the given algorithm.
-    This is shared between the cli and :func:`ziplime.run_algo`.
+        currency_reporting: CurrencyReporting | None = None,
+        currency_conversion: CurrencyConversionService | None = None,
+        currency_slippage: SlippageModel | None = None,
+        currency_commission: CommissionModel | None = None,
+) -> TradingAlgorithm:
+    """Prepare strategy, native benchmark, and shared services without executing bars.
+
+    Parameters
+    ----------
+    currency_slippage : SlippageModel or None, optional
+        Override currency slippage on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
+    currency_commission : CommissionModel or None, optional
+        Override currency commission on simulated exchanges in the repository.
+        Omission preserves each exchange's configured model.
+    currency_reporting : CurrencyReporting or None, optional
+        Configuration passed unchanged to the algorithm and its metrics tracker.
+        Currency benchmark wrappers are created later by that tracker.
+    currency_conversion : CurrencyConversionService or None, optional
+        Independent valuation service, defaulting to the reporting converter in
+        the algorithm. Conflicting service instances are rejected there.
+
+    Returns
+    -------
+    TradingAlgorithm
+        Initialized runner object configured for subsequent execution/streaming.
     """
 
     if print_algo:
@@ -249,6 +332,11 @@ async def _prepare_algorithm(
         await benchmark_source.validate_benchmark(benchmark_asset=benchmark_asset)
 
     for exchange in reversed(await exchange_repository.get_all_exchanges()):
+        if isinstance(exchange, SimulationExchange):
+            if currency_slippage is not None:
+                exchange.slippage_models[Currency] = currency_slippage
+            if currency_commission is not None:
+                exchange.commission_models[Currency] = currency_commission
         custom_data_sources.insert(0, exchange)
 
     tr = TradingAlgorithm(
@@ -265,6 +353,8 @@ async def _prepare_algorithm(
         same_bar_execution=same_bar_execution,
         futures_margin_model=futures_margin_model,
         intraday_metrics=intraday_metrics,
+        currency_reporting=currency_reporting,
+        currency_conversion=currency_conversion,
     )
 
     for exchange in await exchange_repository.get_all_exchanges():

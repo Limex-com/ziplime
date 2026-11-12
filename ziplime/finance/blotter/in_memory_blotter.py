@@ -145,8 +145,11 @@ class InMemoryBlotter(Blotter):
     def execute_cancel_policy(self, event):
         if self.cancel_policy.should_cancel(event):
             # warn = self.cancel_policy.warn_on_cancel # TODO: check if needed
-            for exchange in self.open_orders:
-                for asset in self.open_orders[exchange]:
+            # Over copies: cancelling pops from the dict being walked, which raised "dictionary
+            # changed size during iteration" at the first session end with an open order and cost
+            # that session its end-of-day bookkeeping.
+            for exchange in list(self.open_orders):
+                for asset in list(self.open_orders[exchange]):
                     self.cancel_all_orders_for_asset(asset=asset, exchange_name=exchange, relay_status=False)
 
     def order_held(self, order: Order) -> None:

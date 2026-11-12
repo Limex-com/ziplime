@@ -142,5 +142,5 @@ class YahooFinanceDataSource(DataBundleSource):
                 else:
                     df = df.with_columns(date=pl.col("date").dt.replace_time_zone(str(date_from.tzinfo)))
                 df = df.filter(pl.col("date") >= date_from, pl.col("date") <= date_to)
-                final = pl.concat([final, df])
+                final = pl.concat([final, df.select('date', 'open', 'high', 'low', 'close', 'volume', 'symbol', 'mic', 'price')])
         return final

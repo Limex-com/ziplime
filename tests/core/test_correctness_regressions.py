@@ -107,6 +107,42 @@ class NestedPositionLookupTests(unittest.TestCase):
             tracker.get_position(make_equity(sid=1), EXCHANGE.mic, ACCOUNT).cost_basis, 50.0)
 
 
+class PositionsByAssetTests(unittest.TestCase):
+    """`portfolio.positions` is keyed by (exchange, account, asset), but strategies written for
+    zipline look it up by the asset: `positions.get(asset)`, `positions[asset].amount`,
+    `asset in positions`. Those used to miss whatever was held -- a strategy that closed what it
+    held by checking its position never closed anything."""
+
+    def positions(self, *held):
+        tracker = PositionTracker(data_frequency=datetime.timedelta(days=1))
+        for asset, amount in held:
+            tracker.update_position(asset=asset, exchange_name=EXCHANGE.mic,
+                                    trading_account_id=ACCOUNT, amount=amount,
+                                    last_sale_price=50.0, last_sale_date=SESSION, cost_basis=50.0)
+        return Ledger._positions_by_exchange_and_account(tracker)
+
+    def test_a_held_asset_is_found_by_the_asset(self):
+        spy = make_equity()
+        positions = self.positions((spy, 100))
+        self.assertEqual(positions.get(spy, 0).amount, 100)
+        self.assertEqual(positions[spy].amount, 100)
+        self.assertIn(spy, positions)
+
+    def test_an_unheld_asset_is_missing(self):
+        positions = self.positions((make_equity(), 100))
+        qqq = make_equity(sid=2, symbol="QQQ")
+        self.assertEqual(positions.get(qqq, 0), 0)
+        self.assertNotIn(qqq, positions)
+        with self.assertRaises(KeyError):
+            positions[qqq]
+
+    def test_the_book_keys_still_work(self):
+        spy = make_equity()
+        positions = self.positions((spy, 100))
+        self.assertEqual(positions[(EXCHANGE.mic, ACCOUNT, spy)].amount, 100)
+        self.assertEqual(list(positions), [(EXCHANGE.mic, ACCOUNT, spy)])
+
+
 class PositionSnapshotTests(unittest.TestCase):
     """`Ledger.positions` handed out live objects, so the recorded past mutated.
 
@@ -607,13 +643,23 @@ class VolumeCapSignTests(unittest.IsolatedAsyncioTestCase):
         exchange.get_spot_value = AsyncMock(return_value={"close": [price], "volume": [volume]})
         return exchange
 
-    async def quantity_for(self, volume: float, already_used: int, cash: float = 100_000.0):
+    async def quantity_for(self, volume: float, already_used: int, cash: float = 100_000.0,
+                           used_by=None):
+        """``already_used`` shares of the asset filled earlier in this bar -- or of ``used_by``."""
         model = FixedBasisPointsSlippage(basis_points=5.0, volume_limit=0.1)
-        model._volume_for_bar = already_used
+        asset = make_equity()
+        model._volume_dt, model._volume_by_asset = SESSION, {used_by or asset: already_used}
         _, quantity = await model.order_target_percentage_maximum_quantity(
-            exchange=self.make_exchange(volume), dt=SESSION, asset=make_equity(),
+            exchange=self.make_exchange(volume), dt=SESSION, asset=asset,
             percentage=1.0, available_cash=cash)
         return quantity
+
+    async def test_another_assets_fills_do_not_use_this_assets_cap(self):
+        """The cap used to subtract `volume_for_bar` -- whatever the last instrument simulated
+        filled -- so a busy bar in one stock zeroed `order_target_percent` in a thin one."""
+        other = make_equity(sid=make_equity().sid + 1, symbol="OTHER")
+        self.assertEqual(await self.quantity_for(volume=10_000, already_used=900, used_by=other),
+                         1_000)
 
     async def test_an_exhausted_cap_fills_nothing_rather_than_reversing(self):
         # 10% of 1000 shares is 100; 400 of the limit is already spent.

@@ -26,6 +26,12 @@ are array work but whose decisions are not.
 Neither needs a third-party engine. The kernel is ziplime's own, and `numba` only compiles its
 inner loop -- absent, the same loop runs interpreted and reports the same numbers.
 
+A sweep of many combinations can also run on a GPU:
+:func:`~ziplime.vectorized.kernel.simulate_signals_batch` with ``backend="mlx"`` (Apple),
+``backend="cupy"`` (NVIDIA) or ``backend="opencl"`` (Intel Arc, AMD) runs every signal set at
+once, one GPU thread each, in float32 -- and reruns the one worth reporting through the float64
+kernel.
+
 ``vectorbt`` is not a dependency of either. :func:`to_execution_result` still accepts a
 ``vectorbt`` portfolio, and that is deliberate: replaying one through this ledger is how a second
 engine's fills are made comparable with ziplime's own, which is what
@@ -37,6 +43,7 @@ from ziplime.vectorized.signals import (
 )
 
 __all__ = [
+    "BatchSimulationResult",
     "ExecutionTiming",
     "LookAheadError",
     "PricePanel",
@@ -47,6 +54,7 @@ __all__ = [
     "VectorizedRun",
     "replay_transactions",
     "simulate_signals",
+    "simulate_signals_batch",
     "to_execution_result",
     "verify_causality",
 ]
@@ -57,8 +65,8 @@ _LAZY = {"ReconciliationError", "VectorizedRun", "replay_transactions", "to_exec
 
 #: The native kernel. Lazy for the same reason and one more: it pulls in the cost models, which a
 #: strategy using only the signal half has no need of.
-_LAZY_KERNEL = {"ExecutionTiming", "VectorKernelError", "VectorSimulationResult",
-                "simulate_signals"}
+_LAZY_KERNEL = {"BatchSimulationResult", "ExecutionTiming", "VectorKernelError",
+                "VectorSimulationResult", "simulate_signals", "simulate_signals_batch"}
 
 
 def __getattr__(name: str):

@@ -10,6 +10,7 @@ from pandas import isnull
 
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.bond import Bond
+from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.option_contract import OptionContract
@@ -60,7 +61,7 @@ class SlippageModel(metaclass=FinancialModelMeta):
     """
 
     # Asset types that are compatible with the given model.
-    allowed_asset_types = (Equity, Bond, FuturesContract, OptionContract)
+    allowed_asset_types = (Equity, Bond, FuturesContract, OptionContract, Currency)
 
     def __init__(self):
         self._volume_for_bar = 0
@@ -114,6 +115,11 @@ class SlippageModel(metaclass=FinancialModelMeta):
                        same_bar_execution: bool,
                        price_used_in_order_execution: Literal["open", "close", "low", "high"]):
         self._volume_for_bar = 0
+        # What filled per instrument in this bar, for sizing helpers that ask later in the same bar.
+        # `volume_for_bar` alone is whatever the last instrument simulated filled, so a sizing call
+        # for another instrument used to subtract someone else's volume from its own limit.
+        if getattr(self, "_volume_dt", None) != current_dt:
+            self._volume_dt, self._volume_by_asset = current_dt, {}
         current_val = await exchange.get_spot_value(
             assets=assets, fields=frozenset({"volume", price_used_in_order_execution}),
             dt=current_dt
@@ -179,7 +185,14 @@ class SlippageModel(metaclass=FinancialModelMeta):
 
             if txn:
                 self._volume_for_bar += abs(txn.amount)
+                self._volume_by_asset[order.asset] = self._volume_for_bar
                 yield order, txn
+
+    def volume_filled(self, asset, dt) -> int:
+        """Shares of ``asset`` already filled in the bar at ``dt``."""
+        if getattr(self, "_volume_dt", None) != dt:
+            return 0
+        return self._volume_by_asset.get(asset, 0)
 
     def asdict(self):
         return self.__dict__

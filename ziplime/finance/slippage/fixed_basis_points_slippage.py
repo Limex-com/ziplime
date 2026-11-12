@@ -112,7 +112,7 @@ class FixedBasisPointsSlippage(SlippageModel):
         # of shares -- opening a short in a long-only strategy. On a micro-cap universe that ran a
         # book to -13m of exposure on a 1m account. Clamp the remaining capacity at zero: an
         # exhausted limit means nothing more fills, not that the position reverses.
-        remaining_capacity = max(0, max_volume - self.volume_for_bar)
+        remaining_capacity = max(0, max_volume - self.volume_filled(asset, dt))
         shares_to_fill = min(abs(max_quantity), remaining_capacity)
         # print(f"estimated_price_for_target_percentage={price_with_slippage}, shares_to_fill={shares_to_fill},"
         #       f"price_without_slippage={price}")
