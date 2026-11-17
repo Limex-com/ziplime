@@ -13,6 +13,10 @@ from .at_least_n import AtLeastN
 from .static_assets import StaticAssets
 from .static_sids import StaticSids
 
+# Declare the lazy names for source inspection; __init__.pyi provides their exact public types.
+MaximumFilter: type[Filter]
+PercentileFilter: type[Filter]
+
 __all__ = [
     "All",
     "AllPresent",
