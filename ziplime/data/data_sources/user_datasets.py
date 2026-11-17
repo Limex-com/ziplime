@@ -42,6 +42,7 @@ new content) is read again. Least recently used entries are evicted past a byte 
 
 Errors are one plain line each, never a traceback, and never name the bucket or the user.
 """
+
 import collections
 import datetime
 import os
@@ -52,6 +53,7 @@ from typing import Any, Protocol
 
 import polars as pl
 import structlog
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.data.data_sources.huggingface.huggingface_data_source import (
     HuggingFaceDataSource, Resolution,
@@ -59,6 +61,9 @@ from ziplime.data.data_sources.huggingface.huggingface_data_source import (
 from ziplime.data.data_sources.huggingface.manifest import (
     ManifestError, resolve_entity_column, resolve_event_column, resolve_knowledge_column,
 )
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.services.asset_service import AssetService
+from ziplime.constants.period import Period
 
 _logger = structlog.get_logger(__name__)
 
@@ -89,7 +94,7 @@ class UserDatasetStore(Protocol):
 class S3Store:
     """Reads ``s3://bucket/key`` with the credentials the process already has."""
 
-    def __init__(self, region: str | None = None):
+    def __init__(self, region: str | None = None) -> None:
         self.region = region or os.environ.get("AWS_REGION") or os.environ.get(
             "AWS_DEFAULT_REGION") or "us-east-1"
         self._client = None
@@ -157,7 +162,7 @@ def _limit(context_limit: Any) -> int:
 class _FrameCache:
     """Mounted frames by key, least recently used out first, bounded by bytes."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._entries: collections.OrderedDict[tuple, pl.DataFrame] = collections.OrderedDict()
         self._lock = threading.Lock()
 
@@ -241,7 +246,7 @@ class UserDatasetSource(HuggingFaceDataSource):
         fields = self._projected
         return self._cache_base + ((fields if fields == self._ALL else tuple(sorted(fields))),)
 
-    def _need(self, fields) -> None:
+    def _need(self, fields: 'frozenset[str] | None') -> None:
         """Make sure the materialised frame carries ``fields`` (all columns for ``None``)."""
         if self._fixed:
             return
@@ -280,32 +285,63 @@ class UserDatasetSource(HuggingFaceDataSource):
         CACHE.put(key, frame)
         return frame
 
-    async def get_data_by_limit(self, fields, limit, end_date, frequency, assets, include_end_date):
+    async def get_data_by_limit(
+        self,
+        fields: 'frozenset[str] | None',
+        limit: int,
+        end_date: 'datetime.datetime',
+        frequency: 'datetime.timedelta | Period',
+        assets: 'frozenset[ExchangeAsset]',
+        include_end_date: bool,
+    ):
         self._need(fields)
         return await super().get_data_by_limit(fields=fields, limit=limit, end_date=end_date,
                                                frequency=frequency, assets=assets,
                                                include_end_date=include_end_date)
 
-    async def get_data_by_window(self, fields, since, end_date, frequency, assets, include_end_date):
+    async def get_data_by_window(
+        self,
+        fields: 'frozenset[str] | None',
+        since: 'datetime.timedelta',
+        end_date: 'datetime.datetime',
+        frequency: 'datetime.timedelta | Period',
+        assets: 'frozenset[ExchangeAsset]',
+        include_end_date: bool,
+    ):
         self._need(fields)
         return await super().get_data_by_window(fields=fields, since=since, end_date=end_date,
                                                 frequency=frequency, assets=assets,
                                                 include_end_date=include_end_date)
 
-    async def get_spot_value(self, assets, fields, dt, frequency=None, **kwargs):
+    async def get_spot_value(
+        self,
+        assets: 'frozenset[ExchangeAsset]',
+        fields: 'frozenset[str] | None',
+        dt: 'datetime.datetime',
+        frequency: 'datetime.timedelta | Period | None' = None,
+        **kwargs,
+    ):
         self._need(fields)
         return await super().get_spot_value(assets=assets, fields=fields, dt=dt,
                                             frequency=frequency, **kwargs)
 
 
-def mount_user_dataset(address: str, *, asset_service=None, start_date: datetime.date | None = None,
-                       end_date: datetime.date | None = None, trading_calendar=None,
-                       user_id: Any = None, user_datasets_bucket: str | None = None,
-                       user_dataset_store: UserDatasetStore | None = None,
-                       user_dataset_max_bytes: int | None = None,
-                       fields: list[str] | None = None,
-                       resolution: Resolution = Resolution.LATEST_ROW,
-                       name: str | None = None, **_ignored) -> UserDatasetSource:
+def mount_user_dataset(
+    address: str,
+    *,
+    asset_service: 'AssetService | None' = None,
+    start_date: datetime.date | None = None,
+    end_date: datetime.date | None = None,
+    trading_calendar: 'ExchangeCalendar | None' = None,
+    user_id: Any = None,
+    user_datasets_bucket: str | None = None,
+    user_dataset_store: UserDatasetStore | None = None,
+    user_dataset_max_bytes: int | None = None,
+    fields: list[str] | None = None,
+    resolution: Resolution = Resolution.LATEST_ROW,
+    name: str | None = None,
+    **_ignored,
+) -> UserDatasetSource:
     """Mount ``dataset://<name>`` for the user of the running backtest.
 
     ``user_id``, ``user_datasets_bucket`` and, in tests, ``user_dataset_store`` come from the run's

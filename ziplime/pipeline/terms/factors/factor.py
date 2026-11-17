@@ -307,7 +307,11 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         )
 
     def rank(
-            self, method="ordinal", ascending=True, mask=None, groupby=None
+        self,
+        method: str = "ordinal",
+        ascending: bool = True,
+        mask: 'Filter | None' = None,
+        groupby: 'Classifier | None' = None,
     ):
         """
         Construct a new Factor representing the sorted rank of each column
@@ -742,7 +746,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         """
         return self.quantiles(bins=10, mask=mask)
 
-    def top(self, N, mask=None, groupby=None):
+    def top(self, N: int, mask: 'Filter | None' = None, groupby: 'Classifier | None' = None):
         """
         Construct a Filter matching the top N asset values of self each day.
 
@@ -770,7 +774,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             return self._maximum(mask=mask, groupby=groupby)
         return self.rank(ascending=False, mask=mask, groupby=groupby) <= N
 
-    def bottom(self, N, mask=None, groupby=None):
+    def bottom(self, N: int, mask: 'Filter | None' = None, groupby: 'Classifier | None' = None):
         """
         Construct a Filter matching the bottom N asset values of self each day.
 
@@ -794,10 +798,10 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         """
         return self.rank(ascending=True, mask=mask, groupby=groupby) <= N
 
-    def _maximum(self, mask=None, groupby=None):
+    def _maximum(self, mask: 'Filter | None' = None, groupby: 'Classifier | None' = None):
         return MaximumFilter(self, groupby=groupby, mask=mask)
 
-    def percentile_between(self, min_percentile, max_percentile, mask=None):
+    def percentile_between(self, min_percentile: float, max_percentile: float, mask: 'Filter | None' = None):
         """
         Construct a Filter matching values of self that fall within the range
         defined by ``min_percentile`` and ``max_percentile``.
@@ -857,7 +861,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         """
         return (-inf < self) & (self < inf)
 
-    def clip(self, min_bound, max_bound, mask=None):
+    def clip(self, min_bound: float, max_bound: float, mask: 'Filter | None' = None):
         """
         Clip (limit) the values in a factor.
 

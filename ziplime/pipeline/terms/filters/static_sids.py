@@ -1,3 +1,7 @@
+from collections.abc import Iterable
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.terms.filters import Filter
 from ziplime.utils.numpy_utils import repeat_first_axis
 
@@ -20,10 +24,10 @@ class StaticSids(Filter):
     window_length = 0
     params = ("sids",)
 
-    def __new__(cls, sids):
+    def __new__(cls, sids: 'Iterable[int]'):
         sids = frozenset(sids)
         return super(StaticSids, cls).__new__(cls, sids=sids)
 
-    def _compute(self, arrays, dates, sids, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', sids: 'pd.Index', mask: 'np.ndarray'):
         my_columns = sids.isin(self.params["sids"])
         return repeat_first_axis(my_columns, len(mask)) & mask

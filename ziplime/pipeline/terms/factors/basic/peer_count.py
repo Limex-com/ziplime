@@ -1,4 +1,6 @@
 from numpy import unique, copyto
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.mixins import SingleInputMixin
 from ziplime.pipeline.terms.factors.custom_factor import CustomFactor
@@ -16,7 +18,7 @@ class PeerCount(SingleInputMixin, CustomFactor):
 
     window_length = 1
 
-    def _validate(self):
+    def _validate(self) -> None:
         super(PeerCount, self)._validate()
         if self.window_length != 1:
             raise ValueError(
@@ -24,7 +26,13 @@ class PeerCount(SingleInputMixin, CustomFactor):
                 "{window_length}.".format(window_length=self.window_length)
             )
 
-    def compute(self, today, assets, out, classifier_values):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        classifier_values: 'np.ndarray',
+    ) -> None:
         # Convert classifier array to group label int array
         group_labels, null_label = self.inputs[0]._to_integral(classifier_values[0])
         _, inverse, counts = unique(  # Get counts, idx of unique groups

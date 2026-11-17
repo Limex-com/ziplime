@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.data import EquityPricing
 from ziplime.pipeline.terms.factors import CustomFactor
 
@@ -39,7 +42,7 @@ class IchimokuKinkoHyo(CustomFactor):
     )
     window_length = 52
 
-    def _validate(self):
+    def _validate(self) -> None:
         super(IchimokuKinkoHyo, self)._validate()
         for k, v in self.params.items():
             if v > self.window_length:
@@ -54,16 +57,16 @@ class IchimokuKinkoHyo(CustomFactor):
 
     def compute(
         self,
-        today,
-        assets,
-        out,
-        high,
-        low,
-        close,
-        tenkan_sen_length,
-        kijun_sen_length,
-        chikou_span_length,
-    ):
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        high: 'np.ndarray',
+        low: 'np.ndarray',
+        close: 'np.ndarray',
+        tenkan_sen_length: int,
+        kijun_sen_length: int,
+        chikou_span_length: int,
+    ) -> None:
 
         out.tenkan_sen = tenkan_sen = (
             high[-tenkan_sen_length:].max(axis=0) + low[-tenkan_sen_length:].min(axis=0)

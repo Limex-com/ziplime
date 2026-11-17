@@ -22,7 +22,7 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade():
+def upgrade() -> None:
     op.create_table(
         'options_contracts',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -59,7 +59,7 @@ def upgrade():
                     ['underlying_symbol', 'expiration_date'], unique=False)
 
 
-def downgrade():
+def downgrade() -> None:
     op.drop_index('ix_options_contracts_chain', table_name='options_contracts')
     op.drop_index(op.f('ix_options_contracts_underlying_exchange_asset_sid'),
                   table_name='options_contracts')

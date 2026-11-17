@@ -33,7 +33,7 @@ class FileSystemDeltaLakeBundleStorage(BundleStorage):
                  storage_options: dict[str, Any] | None = None,
                  credential_provider: (
                      CredentialProviderFunction | Literal["auto"] | None
-                 ) = "auto", ):
+                 ) = "auto", ) -> None:
         super().__init__()
         self.base_data_path = base_data_path
         self.compression = compression
@@ -66,7 +66,7 @@ class FileSystemDeltaLakeBundleStorage(BundleStorage):
             print(f"[{label}] duplicate keys:")
             print(offending)
 
-    async def store_bundle(self, data_bundle: DataBundle, merge: bool, merge_columns: list[str] | None = None):
+    async def store_bundle(self, data_bundle: DataBundle, merge: bool, merge_columns: list[str] | None = None) -> None:
         # we need here to know where to store bundle, and info is in bundle metadata
         bundle_path = self.get_data_bundle_path(data_bundle=data_bundle)
         await aiofiles.os.makedirs(bundle_path.parent, exist_ok=True)

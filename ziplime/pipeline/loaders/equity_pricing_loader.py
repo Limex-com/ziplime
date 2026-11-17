@@ -11,9 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 from collections import defaultdict
 
 from numpy import iinfo, uint32, multiply
+import numpy as np
+import pandas as pd
 
 from ziplime.data.fx import ExplodingFXRateReader
 from ziplime.lib.adjusted_array import AdjustedArray
@@ -25,6 +28,8 @@ from ziplime.pipeline import Domain
 from ziplime.pipeline.data.equity_pricing import EquityPricing
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.data.services.data_source import DataSource
+from ziplime.data.fx.base import FXRateReader
+from ziplime.pipeline.terms.bound_column import BoundColumn
 
 UINT32_MAX = iinfo(uint32).max
 
@@ -42,7 +47,7 @@ class EquityPricingLoader(PipelineLoader):
        Reader providing currency conversions.
     """
 
-    def __init__(self, data_source: DataSource, asset_service: AssetService, fx_reader):
+    def __init__(self, data_source: DataSource, asset_service: AssetService, fx_reader: 'FXRateReader | None') -> None:
         self.data_source = data_source
         self.asset_service = asset_service
         self.fx_reader = fx_reader
@@ -73,7 +78,14 @@ class EquityPricingLoader(PipelineLoader):
             asset_service=asset_service
         )
 
-    async def load_adjusted_array(self, domain: Domain, columns, dates, sids, mask):
+    async def load_adjusted_array(
+        self,
+        domain: Domain,
+        columns: 'list[BoundColumn]',
+        dates: 'pd.DatetimeIndex',
+        sids: 'pd.Index',
+        mask: 'np.ndarray',
+    ):
         # load_adjusted_array is called with dates on which the user's algo
         # will be shown data, which means we need to return the data that would
         # be known at the **start** of each date. We assume that the latest
@@ -136,7 +148,13 @@ class EquityPricingLoader(PipelineLoader):
         # conversion if we have a non-dummy fx rates reader.
         return not isinstance(self.fx_reader, ExplodingFXRateReader)
 
-    def _inplace_currency_convert(self, columns, arrays, dates, sids):
+    def _inplace_currency_convert(
+        self,
+        columns: 'list[BoundColumn]',
+        arrays: 'list[np.ndarray]',
+        dates: 'pd.DatetimeIndex',
+        sids: 'pd.Index',
+    ):
         """
         Currency convert raw data loaded for ``column``.
 
@@ -185,7 +203,7 @@ class EquityPricingLoader(PipelineLoader):
             for arr in arrays:
                 multiply(arr, rates, out=arr)
 
-    def _split_column_types(self, columns):
+    def _split_column_types(self, columns: 'list[BoundColumn]'):
         """Split out currency columns from OHLCV columns.
 
         Parameters

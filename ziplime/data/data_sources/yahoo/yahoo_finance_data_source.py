@@ -1,5 +1,6 @@
 import datetime
 import multiprocessing
+from collections.abc import Sequence
 import yfinance as yf
 
 import structlog
@@ -8,6 +9,7 @@ import polars as pl
 
 from ziplime.data.data_sources.yahoo.yahoo_finance_constants import YAHOO_EXCHANGE_MAP
 from ziplime.data.services.data_bundle_source import DataBundleSource
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 
 class YahooFinanceDataSource(DataBundleSource):
@@ -22,7 +24,7 @@ class YahooFinanceDataSource(DataBundleSource):
     """
 
     def __init__(self, maximum_threads: int | None = None,
-                 symbol_mics: dict[str, str] | None = None):
+                 symbol_mics: dict[str, str] | None = None) -> None:
         self._logger = structlog.get_logger(__name__)
         if maximum_threads is not None:
             self._maximum_threads = min(multiprocessing.cpu_count() * 2, maximum_threads)
@@ -31,7 +33,7 @@ class YahooFinanceDataSource(DataBundleSource):
         self._symbol_mics = dict(symbol_mics or {})
 
     @classmethod
-    def for_assets(cls, assets, **kwargs) -> "YahooFinanceDataSource":
+    def for_assets(cls, assets: 'Sequence[ExchangeAsset]', **kwargs) -> "YahooFinanceDataSource":
         """Build a source that already knows each listing's exchange."""
         return cls(symbol_mics={a.symbol: a.mic for a in assets}, **kwargs)
 

@@ -32,6 +32,7 @@ from ziplime.finance.slippage.no_slippage import NoSlippage
 from ziplime.finance.slippage.slippage_model import SlippageModel
 
 from ziplime.vectorized.kernel.models import VectorKernelError
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 
 @dataclasses.dataclass(frozen=True)
@@ -137,7 +138,7 @@ def resolve_commission(model: CommissionModel | None) -> ResolvedCommission:
     )
 
 
-def charge_through_model(model: CommissionModel, asset, quantity: float,
+def charge_through_model(model: CommissionModel, asset: 'ExchangeAsset', quantity: float,
                          transaction_amount: float) -> float:
     """One fill's commission, straight through the model's own code.
 

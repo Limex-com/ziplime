@@ -25,7 +25,7 @@ class BenchmarkReturnsAndVolatility:
     def start_of_simulation(
             self, ledger: Ledger, emission_rate: datetime.timedelta, trading_calendar: ExchangeCalendar,
             sessions: pd.DatetimeIndex, benchmark_source: BenchmarkSource
-    ):
+    ) -> None:
         # One row per session; a benchmark day missing from the calendar would otherwise
         # shift the whole series against `session_ix`.
         daily_returns = benchmark_source.daily_returns_by_session(sessions)
@@ -76,7 +76,7 @@ class BenchmarkReturnsAndVolatility:
             )  # pl.DataFrame([pd.Series(returns.select("date"))])
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                   exchanges: dict[str, Exchange]):
+                   exchanges: dict[str, Exchange]) -> None:
         if self._minute_cumulative_returns is None:
             # TODO: fix this so that we don't have minute/daily returns but dynamic frequency returns
             return
@@ -94,7 +94,7 @@ class BenchmarkReturnsAndVolatility:
         packet["cumulative_risk_metrics"]["benchmark_volatility"] = v
 
     def end_of_session(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                       exchanges: dict[str, Exchange]):
+                       exchanges: dict[str, Exchange]) -> None:
         r = self._daily_cumulative_returns[session_ix]
         if np.isnan(r):
             r = None

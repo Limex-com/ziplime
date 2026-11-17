@@ -12,7 +12,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import threading
+
+from ziplime.trading.base_trading_algorithm import BaseTradingAlgorithm
 
 context = threading.local()
 
@@ -21,5 +24,5 @@ def get_algo_instance():
     return getattr(context, "algorithm", None)
 
 
-def set_algo_instance(algo):
+def set_algo_instance(algo: BaseTradingAlgorithm | None) -> None:
     context.algorithm = algo

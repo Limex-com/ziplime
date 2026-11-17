@@ -1,5 +1,6 @@
 import datetime
 from typing import Any
+from collections.abc import Callable
 
 import numpy as np
 
@@ -24,7 +25,7 @@ class ReturnsStatistic:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-    def __init__(self, function, field_name=None):
+    def __init__(self, function: 'Callable', field_name: 'str | None' = None) -> None:
         if field_name is None:
             field_name = function.__name__
 
@@ -32,7 +33,7 @@ class ReturnsStatistic:
         self._field_name = field_name
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                   exchanges: dict[str, Exchange]):
+                   exchanges: dict[str, Exchange]) -> None:
         res = self._function(ledger.daily_returns_array[: session_ix + 1])
         if not np.isfinite(res):
             res = None

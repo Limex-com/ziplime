@@ -7,9 +7,11 @@ from numpy import (
     array,
     dtype as dtype_class,
 )
+from numpy.typing import DTypeLike
+import numpy as np
 
 
-def validate_dtype(termname, dtype, missing_value):
+def validate_dtype(termname: str, dtype: 'DTypeLike | None', missing_value):
     """
     Validate a `dtype` and `missing_value` passed to Term.__new__.
 
@@ -64,7 +66,7 @@ def validate_dtype(termname, dtype, missing_value):
     return dtype, missing_value
 
 
-def _assert_valid_categorical_missing_value(value):
+def _assert_valid_categorical_missing_value(value) -> None:
     """
     Check that value is a valid categorical missing_value.
 
@@ -80,7 +82,7 @@ def _assert_valid_categorical_missing_value(value):
         )
 
 
-def _coerce_to_dtype(value, dtype):
+def _coerce_to_dtype(value, dtype: 'np.dtype'):
     if dtype == categorical_dtype:
         # This check is necessary because we use object dtype for
         # categoricals, and numpy will allow us to promote numerical

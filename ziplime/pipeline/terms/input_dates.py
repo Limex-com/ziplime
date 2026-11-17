@@ -19,7 +19,7 @@ class InputDates(Term):
     windowed = False
     window_safe = True
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "InputDates()"
 
     graph_repr = __repr__

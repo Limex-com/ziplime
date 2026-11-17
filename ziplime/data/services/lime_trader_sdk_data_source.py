@@ -15,7 +15,7 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 class LimeTraderSdkDataSource(DataBundleSource):
     def __init__(self, lime_sdk_credentials_file: str | None,
                  trading_calendar: ExchangeCalendar
-                 ):
+                 ) -> None:
         self._lime_sdk_credentials_file = lime_sdk_credentials_file
         self.trading_calendar = trading_calendar
         self._logger = structlog.get_logger(__name__)
@@ -26,10 +26,15 @@ class LimeTraderSdkDataSource(DataBundleSource):
             self._lime_sdk_client = AsyncLimeClient.from_file(lime_sdk_credentials_file, logger=self._logger)
             self._lime_sdk_client_sync = LimeClient.from_file(lime_sdk_credentials_file, logger=self._logger)
 
-    async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str], dt, data_frequency,
-                             exchange_name: str,
-                             exchange_country: str,
-                             ) -> pl.DataFrame:
+    async def get_spot_value(
+        self,
+        assets: frozenset[ExchangeAsset],
+        fields: frozenset[str],
+        dt: 'datetime.datetime',
+        data_frequency: 'datetime.timedelta',
+        exchange_name: str,
+        exchange_country: str,
+    ) -> pl.DataFrame:
 
         symbols = [asset.get_symbol_by_exchange(exchange_name=exchange_name) for asset in assets]
         quotes = self._lime_sdk_client_sync.market.get_current_quotes(symbols=symbols)

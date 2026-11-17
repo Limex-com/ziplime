@@ -13,9 +13,9 @@ class Positions:
     packet_only = True
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                   exchanges: dict[str, Exchange]):
+                   exchanges: dict[str, Exchange]) -> None:
         packet["minute_perf"]["positions"] = ledger.positions(session)
 
     def end_of_session(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                       exchanges: dict[str, Exchange]):
+                       exchanges: dict[str, Exchange]) -> None:
         packet["daily_perf"]["positions"] = ledger.positions(dt=session)

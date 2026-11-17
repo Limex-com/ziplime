@@ -5,9 +5,11 @@ Utilities for working with pandas objects.
 from contextlib import contextmanager
 from copy import deepcopy
 import warnings
+import datetime
 
 import numpy as np
 import pandas as pd
+from numpy.typing import DTypeLike
 
 
 def explode(df: pd.DataFrame):
@@ -18,7 +20,9 @@ def explode(df: pd.DataFrame):
     return df.index, df.columns, df.values
 
 
-def nearest_unequal_elements(dts, dt):
+def nearest_unequal_elements(
+        dts: pd.DatetimeIndex, dt: pd.Timestamp,
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
     """Find values in ``dts`` closest but not equal to ``dt``.
 
     Returns a pair of (last_before, first_after).
@@ -67,7 +71,7 @@ def nearest_unequal_elements(dts, dt):
     return lower_value, upper_value
 
 
-def timedelta_to_integral_seconds(delta):
+def timedelta_to_integral_seconds(delta: 'pd.Timedelta | datetime.timedelta') -> int:
     """Convert a pd.Timedelta to a number of seconds as an int."""
     return int(delta.total_seconds())
 
@@ -85,7 +89,7 @@ def ignore_pandas_nan_categorical_warning():
         yield
 
 
-def categorical_df_concat(df_list: list[pd.DataFrame], inplace: bool = False):
+def categorical_df_concat(df_list: list[pd.DataFrame], inplace: bool = False) -> pd.DataFrame:
     """Prepare list of pandas DataFrames to be used as input to pd.concat.
     Ensure any columns of type 'category' have the same categories across each
     dataframe.
@@ -142,7 +146,7 @@ def _sort_set_none_first(set_):
         return sorted(set_)
 
 
-def empty_dataframe(*columns):
+def empty_dataframe(*columns: 'tuple[str, DTypeLike]'):
     """Create an empty dataframe with columns of particular types.
 
     Parameters

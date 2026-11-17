@@ -16,6 +16,7 @@ from ziplime.constants.data_type import DataType
 from ziplime.constants.period import Period
 from ziplime.data.services.data_source import DataSource
 from ziplime.utils.date_utils import period_to_timedelta
+from ziplime.assets.services.asset_service import AssetService
 
 
 class DataBundle(DataSource):
@@ -31,8 +32,8 @@ class DataBundle(DataSource):
                  timestamp: datetime.datetime,
                  data: pl.DataFrame = None,
                  sid_indexes: dict[int, tuple[int, int]] = None,
-                 asset_service=None,
-                 roll_finder_settings: dict[str, dict] | None = None):
+                 asset_service: 'AssetService | None' = None,
+                 roll_finder_settings: dict[str, dict] | None = None) -> None:
         super().__init__(name=name,
                          start_date=start_date,
                          end_date=end_date,
@@ -358,7 +359,7 @@ class DataBundle(DataSource):
             # the low the lowest, the volume the sum. This used to take the last row of every
             # field, so a daily "open" was the last minute's and "volume" one minute's; and it cut
             # `.tail(limit)` across all instruments together, so with several only the last came back.
-            def aggregate(field):
+            def aggregate(field: str):
                 return {"open": pl.col(field).first(), "high": pl.col(field).max(),
                         "low": pl.col(field).min(), "volume": pl.col(field).sum()}.get(
                     field, pl.col(field).last())
@@ -524,7 +525,7 @@ class DataBundle(DataSource):
             return False
         return not df.filter(pl.col("sid") == sid).limit(1).is_empty()
 
-    def _as_datetime(self, value) -> datetime.datetime:
+    def _as_datetime(self, value: 'datetime.date') -> datetime.datetime:
         """Normalise a date or datetime to a tz-aware datetime in the calendar's timezone."""
         if isinstance(value, datetime.datetime):
             return value if value.tzinfo else value.replace(tzinfo=self.trading_calendar.tz)
@@ -573,7 +574,7 @@ class DataBundle(DataSource):
             self, asset: ExchangeAsset, field: str, dt: datetime.datetime, perspective_dt: datetime.datetime,
             data_frequency: datetime.timedelta,
             spot_value: float = None
-    ):
+    ) -> float:
         """Returns a scalar value representing the value
         of the desired asset's field at the given dt with adjustments applied.
 
@@ -692,7 +693,7 @@ class DataBundle(DataSource):
         """
         adjustment_ratios_per_asset = []
 
-        def split_adj_factor(x):
+        def split_adj_factor(x: float):
             return x if field != "volume" else 1.0 / x
 
         for asset in assets:

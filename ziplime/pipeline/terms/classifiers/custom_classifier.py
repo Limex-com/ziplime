@@ -13,6 +13,7 @@ from ziplime.pipeline.mixins import (
     PositiveWindowLengthMixin,
     StandardOutputs,
 )
+from ziplime.lib.windowtemplate import AdjustedArrayWindow
 
 
 class CustomClassifier(
@@ -29,7 +30,7 @@ class CustomClassifier(
     ziplime.pipeline.CustomFilter
     """
 
-    def _validate(self):
+    def _validate(self) -> None:
         try:
             super(CustomClassifier, self)._validate()
         except UnsupportedDataType as exc:
@@ -47,7 +48,7 @@ class CustomClassifier(
                 ) from exc
             raise
 
-    def _allocate_output(self, windows, shape):
+    def _allocate_output(self, windows: 'list[AdjustedArrayWindow]', shape: 'tuple[int, int]'):
         """
         Override the default array allocation to produce a LabelArray when we
         have a string-like dtype.

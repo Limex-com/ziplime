@@ -55,6 +55,7 @@ implements the following algorithm for executing pipelines:
    into "narrow" format, with output labels dictated by the Pipeline's
    screen. This logic lives in SimplePipelineEngine._to_narrow.
 """
+
 import datetime
 from abc import ABC, abstractmethod
 from functools import partial
@@ -65,6 +66,7 @@ import pandas as pd
 from numpy import arange, array
 from pandas import DatetimeIndex
 from toolz import groupby
+import numpy as np
 
 from ziplime.errors import NoFurtherDataError
 from ziplime.lib.adjusted_array import ensure_adjusted_array, ensure_ndarray, AdjustedArray
@@ -81,6 +83,7 @@ from ziplime.pipeline.hooks import DelegatingHooks, PipelineHooks
 from ziplime.pipeline.terms.asset_exists import AssetExists
 from ziplime.pipeline.terms.input_dates import InputDates
 from ziplime.assets.services.asset_service import AssetService
+from ziplime.pipeline.loaders.pipeline_loader import PipelineLoader
 
 
 class PipelineEngine(ABC):
@@ -259,8 +262,8 @@ class SimplePipelineEngine(PipelineEngine):
             asset_service: AssetService,
             default_domain: Domain = GENERIC,
             populate_initial_workspace: Callable = None,
-            default_hooks=None,
-    ):
+            default_hooks: 'list[PipelineHooks] | None' = None,
+    ) -> None:
         self._get_loader = get_loader
         self._asset_service = asset_service
 
@@ -643,7 +646,7 @@ class SimplePipelineEngine(PipelineEngine):
         # a mechanism for asking a loader to fetch different windows of data
         # for different terms, so we only batch requests together when they're
         # going to produce data for the same set of dates.
-        def loader_group_key(term):
+        def loader_group_key(term: 'Term'):
             loader = get_loader(term)
             extra_rows = graph.extra_rows[term]
             return loader, extra_rows
@@ -733,7 +736,12 @@ class SimplePipelineEngine(PipelineEngine):
         return out
 
     async def _to_narrow(
-        self, terms: dict[str, Term], data: dict[str, AdjustedArray], mask, dates: numpy.ndarray, assets: numpy.ndarray
+        self,
+        terms: dict[str, Term],
+        data: dict[str, AdjustedArray],
+        mask: 'np.ndarray',
+        dates: numpy.ndarray,
+        assets: numpy.ndarray,
     ):
         """
         Convert raw computed pipeline results into a DataFrame for public APIs.
@@ -800,7 +808,7 @@ class SimplePipelineEngine(PipelineEngine):
         dates: pd.DatetimeIndex,
         sids: pd.Index,
         initial_workspace: dict[Term, AdjustedArray],
-    ):
+    ) -> None:
         """
         Verify that the values passed to compute_chunk are well-formed.
         """
@@ -897,7 +905,7 @@ class SimplePipelineEngine(PipelineEngine):
             hooks = []
         return DelegatingHooks(self._default_hooks + hooks)
 
-    def _ensure_can_load(self, loader, terms):
+    def _ensure_can_load(self, loader: 'PipelineLoader', terms: 'list[LoadableTerm]') -> None:
         """Ensure that ``loader`` can load ``terms``."""
         if not loader.currency_aware:
             bad = [t for t in terms if t.currency_conversion is not None]
@@ -908,7 +916,7 @@ class SimplePipelineEngine(PipelineEngine):
                 )
 
 
-def _pipeline_output_index(dates, assets, mask):
+def _pipeline_output_index(dates: 'pd.DatetimeIndex', assets: 'np.ndarray', mask: 'np.ndarray'):
     """
     Create a MultiIndex for a pipeline output.
 

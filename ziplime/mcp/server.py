@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import sys
 from typing import Any
+from collections.abc import Callable
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -57,7 +58,7 @@ name and a run has a date; use those when talking to a person.
 server = MCPServer(name="ziplime-local", version=VERSION, instructions=INSTRUCTIONS)
 
 
-def _handled(func):
+def _handled(func: 'Callable'):
     """The only path out. Every tool needs it; a traceback must never be the answer.
 
     `ToolError` is the SDK's "a failure you saw coming" — its message reaches

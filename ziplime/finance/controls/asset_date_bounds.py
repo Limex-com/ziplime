@@ -1,4 +1,9 @@
+import pandas as pd
+
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.domain.portfolio import Portfolio
 from ziplime.finance.controls.trading_control import TradingControl
+from ziplime.domain.bar_data import BarData
 
 
 class AssetDateBounds(TradingControl):
@@ -6,10 +11,11 @@ class AssetDateBounds(TradingControl):
     its start_date, or after its end_date.
     """
 
-    def __init__(self, on_error):
+    def __init__(self, on_error: str) -> None:
         super(AssetDateBounds, self).__init__(on_error)
 
-    async def validate(self, asset, amount, portfolio, algo_datetime, algo_current_data):
+    async def validate(self, asset: ExchangeAsset, amount: int, portfolio: Portfolio,
+                       algo_datetime: 'pd.Timestamp', algo_current_data: 'BarData') -> None:
         """Fail if the algo has passed this Asset's end_date, or before the
         Asset's start date.
         """

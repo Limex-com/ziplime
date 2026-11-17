@@ -1,4 +1,6 @@
 from numpy import newaxis
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.terms.factors.factor import Factor
 from ziplime.utils.numpy_utils import (
@@ -48,7 +50,7 @@ class BusinessDaysSincePreviousEvent(Factor):
     window_length = 0
     dtype = float64_dtype
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
 
         # Coerce from [ns] to [D] for numpy busday_count.
         announce_dates = arrays[0].astype(datetime64D_dtype)

@@ -1,13 +1,16 @@
 """Registers the Yahoo Finance connector."""
+from collections.abc import Sequence
+
 from ziplime.assets.domain.asset_type import AssetType
 from ziplime.data.data_sources.registry import DataProvider, register_provider
 from ziplime.data.data_sources.yahoo.yahoo_finance_asset_data_source import (
     YahooFinanceAssetDataSource,
 )
 from ziplime.data.data_sources.yahoo.yahoo_finance_data_source import YahooFinanceDataSource
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 
-def _market_data_source(assets=None, **kwargs) -> YahooFinanceDataSource:
+def _market_data_source(assets: 'Sequence[ExchangeAsset] | None' = None, **kwargs) -> YahooFinanceDataSource:
     """Build the bar source, pre-loading each listing's exchange when assets are given.
 
     Yahoo does not return the exchange with the bars, so without this the source falls back to one

@@ -49,7 +49,7 @@ class OptionLeg:
     listing: ExchangeAsset
     ratio: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         contract_of(self.listing)  # rejects a non-option listing at construction
         if self.ratio == 0:
             raise ValueError(f"A leg of zero contracts is not a leg ({self.listing.symbol}).")
@@ -88,7 +88,7 @@ class OptionStrategy:
     name: str
     legs: tuple[OptionLeg, ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.legs:
             raise ValueError("A strategy needs at least one leg.")
         expiries = {leg.contract.expiration_date for leg in self.legs}
@@ -441,7 +441,7 @@ def custom(name: str, legs: Iterable[tuple[ExchangeAsset, float]]) -> OptionStra
                           legs=tuple(_leg(listing, ratio) for listing, ratio in legs))
 
 
-def _require_sides(call, put) -> None:
+def _require_sides(call: 'ExchangeAsset', put: 'ExchangeAsset') -> None:
     if not call.is_call:
         raise ValueError(f"Expected a call, got a put at {call.strike:g}.")
     if not put.is_put:

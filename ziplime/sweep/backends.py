@@ -10,7 +10,9 @@ The simulation is written against a numpy-like module ``xp``; the backend picks 
 MLX, CuPy and dpnp are optional: ``pip install "ziplime[mlx]"`` or ``"ziplime[cuda]"``; dpnp comes
 from Intel's index (see docs/backtesting/sweep-performance.md).
 """
+
 import os
+from collections.abc import Callable
 
 import numpy as np
 
@@ -18,7 +20,7 @@ from ziplime.sweep.params import SweepError
 
 
 class Backend:
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         self.name = name
         if name == "mlx":
             try:
@@ -73,7 +75,7 @@ class Backend:
             return self.xp.array(value, dtype=self.xp.int32 if self.name == "mlx" else np.int64)
         return self.xp.array(value, dtype=self.xp.float32 if self.name != "numpy" else np.float64)
 
-    def evaluate(self, *arrays):
+    def evaluate(self, *arrays) -> None:
         if self.name == "mlx":
             self.xp.eval(*arrays)
 
@@ -85,7 +87,7 @@ class Backend:
             return self.xp.asnumpy(values)
         return np.asarray(values)
 
-    def compile(self, function):
+    def compile(self, function: 'Callable'):
         """The step compiled into a few kernels. Not shapeless: on CUDA that fails inside MLX
         (an illegal memory access) and on Apple GPUs it is slower; ZIPLIME_SWEEP_SHAPELESS=1 to try."""
         if self.name != "mlx":

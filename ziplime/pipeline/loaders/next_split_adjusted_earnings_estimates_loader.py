@@ -1,7 +1,11 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.lib.adjustment import Float64Multiply
 from ziplime.pipeline.common import SHIFTED_NORMALIZED_QTRS
 from ziplime.pipeline.loaders.next_earnings_estimates_loader import NextEarningsEstimatesLoader
 from ziplime.pipeline.loaders.split_adjusted_estimates_loader import SplitAdjustedEstimatesLoader
+from ziplime.lib.adjustment import Adjustment
 
 
 class NextSplitAdjustedEarningsEstimatesLoader(
@@ -9,17 +13,17 @@ class NextSplitAdjustedEarningsEstimatesLoader(
 ):
     def collect_split_adjustments(
         self,
-        adjustments_for_sid,
-        requested_qtr_data,
-        dates,
-        sid,
-        sid_idx,
-        sid_estimates,
-        split_adjusted_asof_idx,
-        pre_adjustments,
-        post_adjustments,
-        requested_split_adjusted_columns,
-    ):
+        adjustments_for_sid: 'dict[str, dict[int, list[Adjustment]]]',
+        requested_qtr_data: 'pd.DataFrame',
+        dates: 'pd.DatetimeIndex',
+        sid: int,
+        sid_idx: int,
+        sid_estimates: 'pd.DataFrame',
+        split_adjusted_asof_idx: int,
+        pre_adjustments: 'tuple[np.ndarray, np.ndarray]',
+        post_adjustments: 'tuple[np.ndarray, np.ndarray, pd.DatetimeIndex]',
+        requested_split_adjusted_columns: 'list[str]',
+    ) -> None:
         """Collect split adjustments for future quarters. Re-apply adjustments
         that would be overwritten by overwrites. Merge split adjustments with
         overwrites into the given dictionary of splits for the given sid.

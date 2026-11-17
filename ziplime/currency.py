@@ -21,7 +21,7 @@ class Currency:
         Plain english name for the currency, e.g., 'US Dollar'.
     """
 
-    def __new__(cls, code):
+    def __new__(cls, code: str | None) -> "Currency":
         try:
             return _ALL_CURRENCIES[code]
         except KeyError:
@@ -41,7 +41,7 @@ class Currency:
             return obj
 
     @property
-    def code(self):
+    def code(self) -> str | None:
         """ISO-4217 currency code for the currency.
 
         Returns
@@ -51,7 +51,7 @@ class Currency:
         return self._code
 
     @property
-    def name(self):
+    def name(self) -> str:
         """Plain english name for the currency.
 
         Returns
@@ -65,11 +65,11 @@ class Currency:
             return NotImplemented
         return self.code == other.code
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.code)
 
     def __lt__(self, other):
         return self.code < other.code
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "{}({!r})".format(type(self).__name__, self.code)

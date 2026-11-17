@@ -1,6 +1,11 @@
+import datetime
+
 import structlog
 
 from ziplime.finance.controls.account_control import AccountControl
+from ziplime.domain.account import Account
+from ziplime.domain.bar_data import BarData
+from ziplime.domain.portfolio import Portfolio
 
 
 class MaxLeverage(AccountControl):
@@ -9,7 +14,7 @@ class MaxLeverage(AccountControl):
     """
 
     def __init__(self, max_leverage: float, fail_on_error: bool = True,
-                 logger=structlog.get_logger(__name__)):
+                 logger=structlog.get_logger(__name__)) -> None:
         """max_leverage is the gross leverage in decimal form. For example,
         2, limits an algorithm to trading at most double the account value.
         """
@@ -24,7 +29,13 @@ class MaxLeverage(AccountControl):
             raise ValueError("max_leverage must be positive")
         self.fail_on_error = fail_on_error
 
-    async def validate(self, _portfolio, _account, _algo_datetime, _algo_current_data):
+    async def validate(
+        self,
+        _portfolio: 'Portfolio',
+        _account: 'Account',
+        _algo_datetime: 'datetime.datetime',
+        _algo_current_data: 'BarData',
+    ) -> None:
         """Fail if the leverage is greater than the allowed leverage."""
         if _account.leverage > self.max_leverage:
             if self.fail_on_error:

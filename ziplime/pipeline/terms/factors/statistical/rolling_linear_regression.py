@@ -3,9 +3,11 @@ from numpy import broadcast_arrays
 from scipy.stats import (
     linregress,
 )
+import pandas as pd
 
 from ziplime.errors import IncompatibleTerms
 from ziplime.pipeline.terms.factors import CustomFactor
+from ziplime.pipeline.terms.filters.filter import Filter
 
 
 class RollingLinearRegression(CustomFactor):
@@ -44,7 +46,7 @@ class RollingLinearRegression(CustomFactor):
     outputs = ["alpha", "beta", "r_value", "p_value", "stderr"]
 
     def __new__(cls, dependent: np.float64 | np.int64, independent: np.float64 | np.int64,
-                regression_length, mask=None):
+                regression_length: int, mask: 'Filter | None' = None):
         if independent.ndim == 2 and dependent.mask is not independent.mask:
             raise IncompatibleTerms(term_1=dependent, term_2=independent)
         if regression_length < 2:
@@ -56,14 +58,21 @@ class RollingLinearRegression(CustomFactor):
             mask=mask,
         )
 
-    def compute(self, today, assets, out, dependent, independent):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        dependent: 'np.ndarray',
+        independent: 'np.ndarray',
+    ) -> None:
         alpha = out.alpha
         beta = out.beta
         r_value = out.r_value
         p_value = out.p_value
         stderr = out.stderr
 
-        def regress(y, x):
+        def regress(y: 'np.ndarray', x: 'np.ndarray') -> None:
             regr_results = linregress(y=y, x=x)
             # `linregress` returns its results in the following order:
             # slope, intercept, r-value, p-value, stderr

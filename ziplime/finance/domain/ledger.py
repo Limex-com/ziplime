@@ -42,9 +42,11 @@ from ziplime.finance.domain.investment_snapshot import InvestmentSnapshot
 from ziplime.finance.domain.investment_position import InvestmentPosition
 from ziplime.finance.monetary_valuation_service import MonetaryValuationService
 from ziplime.assets.domain.bond_event_type import BondEventType
+from ziplime.assets.entities.split import Split
+from ziplime.assets.services.asset_service import AssetService
 
 
-def _is_margined_option(instrument) -> bool:
+def _is_margined_option(instrument: 'Asset') -> bool:
     """Whether ``instrument`` is an option that settles variation margin rather than a premium.
 
     A free function rather than a method because three separate places have to agree on it -- the
@@ -94,7 +96,7 @@ class Ledger:
                  data_frequency: datetime.timedelta,
                  futures_margin_model: FuturesMarginModel | None = None,
                  bond_book: BondBook | None = None,
-                 ):
+                 ) -> None:
         if len(trading_sessions):
             start = trading_sessions[0]
         else:
@@ -650,7 +652,7 @@ class Ledger:
             else:
                 future.setdefault(stamp, {}).setdefault(key, []).append(amount)
 
-        def check(stamp):
+        def check(stamp: 'datetime.datetime') -> None:
             for (exchange, account, currency), values in amounts.items():
                 balance = self._cash_balance(values)
                 if balance < 0 and changes[(exchange, account, currency)] < 0:
@@ -927,14 +929,14 @@ class Ledger:
         return self.__dirty_portfolio
 
     @_dirty_portfolio.setter
-    def _dirty_portfolio(self, value):
+    def _dirty_portfolio(self, value: bool) -> None:
         if value:
             # marking the portfolio as dirty also marks the account as dirty
             self.__dirty_portfolio = self._dirty_account = value
         else:
             self.__dirty_portfolio = value
 
-    def start_of_session(self, session_label):
+    def start_of_session(self, session_label: 'datetime.date | datetime.datetime') -> None:
         self._processed_transactions.clear()
         self._orders_by_modified.clear()
         self._orders_by_id.clear()
@@ -945,7 +947,7 @@ class Ledger:
         # correct value in metric ``end_of_session`` handlers.
         self._previous_total_returns = self.portfolio.returns
 
-    def end_of_bar(self, session_ix):
+    def end_of_bar(self, session_ix: int) -> None:
         # make daily_returns hold the partial returns, this saves many
         # metrics from doing a concat and copying all of the previous
         # returns
@@ -956,11 +958,11 @@ class Ledger:
         else:
             raise ValueError("Unknown daily returns array type")
 
-    def end_of_session(self, session_ix: int):
+    def end_of_session(self, session_ix: int) -> None:
         # save the daily returns time-series
         self.daily_returns_series.iloc[session_ix] = self.todays_returns
 
-    def sync_last_sale_prices(self, dt: datetime.datetime, prices: dict[tuple[Asset, Exchange], float]):
+    def sync_last_sale_prices(self, dt: datetime.datetime, prices: dict[tuple[Asset, Exchange], float]) -> None:
         self.set_reporting_datetime(dt=dt)
         self.position_tracker.sync_last_sale_prices(
             dt=dt,
@@ -1024,7 +1026,7 @@ class Ledger:
         return self.cash_balances(dt=self._reporting_dt).get(
             (exchange_name, trading_account_id, currency), 0.0)
 
-    def process_transaction(self, transaction: Transaction):
+    def process_transaction(self, transaction: Transaction) -> None:
         """Add a transaction to ledger, updating the current state as needed.
 
         Parameters
@@ -1133,7 +1135,7 @@ class Ledger:
         if currency_trade:
             return
 
-    def process_splits(self, splits):
+    def process_splits(self, splits: 'Iterable[Split]') -> None:
         """Processes a list of splits by modifying any positions as needed.
 
         Parameters
@@ -1185,7 +1187,7 @@ class Ledger:
         if leftover_cash > 0:
             self._cash_flow(leftover_cash)
 
-    def process_order(self, order: Order):
+    def process_order(self, order: Order) -> None:
         """Keep track of an order that was placed.
 
         Parameters
@@ -1209,7 +1211,7 @@ class Ledger:
 
         self._orders_by_id.move_to_end(order.id, last=True)
 
-    def process_commission(self, commission: Commission, tr):
+    def process_commission(self, commission: Commission, tr) -> None:
         """Process the commission.
 
         Parameters
@@ -1250,7 +1252,7 @@ class Ledger:
         # print(f"Commission 3 for {asset.asset_name} is {cost}", tr.account.leverage, tr.account.net_leverage)
 
     def close_position(self, asset: ExchangeAsset, dt: datetime.datetime,
-                       price: float | None = None):
+                       price: float | None = None) -> None:
         """Force-close a position whose contract has reached its auto close date.
 
         For a physically delivered contract this is the step that keeps the backtest honest: the
@@ -1276,7 +1278,12 @@ class Ledger:
         for txn in self.position_tracker.close_positions(asset=asset, dt=dt, price=price):
             self.process_transaction(transaction=txn)
 
-    def bond_price_in_money(self, asset: ExchangeAsset, quoted_price: float, dt) -> float:
+    def bond_price_in_money(
+        self,
+        asset: ExchangeAsset,
+        quoted_price: float,
+        dt: 'datetime.date | datetime.datetime',
+    ) -> float:
         """What one bond of ``asset`` changes hands for at ``quoted_price``: clean value plus
         accrued coupon interest."""
         return self.bond_book.dirty_value(asset.asset, quoted_price, dt)
@@ -1290,7 +1297,11 @@ class Ledger:
                 seen.setdefault(instrument.id, instrument)
         return list(seen.values())
 
-    async def process_bond_events(self, next_session, asset_service) -> None:
+    async def process_bond_events(
+        self,
+        next_session: 'datetime.date | datetime.datetime',
+        asset_service: 'AssetService',
+    ) -> None:
         """Earn and pay the bond schedule for ``next_session``.
 
         Mirrors :meth:`process_dividends`: a payment is *earned* when its record date arrives --
@@ -1327,7 +1338,11 @@ class Ledger:
 
         self.position_tracker.pay_income(session=session_date, post=self._post_income)
 
-    async def redeem_matured_bonds(self, session, asset_service=None) -> None:
+    async def redeem_matured_bonds(
+        self,
+        session: 'datetime.date | datetime.datetime',
+        asset_service: 'AssetService | None' = None,
+    ) -> None:
         """Repay the principal of every bond position that has reached maturity.
 
         Redemption is booked as a closing trade at par rather than left to the auto-close path,
@@ -1375,7 +1390,11 @@ class Ledger:
                 trading_account_id=position.trading_account_id,
             ))
 
-    async def process_dividends(self, next_session, asset_service):
+    async def process_dividends(
+        self,
+        next_session: 'datetime.date | datetime.datetime',
+        asset_service: 'AssetService',
+    ) -> None:
         """Process dividends for the next session.
 
         Earn dividends whose ex-date is this session and pay all previously
@@ -1410,7 +1429,7 @@ class Ledger:
             self, change_amount: float, currency: str | None = None,
             exchange_name: str | None = None, trading_account_id: str | None = None,
             event_id: str | None = None,
-    ):
+    ) -> None:
         """Apply external capital without counting the transfer itself as PNL.
 
         Parameters
@@ -1475,7 +1494,7 @@ class Ledger:
         self._portfolio.portfolio_value += change_amount
         self._portfolio.cash += change_amount
 
-    def transactions(self, dt=None):
+    def transactions(self, dt: 'datetime.datetime | None' = None):
         """Retrieve the dict-form of all of the transactions in a given bar or
         for the whole simulation.
 
@@ -1501,7 +1520,7 @@ class Ledger:
 
         return self._processed_transactions.get(dt, [])
 
-    def orders(self, dt=None):
+    def orders(self, dt: 'datetime.datetime | None' = None):
         """Retrieve the dict-form of all of the orders in a given bar or for
         the whole simulation.
 
@@ -1579,7 +1598,7 @@ class Ledger:
             )
         return next(iter(totals.values()), 0.0)
 
-    def _get_payout_total(self, positions):
+    def _get_payout_total(self, positions: 'Mapping[tuple[str, str, ExchangeAsset], Position]'):
 
         total = 0
         for asset, old_price in self._payout_last_sale_prices.items():
@@ -1628,7 +1647,7 @@ class Ledger:
             )
         return positions
 
-    def synchronize_exchange_portfolio(self, portfolio: Portfolio):
+    def synchronize_exchange_portfolio(self, portfolio: Portfolio) -> None:
         # start_cash = sum(exchange.get_start_cash_balance() for exchange in exchange_repository.get_all_exchanges())
 
         pt = self.position_tracker
@@ -1777,7 +1796,7 @@ class Ledger:
         #     print("a")
         return portfolio_value, gross_leverage, net_leverage
 
-    def update_account(self):
+    def update_account(self) -> None:
         if not self._dirty_account:
             return
 

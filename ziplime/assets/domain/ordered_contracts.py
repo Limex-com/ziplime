@@ -1,4 +1,6 @@
 """The ordered chain of contracts behind a continuous future."""
+from collections.abc import Callable
+
 import datetime
 from functools import partial
 
@@ -61,10 +63,11 @@ class OrderedContracts:
             a continuous future on a single delivery cycle.
     """
 
-    def __init__(self, root_symbol: str, contracts: list[ExchangeAsset], chain_predicate=None):
+    def __init__(self, root_symbol: str, contracts: list[ExchangeAsset],
+                 chain_predicate: Callable[[ExchangeAsset], bool] | None = None) -> None:
         self.root_symbol = root_symbol
         if chain_predicate is None:
-            def chain_predicate(contract):
+            def chain_predicate(contract: ExchangeAsset) -> bool:
                 return True
 
         included = []

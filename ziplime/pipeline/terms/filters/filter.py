@@ -15,7 +15,7 @@ from ziplime.pipeline.terms.computable_term import ComputableTerm
 from ziplime.utils.numpy_utils import same, bool_dtype
 
 
-def binary_operator(op):
+def binary_operator(op: str):
     """
     Factory function for making binary operator methods on a Filter subclass.
 
@@ -27,7 +27,7 @@ def binary_operator(op):
     # NumericalExpression operator.
     commuted_method_getter = attrgetter(method_name_for_op(op, commute=True))
 
-    def binary_operator(self, other):
+    def binary_operator(self, other: 'Term | int'):
         from ziplime.pipeline.terms.filters.num_expr_filter import NumExprFilter
         if isinstance(self, NumericalExpression):
             self_expr, other_expr, new_inputs = self.build_binary_op(
@@ -70,7 +70,7 @@ def binary_operator(op):
     return binary_operator
 
 
-def unary_operator(op):
+def unary_operator(op: str):
     """
     Factory function for making unary operator methods for Filters.
     """

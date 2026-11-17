@@ -23,7 +23,7 @@ class CancelPolicy(metaclass=abc.ABCMeta):
     """Abstract cancellation policy interface."""
 
     @abstractmethod
-    def should_cancel(self, event):
+    def should_cancel(self, event: SimulationEvent) -> bool:
         """Should all open orders be cancelled?
 
         Parameters
@@ -53,18 +53,18 @@ class EODCancel(CancelPolicy):
         Should a warning be raised if this causes an order to be cancelled?
     """
 
-    def __init__(self, warn_on_cancel=True):
+    def __init__(self, warn_on_cancel: bool = True) -> None:
         self.warn_on_cancel = warn_on_cancel
 
-    def should_cancel(self, event):
+    def should_cancel(self, event: SimulationEvent) -> bool:
         return event == SimulationEvent.SESSION_END
 
 
 class NeverCancel(CancelPolicy):
     """Orders are never automatically canceled."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.warn_on_cancel = False
 
-    def should_cancel(self, event):
+    def should_cancel(self, event: SimulationEvent) -> bool:
         return False

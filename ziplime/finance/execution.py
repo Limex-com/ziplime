@@ -28,7 +28,7 @@ class ExecutionStyle(metaclass=abc.ABCMeta):
     """Base class for order execution styles."""
 
     @abc.abstractmethod
-    def get_limit_price(self, is_buy):
+    def get_limit_price(self, is_buy: bool) -> float | None:
         """
         Get the limit price for this order.
         Returns either None or a numerical value >= 0.
@@ -36,7 +36,7 @@ class ExecutionStyle(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def get_stop_price(self, is_buy):
+    def get_stop_price(self, is_buy: bool) -> float | None:
         """
         Get the stop price for this order.
         Returns either None or a numerical value >= 0.
@@ -59,19 +59,19 @@ class MarketOrder(ExecutionStyle):
     This is the default for orders placed with :func:`~ziplime.api.order`.
     """
 
-    def __init__(self, same_day_execution: bool = True):
+    def __init__(self, same_day_execution: bool = True) -> None:
         self.same_day_execution = same_day_execution
 
-    def get_limit_price(self, is_buy: bool):
+    def get_limit_price(self, is_buy: bool) -> None:
         return None
 
-    def get_stop_price(self, is_buy: bool):
+    def get_stop_price(self, is_buy: bool) -> None:
         return None
 
     def to_order_type(self) -> OrderType:
         return OrderType.MARKET
 
-    def __str__(self):
+    def __str__(self) -> str:
         return "MarketOrder()"
 
 
@@ -87,26 +87,26 @@ class LimitOrder(ExecutionStyle):
         should be filled.
     """
 
-    def __init__(self, limit_price: float, tick_size: float = 0.01):
+    def __init__(self, limit_price: float, tick_size: float = 0.01) -> None:
         check_stoplimit_prices(price=limit_price, label="limit")
 
         self.limit_price = limit_price
         self.tick_size = tick_size
 
-    def get_limit_price(self, is_buy):
+    def get_limit_price(self, is_buy: bool) -> float:
         return asymmetric_round_price(
             self.limit_price,
             is_buy,
             tick_size=self.tick_size,
         )
 
-    def get_stop_price(self, is_buy):
+    def get_stop_price(self, is_buy: bool) -> None:
         return None
 
     def to_order_type(self) -> OrderType:
         return OrderType.LIMIT
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"LimitOrder(limit_price={self.limit_price})"
 
 
@@ -123,18 +123,18 @@ class StopOrder(ExecutionStyle):
         the order will be placed if market price rises above this value.
     """
 
-    def __init__(self, stop_price: float, tick_size: float = 0.01):
+    def __init__(self, stop_price: float, tick_size: float = 0.01) -> None:
         check_stoplimit_prices(price=stop_price, label="stop")
 
         self.stop_price = stop_price
         self.tick_size = tick_size
 
-    def get_limit_price(self, is_buy):
+    def get_limit_price(self, is_buy: bool) -> None:
         # Named `_is_buy` before, while Order passes it by keyword (`is_buy=`): every StopOrder
         # raised TypeError the moment it was placed.
         return None
 
-    def get_stop_price(self, is_buy):
+    def get_stop_price(self, is_buy: bool) -> float:
         return asymmetric_round_price(
             self.stop_price,
             not is_buy,
@@ -144,7 +144,7 @@ class StopOrder(ExecutionStyle):
     def to_order_type(self) -> OrderType:
         return OrderType.STOP
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"StopOrder(stop_price={self.stop_price})"
 
 
@@ -164,7 +164,7 @@ class StopLimitOrder(ExecutionStyle):
         the order will be placed if market price rises above this value.
     """
 
-    def __init__(self, limit_price: float, stop_price: float, tick_size: float = 0.01):
+    def __init__(self, limit_price: float, stop_price: float, tick_size: float = 0.01) -> None:
         check_stoplimit_prices(price=limit_price, label="limit")
         check_stoplimit_prices(price=stop_price, label="stop")
 
@@ -172,14 +172,14 @@ class StopLimitOrder(ExecutionStyle):
         self.stop_price = stop_price
         self.tick_size = tick_size
 
-    def get_limit_price(self, is_buy):
+    def get_limit_price(self, is_buy: bool) -> float:
         return asymmetric_round_price(
             self.limit_price,
             is_buy,
             tick_size=self.tick_size,
         )
 
-    def get_stop_price(self, is_buy):
+    def get_stop_price(self, is_buy: bool) -> float:
         return asymmetric_round_price(
             self.stop_price,
             not is_buy,
@@ -189,11 +189,11 @@ class StopLimitOrder(ExecutionStyle):
     def to_order_type(self) -> OrderType:
         return OrderType.STOP_LIMIT
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"StopLimitOrder(limit_price={self.limit_price}, stop_price={self.stop_price})"
 
 
-def asymmetric_round_price(price: float, prefer_round_down: bool, tick_size: float, diff: float = 0.95):
+def asymmetric_round_price(price: float, prefer_round_down: bool, tick_size: float, diff: float = 0.95) -> float:
     """
     Asymmetric rounding function for adjusting prices to the specified number
     of places in a way that "improves" the price. For limit prices, this means
@@ -230,7 +230,7 @@ def asymmetric_round_price(price: float, prefer_round_down: bool, tick_size: flo
     return rounded
 
 
-def check_stoplimit_prices(price: float, label: str):
+def check_stoplimit_prices(price: float, label: str) -> None:
     """
     Check to make sure the stop/limit prices are reasonable and raise
     a BadOrderParameters exception if not.

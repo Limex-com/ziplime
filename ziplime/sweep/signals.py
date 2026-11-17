@@ -5,6 +5,8 @@ or the strategy's ``compute_signals``. Either way most combinations share most o
 ``rolling_mean(5)`` is the same array whatever ``slow`` is -- and the sweep computes each distinct
 signal once and hands every combination an index into the distinct ones.
 """
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 import polars as pl
@@ -14,14 +16,23 @@ from ziplime.vectorized.indicators import compute_indicators, long_frame, per_in
 from ziplime.vectorized.signals import (
     LookAheadError, PricePanel, normalise_signals, verify_causality,
 )
+from ziplime.config.base_algorithm_config import BaseAlgorithmConfig
+from ziplime.core.algorithm_file import AlgorithmFile
+from ziplime.sweep.initialize import SweepContext
 
 #: Signals the vector kernel trades on.
 DECISION_NAMES = ("entries", "exits", "short_entries", "short_exits")
 
-
 # -- compute_signals ---------------------------------------------------------------------------
 
-def compute(algorithm, context, panel: PricePanel, config, decisions: bool = True) -> dict:
+
+def compute(
+    algorithm: 'AlgorithmFile',
+    context: 'SweepContext',
+    panel: PricePanel,
+    config: 'BaseAlgorithmConfig | _ReadTracker',
+    decisions: bool = True,
+) -> dict:
     """The algorithm's compute_signals with this config, normalised as the engine does it."""
     algorithm.config = config
     computed = normalise_signals(algorithm.compute_signals(context, panel), panel.index)
@@ -33,7 +44,13 @@ def compute(algorithm, context, panel: PricePanel, config, decisions: bool = Tru
     return computed
 
 
-def check_causality(algorithm, context, panel: PricePanel, config, decisions: bool = True):
+def check_causality(
+    algorithm: 'AlgorithmFile',
+    context: 'SweepContext',
+    panel: PricePanel,
+    config: 'BaseAlgorithmConfig | _ReadTracker',
+    decisions: bool = True,
+) -> None:
     """ziplime's verify_causality: no signal may read the future."""
     computed = compute(algorithm, context, panel, config, decisions)
     try:
@@ -75,11 +92,11 @@ def signal_arrays(computed: dict, in_run: np.ndarray, columns: list[str],
 class _ReadTracker:
     """A config that records which of its fields compute_signals read."""
 
-    def __init__(self, config):
+    def __init__(self, config: 'BaseAlgorithmConfig') -> None:
         object.__setattr__(self, "_config", config)
         object.__setattr__(self, "read", set())
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name in type(self._config).model_fields:
             self.read.add(name)
         return getattr(self._config, name)
@@ -91,15 +108,23 @@ class SignalCache:
     Rotation reads only lookback, so 360 combinations cost 12 calls.
     """
 
-    def __init__(self, algorithm, context, panel, in_run, columns, decisions):
+    def __init__(
+        self,
+        algorithm: 'AlgorithmFile',
+        context: 'SweepContext',
+        panel: 'PricePanel',
+        in_run: 'np.ndarray',
+        columns: 'list[str]',
+        decisions: bool,
+    ) -> None:
         self._args = (algorithm, context, panel, in_run, columns, decisions)
         self.fields = None
         self.variants = {}
 
-    def key(self, config):
+    def key(self, config: 'BaseAlgorithmConfig'):
         return tuple((name, repr(getattr(config, name))) for name in sorted(self.fields))
 
-    def get(self, config):
+    def get(self, config: 'BaseAlgorithmConfig'):
         if self.fields is not None and self.key(config) in self.variants:
             return self.key(config)
         algorithm, context, panel, in_run, columns, decisions = self._args
@@ -113,7 +138,7 @@ class SignalCache:
         self.variants[self.key(config)] = arrays
         return self.key(config)
 
-    def stacks(self, configs, n_bars: int, n_columns: int, decisions: bool = True):
+    def stacks(self, configs: 'Sequence[BaseAlgorithmConfig]', n_bars: int, n_columns: int, decisions: bool = True):
         """decisions=True: each combination's decisions, (combinations, bars, instruments) per
         name, for the vector kernel. decisions=False: the distinct signal sets (variants, bars,
         instruments) and each combination's variant, so nothing is copied per combination."""
@@ -124,7 +149,7 @@ class SignalCache:
         unique = list(dict.fromkeys(keys))
         names = list(dict.fromkeys(name for key in unique for name in self.variants[key]))
 
-        def stack(key_list, name):
+        def stack(key_list, name: str):
             return np.stack([self.variants[key].get(name, np.zeros((n_bars, n_columns), dtype=bool))
                              for key in key_list])
 
@@ -147,7 +172,7 @@ class IndicatorSignals:
     ``momentum`` it read.
     """
 
-    def __init__(self, initialized: list, panel: PricePanel, in_run: np.ndarray, columns: list[str]):
+    def __init__(self, initialized: list, panel: PricePanel, in_run: np.ndarray, columns: list[str]) -> None:
         self.names = list(initialized[0].indicators)
         distinct = {id(each): each for each in initialized}
         if any(list(each.indicators) != self.names for each in distinct.values()):
@@ -188,7 +213,7 @@ class IndicatorSignals:
     def variants(self) -> int:
         return len(self.arrays)
 
-    def stacks(self, indices):
+    def stacks(self, indices: 'Sequence[int]'):
         """Each indicator's distinct arrays among these combinations, and each one's index."""
         stacks, index = {}, {}
         for name in self.names:
@@ -200,7 +225,7 @@ class IndicatorSignals:
         return stacks, index
 
 
-def check_indicators(expressions: dict, panel: PricePanel, warmup: int, config):
+def check_indicators(expressions: dict, panel: PricePanel, warmup: int, config: 'BaseAlgorithmConfig') -> None:
     """verify_causality for one combination's indicators."""
     computed = normalise_signals(compute_indicators(expressions, panel), panel.index)
     try:

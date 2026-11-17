@@ -1,14 +1,20 @@
 """Pipeline hooks for tracking and displaying progress.
 """
+
 import datetime
 from collections import namedtuple
 import time
+from collections.abc import Callable
+from collections.abc import Iterable
 
 from ziplime.utils.compat import contextmanager, escape_html
 from ziplime.utils.string_formatting import bulleted_list
 
 from ziplime.pipeline.hooks.iface import PipelineHooks
 from ziplime.pipeline import Term
+from ziplime.pipeline.pipeline import Pipeline
+from ziplime.pipeline.terms.computable_term import ComputableTerm
+from ziplime.pipeline.terms.loadable_term import LoadableTerm
 
 
 class ProgressHooks(PipelineHooks):
@@ -22,11 +28,11 @@ class ProgressHooks(PipelineHooks):
         a ``ProgressModel`` and publishes progress to a consumer.
     """
 
-    def __init__(self, publisher_factory):
+    def __init__(self, publisher_factory: 'Callable') -> None:
         self._publisher_factory = publisher_factory
         self._reset_transient_state()
 
-    def _reset_transient_state(self):
+    def _reset_transient_state(self) -> None:
         self._start_date = None
         self._end_date = None
         self._model = None
@@ -45,11 +51,11 @@ class ProgressHooks(PipelineHooks):
         """Construct a ProgressHooks that uses an already-constructed publisher."""
         return cls(publisher_factory=lambda: publisher)
 
-    def _publish(self):
+    def _publish(self) -> None:
         self._publisher.publish(self._model)
 
     @contextmanager
-    def running_pipeline(self, pipeline, start_date, end_date):
+    def running_pipeline(self, pipeline: 'Pipeline', start_date: 'datetime.date', end_date: 'datetime.date'):
         self._start_date = start_date
         self._end_date = end_date
 
@@ -151,7 +157,7 @@ class ProgressModel:
         List of terms currently being loaded or computed.
     """
 
-    def __init__(self, start_date: datetime.date, end_date: datetime.date):
+    def __init__(self, start_date: datetime.date, end_date: datetime.date) -> None:
         self._start_date = start_date
         self._end_date = end_date
 
@@ -211,7 +217,7 @@ class ProgressModel:
         return self._current_work
 
     # These methods form the interface for ProgressHooks.
-    def start_chunk(self, terms: list[Term], start_date: datetime.date, end_date: datetime.date):
+    def start_chunk(self, terms: list[Term], start_date: datetime.date, end_date: datetime.date) -> None:
         days_since_start = (end_date - self._start_date).days + 1
         self._current_chunk_size = days_since_start - self._days_completed
         self._current_chunk_bounds = (start_date, end_date)
@@ -230,32 +236,32 @@ class ProgressModel:
             self._completed_term_increment = 0.0
             self._completed_chunk_increment = chunk_percent
 
-    def finish_chunk(self, terms, start_date, end_date):
+    def finish_chunk(self, terms: 'list[Term]', start_date: 'datetime.date', end_date: 'datetime.date') -> None:
         self._days_completed += self._current_chunk_size
         self._progress += self._completed_chunk_increment
 
-    def start_load_terms(self, terms):
+    def start_load_terms(self, terms: 'list[LoadableTerm]') -> None:
         self._state = "loading"
         self._current_work = terms
 
-    def finish_load_terms(self, terms):
+    def finish_load_terms(self, terms: 'list[LoadableTerm]') -> None:
         self._finish_terms(nterms=len(terms))
 
-    def start_compute_term(self, term):
+    def start_compute_term(self, term: 'ComputableTerm') -> None:
         self._state = "computing"
         self._current_work = [term]
 
-    def finish_compute_term(self, term):
+    def finish_compute_term(self, term: 'ComputableTerm') -> None:
         self._finish_terms(nterms=1)
 
-    def finish(self, success):
+    def finish(self, success: bool) -> None:
         self._end_time = time.time()
         if success:
             self._state = "success"
         else:
             self._state = "error"
 
-    def _finish_terms(self, nterms):
+    def _finish_terms(self, nterms: int) -> None:
         self._progress += nterms * self._completed_term_increment
 
 
@@ -270,7 +276,7 @@ try:
     # is somewhat noisy, so we replace it here with a version that just returns
     # an empty string.
     class ProgressBarContainer(ipywidgets.VBox):
-        def __repr__(self):
+        def __repr__(self) -> str:
             return ""
 
 except ImportError:
@@ -289,7 +295,7 @@ except ImportError:
 class IPythonWidgetProgressPublisher:
     """A progress publisher that publishes to an IPython/Jupyter widget."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         missing = []
         if not HAVE_WIDGETS:
             missing.append("ipywidgets")
@@ -349,7 +355,7 @@ class IPythonWidgetProgressPublisher:
 
         self._displayed = False
 
-    def publish(self, model):
+    def publish(self, model: 'ProgressModel') -> None:
         if model.state == "init":
             self._heading.value = "<b>Analyzing Pipeline...</b>"
             self._set_progress(0.0)
@@ -393,29 +399,29 @@ class IPythonWidgetProgressPublisher:
             self._layout.close()
             raise ValueError("Unknown display state: {!r}".format(model.state))
 
-    def _ensure_displayed(self):
+    def _ensure_displayed(self) -> None:
         if not self._displayed:
             display(self._layout)
             self._displayed = True
 
-    def _stop_displaying(self):
+    def _stop_displaying(self) -> None:
         self._layout.close()
 
     @staticmethod
-    def _render_term_list(terms):
+    def _render_term_list(terms: 'Iterable[Term]') -> str:
         list_elements = "".join(
             ["<li><pre>{}</pre></li>".format(repr_htmlsafe(t)) for t in terms]
         )
         return "<ul>{}</ul>".format(list_elements)
 
-    def _set_progress(self, percent_complete):
+    def _set_progress(self, percent_complete: float) -> None:
         self._bar.value = percent_complete
         self._percent_indicator.value = "<b>{:.2f}% Complete</b>".format(
             percent_complete
         )
 
     @staticmethod
-    def _format_execution_time(total_seconds):
+    def _format_execution_time(total_seconds: float):
         """Helper method for displaying total execution time of a Pipeline.
 
         Parameters
@@ -429,7 +435,7 @@ class IPythonWidgetProgressPublisher:
             User-facing text representation of elapsed time.
         """
 
-        def maybe_s(n):
+        def maybe_s(n: int) -> str:
             if n == 1:
                 return ""
             return "s"
@@ -471,10 +477,10 @@ class TestingProgressPublisher:
         ],
     )
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.trace = []
 
-    def publish(self, model):
+    def publish(self, model: 'ProgressModel') -> None:
         self.trace.append(
             self.TraceState(
                 state=model.state,

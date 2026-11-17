@@ -1,4 +1,5 @@
 import math
+import datetime
 
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.finance.domain.order_status import OrderStatus
@@ -9,7 +10,6 @@ SELL = 1 << 0
 BUY = 1 << 1
 STOP = 1 << 2
 LIMIT = 1 << 3
-
 
 # ORDER_FIELDS_TO_IGNORE = {"type", "direction", "_status", "asset"}
 
@@ -29,8 +29,8 @@ class Order:
 
     def __init__(
             self,
-            id,
-            dt,
+            id: str,
+            dt: 'datetime.datetime',
             asset: ExchangeAsset,
             amount: int,
             filled: int,
@@ -40,7 +40,7 @@ class Order:
             exchange_name: str,
             trading_account_id: str,
             exchange_order_id: str = None
-    ):
+    ) -> None:
         """
         @dt - datetime.datetime that the order was placed
         @asset - asset for the order.
@@ -73,7 +73,7 @@ class Order:
         self.exchange_order_id = exchange_order_id
         self.submitted_valuations: dict[str, OrderValuation] = {}
 
-    def check_triggers(self, price, dt):
+    def check_triggers(self, price: float, dt: 'datetime.datetime') -> None:
         """
         Update internal state based on price triggers and the
         trade event's price.
@@ -111,7 +111,7 @@ class Order:
 
     # TODO: simplify
     # flake8: noqa: C901
-    def check_order_triggers(self, current_price):
+    def check_order_triggers(self, current_price: float):
         """
         Given an order and a trade event, return a tuple of
         (stop_reached, limit_reached).
@@ -157,7 +157,7 @@ class Order:
 
         return stop_reached, limit_reached, sl_stop_reached
 
-    def handle_split(self, ratio):
+    def handle_split(self, ratio: float) -> None:
         # update the amount, limit_price, and stop_price
         # by the split's ratio
 
@@ -185,17 +185,17 @@ class Order:
             return self._status
 
     @status.setter
-    def status(self, status):
+    def status(self, status: 'OrderStatus') -> None:
         self._status = status
 
-    def cancel(self):
+    def cancel(self) -> None:
         self.status = OrderStatus.CANCELLED
 
-    def reject(self, reason: str = ""):
+    def reject(self, reason: str = "") -> None:
         self.status = OrderStatus.REJECTED
         self.reason = reason
 
-    def hold(self, reason: str = ""):
+    def hold(self, reason: str = "") -> None:
         self.status = OrderStatus.HELD
         self.reason = reason
 
@@ -222,7 +222,7 @@ class Order:
     def open_amount(self):
         return self.amount - self.filled
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """
         String representation for this object.
         """

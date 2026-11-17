@@ -1,4 +1,6 @@
 from numpy import abs, dstack
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.data import EquityPricing
 from ziplime.pipeline.terms.factors import CustomFactor
@@ -26,7 +28,15 @@ class TrueRange(CustomFactor):
     )
     window_length = 2
 
-    def compute(self, today, assets, out, highs, lows, closes):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        highs: 'np.ndarray',
+        lows: 'np.ndarray',
+        closes: 'np.ndarray',
+    ) -> None:
         high_to_low = highs[1:] - lows[1:]
         high_to_prev_close = abs(highs[1:] - closes[:-1])
         low_to_prev_close = abs(lows[1:] - closes[:-1])

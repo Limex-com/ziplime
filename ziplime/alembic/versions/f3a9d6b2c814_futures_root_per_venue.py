@@ -22,7 +22,7 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade():
+def upgrade() -> None:
     with op.batch_alter_table("futures_contracts", recreate="always") as batch_op:
         batch_op.drop_constraint("fk_futures_contracts_root_symbol_futures_root_symbols",
                                  type_="foreignkey")
@@ -31,7 +31,7 @@ def upgrade():
         batch_op.create_primary_key("pk_futures_root_symbols", ["root_symbol", "mic"])
 
 
-def downgrade():
+def downgrade() -> None:
     with op.batch_alter_table("futures_root_symbols", recreate="always") as batch_op:
         batch_op.drop_constraint("pk_futures_root_symbols", type_="primary")
         batch_op.create_primary_key("pk_futures_root_symbols", ["root_symbol"])

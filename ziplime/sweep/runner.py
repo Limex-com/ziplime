@@ -11,6 +11,7 @@ Three ways a strategy is computed, picked from the strategy itself:
 Either way the best combinations are recomputed exactly (float64) and the best one is run through
 run_simulation, and its trades compared with the sweep's.
 """
+
 import asyncio
 import concurrent.futures
 import datetime
@@ -22,18 +23,23 @@ import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Callable
+from collections.abc import Iterable
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.core.ingest_data import get_asset_service
 from ziplime.finance.cancel_policy import EODCancel, NeverCancel
 from ziplime.sweep import check, engine, report
 from ziplime.sweep import explain
-from ziplime.sweep.convert import NotConvertible, convert
+from ziplime.sweep.convert import convert
+from ziplime.sweep.errors import NotConvertible
 from ziplime.sweep.data import load_market_data, price_panel
 from ziplime.sweep.initialize import initialize_each, load_algorithm, run_initialize
 from ziplime.sweep.market import asof_rows, build_market, parse_rate
+from ziplime.sweep.windows import Windows
 from ziplime.sweep.params import (
     DEFAULT_ASSET_DB, DEFAULT_STORAGE, Commission, Slippage, SweepError, SweepParams, expand_grid,
 )
@@ -46,6 +52,16 @@ from ziplime.vectorized.kernel import (
     ExecutionTiming, VectorKernelError, simulate_signals, simulate_signals_batch,
 )
 from ziplime.vectorized.kernel.costs import resolve_commission, resolve_slippage
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.services.asset_service import AssetService
+from ziplime.core.algorithm_file import AlgorithmFile
+from ziplime.data.domain.data_bundle import DataBundle
+from ziplime.data.services.data_source import DataSource
+from ziplime.sweep.initialize import Combinations
+from ziplime.sweep.initialize import Initialized
+from ziplime.sweep.market import Market
+from ziplime.sweep.report import Stages
+from ziplime.vectorized.signals import PricePanel
 
 #: Elements (combinations × instruments) per GPU call when batch_size is "auto": the size the
 #: measurements on an M3 and an RTX 4090 ran fastest at.
@@ -56,7 +72,6 @@ CUDA_ELEMENTS = 2_000_000
 #: A rerun of this few combinations goes to the CPU: on a GPU each bar costs the same few hundred
 #: kernel launches whether it carries ten combinations or forty thousand.
 SMALL_RERUN = 5_000
-
 
 #: The entries/exits kernel each sweep backend runs. dpnp has no way to launch it, and every Intel
 #: GPU it runs on has OpenCL, so a dpnp sweep runs the kernel through PyOpenCL on the same GPU.
@@ -82,7 +97,7 @@ def _apple_gpu() -> bool:
 
 
 async def run_sweep(params: SweepParams, base: Path, say: Callable[[str], None] = print, *,
-                    market_data=None, asset_service=None,
+                    market_data: 'DataBundle | None' = None, asset_service: 'AssetService | None' = None,
                     custom_data_sources: list | None = None) -> pd.DataFrame:
     """Run the sweep the file describes; returns every combination's metrics.
 
@@ -108,8 +123,19 @@ async def run_sweep(params: SweepParams, base: Path, say: Callable[[str], None] 
             await asset_service._asset_repository.engine.dispose()
 
 
-async def _sweep(params, base, say, stages, started, combos, algorithm, combinations, asset_service,
-                 market_data, registered):
+async def _sweep(
+    params: 'SweepParams',
+    base: 'Path',
+    say: 'Callable[[str], None]',
+    stages: 'Stages',
+    started: float,
+    combos: 'list[dict]',
+    algorithm: 'AlgorithmFile',
+    combinations: 'Combinations',
+    asset_service: 'AssetService',
+    market_data: 'DataBundle | None',
+    registered: 'dict[str, DataSource]',
+):
     found = {}
     first = await run_initialize(algorithm, asset_service, combinations.config(0), found)
     universe = first.universe
@@ -129,7 +155,7 @@ async def _sweep(params, base, say, stages, started, combos, algorithm, combinat
 
     memo = {}
 
-    async def once(bundle, rank_only: bool = False):
+    async def once(bundle: 'DataBundle', rank_only: bool = False):
         """The sweep on these bars; ``rank_only`` -- every combination's metrics and nothing
         else: no printing, no refinement, no files, no verification (a synthetic path)."""
         quiet = (lambda message: None) if rank_only else say
@@ -167,14 +193,14 @@ async def _sweep(params, base, say, stages, started, combos, algorithm, combinat
     return await once(bundle)
 
 
-def first_context(algorithm, asset_service, found):
+def first_context(algorithm: 'AlgorithmFile', asset_service: 'AssetService', found):
     from ziplime.sweep.initialize import SweepContext
     return SweepContext(algorithm, asset_service, found)
 
 
 # -- handle_data ----------------------------------------------------------------------------------
 
-def _same_frequency(bundle, params):
+def _same_frequency(bundle: 'DataBundle', params: 'SweepParams') -> None:
     """The bundle's bars are the run's bars. A finer bundle loaded at a coarser rate is stamped at
     each window's start, so the engine reads a bar's whole window at its first minute -- look-ahead
     a sweep would have to copy; it refuses instead."""
@@ -185,7 +211,7 @@ def _same_frequency(bundle, params):
                          f"the bundle at the run's frequency.")
 
 
-def hooks_of(algorithm, initialized: list, calendar, market):
+def hooks_of(algorithm: 'AlgorithmFile', initialized: list, calendar: 'ExchangeCalendar', market: 'Market'):
     """handle_data, before_trading_start and the scheduled functions, converted; and for each
     scheduled function the bars it runs at, per distinct initialize result -- decided by the
     engine's own rules (make_eventrule) over the run's bars."""
@@ -240,11 +266,11 @@ def _rule_key(rule):
     return type(rule).__name__, settings
 
 
-def schedule_for(flags, which, chunk) -> list:
+def schedule_for(flags: 'list[np.ndarray]', which: 'np.ndarray', chunk: 'Sequence[int] | np.ndarray') -> list:
     return [matrix[:, which[chunk]] for matrix in flags]
 
 
-def costs_for(params: SweepParams, initialized) -> SweepParams:
+def costs_for(params: SweepParams, initialized: 'Initialized') -> SweepParams:
     """set_commission / set_slippage in initialize win over the sweep file, as over run_simulation's
     arguments."""
     changes = {}
@@ -266,9 +292,28 @@ def remap(stacks: dict, rows: np.ndarray) -> dict:
             for name, stack in stacks.items()}
 
 
-async def _sweep_handle_data(*, params, base, say, stages, combos, algorithm, combinations,
-                             asset_service, calendar, bundle, panel, in_run, universe, columns,
-                             found, first, registered, rank_only=False, memo=None):
+async def _sweep_handle_data(
+    *,
+    params: 'SweepParams',
+    base: 'Path',
+    say: 'Callable[[str], None]',
+    stages: 'Stages',
+    combos: 'list[dict]',
+    algorithm: 'AlgorithmFile',
+    combinations: 'Combinations',
+    asset_service: 'AssetService',
+    calendar: 'ExchangeCalendar',
+    bundle: 'DataBundle',
+    panel: 'PricePanel',
+    in_run: 'np.ndarray',
+    universe: 'dict[str, ExchangeAsset]',
+    columns: 'list[str]',
+    found,
+    first: 'Initialized',
+    registered: 'dict[str, DataSource]',
+    rank_only: bool = False,
+    memo=None,
+):
     if params.backend == "opencl":
         raise SweepError("backend opencl runs the kernel for entries/exits signals only, and this "
                          "strategy is swept through its handle_data. Use mlx (Apple GPU), cupy "
@@ -341,7 +386,7 @@ async def _sweep_handle_data(*, params, base, say, stages, combos, algorithm, co
         f"decisions: handle_data (converted for every combination)"
         + (f"   indicators: {indicators.variants} distinct" if indicators else ""))
 
-    windows = engine.Windows(market, None)
+    windows = Windows(market, None)
     run_kwargs = dict(market=market, hooks=hooks, timing=params.timing,
                       initial_cash=params.total_cash, costs=costs,
                       periods_per_year=params.periods_per_year, compile=compile_step(params))
@@ -450,8 +495,20 @@ async def _sweep_handle_data(*, params, base, say, stages, combos, algorithm, co
                          rank_only=rank_only)
 
 
-async def _on_engine(reason, *, params, base, say, stages, combos, combinations, bundle,
-                     asset_service, registered, rank_only=False):
+async def _on_engine(
+    reason: str,
+    *,
+    params: 'SweepParams',
+    base: 'Path',
+    say: 'Callable[[str], None]',
+    stages: 'Stages',
+    combos: 'list[dict]',
+    combinations: 'Combinations',
+    bundle: 'DataBundle',
+    asset_service: 'AssetService',
+    registered: 'dict[str, DataSource]',
+    rank_only: bool = False,
+):
     """The strategy cannot run for every combination at once: run each through the engine."""
     from ziplime.sweep import fallback
 
@@ -489,8 +546,17 @@ async def _on_engine(reason, *, params, base, say, stages, combos, combinations,
     return table
 
 
-def _check_best(indicators, cache, algorithm, asset_service, combinations, best, panel, found,
-                initialized):
+def _check_best(
+    indicators,
+    cache,
+    algorithm: 'AlgorithmFile',
+    asset_service: 'AssetService',
+    combinations: 'Combinations',
+    best,
+    panel: 'PricePanel',
+    found,
+    initialized,
+) -> None:
     """No look-ahead in the winner's signals either -- it is the combination that gets used."""
     if indicators is not None:
         check_indicators(initialized[best].indicators, panel, algorithm.warmup,
@@ -500,7 +566,12 @@ def _check_best(indicators, cache, algorithm, asset_service, combinations, best,
                         combinations.config(best), decisions=False)
 
 
-def _metrics(result: engine.Result, index, chunk, params) -> pd.DataFrame:
+def _metrics(
+    result: engine.Result,
+    index: 'pd.DatetimeIndex',
+    chunk: 'Sequence[int] | np.ndarray',
+    params: 'SweepParams',
+) -> pd.DataFrame:
     table = pd.DataFrame(result.metrics, index=chunk)
     table["fills"], table["fees"], table["rejects"] = result.fills, result.fees, 0
     table["unsupported"] = result.unsupported
@@ -526,7 +597,7 @@ def _worker(job: dict) -> pd.DataFrame:
         handle_data=convert(module.handle_data),
         before_trading_start=convert(before) if before is not None else None,
         scheduled=[convert(module.__dict__[name]) for name in job["scheduled"]])
-    windows = engine.Windows(job["market"], None)
+    windows = Windows(job["market"], None)
     windows.lengths = dict(job["lengths"])
     tables = []
     size = job["size"]
@@ -550,9 +621,26 @@ def _worker(job: dict) -> pd.DataFrame:
 
 # -- signals as decisions --------------------------------------------------------------------------
 
-async def _sweep_signals(*, params, base, say, stages, combos, algorithm, combinations,
-                         asset_service, calendar, bundle, panel, in_run, universe, columns,
-                         found, first, rank_only=False):
+async def _sweep_signals(
+    *,
+    params: 'SweepParams',
+    base: 'Path',
+    say: 'Callable[[str], None]',
+    stages: 'Stages',
+    combos: 'list[dict]',
+    algorithm: 'AlgorithmFile',
+    combinations: 'Combinations',
+    asset_service: 'AssetService',
+    calendar: 'ExchangeCalendar',
+    bundle: 'DataBundle',
+    panel: 'PricePanel',
+    in_run: 'np.ndarray',
+    universe: 'dict[str, ExchangeAsset]',
+    columns: 'list[str]',
+    found,
+    first: 'Initialized',
+    rank_only: bool = False,
+):
     configs_all = None
     sizes = [params.size if params.size is not None else getattr(combinations.config(i), "size", None)
              for i in range(len(combos))] if len(combos) <= 200_000 else None
@@ -580,7 +668,7 @@ async def _sweep_signals(*, params, base, say, stages, combos, algorithm, combin
         f"decisions: entries/exits signals")
     size_per_call = params.batch_size if params.batch_size != "auto" else 2000
 
-    def simulate(indices, backend):
+    def simulate(indices, backend: str):
         groups = defaultdict(list)
         for index in indices:
             groups[sizes[index]].append(index)
@@ -631,9 +719,30 @@ async def _sweep_signals(*, params, base, say, stages, combos, algorithm, combin
 
 # -- ranking, files, verification -----------------------------------------------------------------
 
-async def _finish(*, params, base, say, stages, table, combos, combinations, simulate, columns,
-                  market, calendar, bundle, universe, asset_service, variants, best_run,
-                  check_best, compiled, close=None, warnings=(), rank_only=False):
+async def _finish(
+    *,
+    params: 'SweepParams',
+    base: 'Path',
+    say: 'Callable[[str], None]',
+    stages: 'Stages',
+    table: 'pd.DataFrame',
+    combos: 'list[dict]',
+    combinations: 'Combinations',
+    simulate: 'Callable',
+    columns: 'list[str]',
+    market: 'Market | None',
+    calendar: 'ExchangeCalendar',
+    bundle: 'DataBundle',
+    universe: 'dict[str, ExchangeAsset]',
+    asset_service: 'AssetService',
+    variants: int,
+    best_run: 'Callable',
+    check_best: 'Callable | None',
+    compiled: 'bool | None',
+    close: 'Callable | None' = None,
+    warnings: 'Iterable[str] | None' = (),
+    rank_only: bool = False,
+):
     table.index.name = "combo"
     gpu = params.backend in ("mlx", "cupy", "dpnp", "opencl")
     table["precision"] = "float32" if gpu else "float64"

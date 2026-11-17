@@ -1,4 +1,6 @@
 from numexpr import evaluate
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.data import EquityPricing
 from ziplime.pipeline.terms.factors import CustomFactor
@@ -23,7 +25,14 @@ class Aroon(CustomFactor):
     inputs = (EquityPricing.low, EquityPricing.high)
     outputs = ("down", "up")
 
-    def compute(self, today, assets, out, lows, highs):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        lows: 'np.ndarray',
+        highs: 'np.ndarray',
+    ) -> None:
         wl = self.window_length
         high_date_index = nanargmax(highs, axis=0)
         low_date_index = nanargmin(lows, axis=0)

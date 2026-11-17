@@ -17,9 +17,14 @@ windows a sweep already computes: arrays (combinations × instruments). ``pl`` i
 code is :class:`PolarsShim`, which knows ``pl.col``; the rest of polars is refused before the
 first bar.
 """
-import operator
 
-from ziplime.sweep.convert import ALL, NotConvertible, Vectorized
+import operator
+from collections.abc import Callable
+
+from ziplime.sweep.all_assets import ALL
+from ziplime.sweep.errors import NotConvertible
+from ziplime.sweep.vectorized_containers import Vectorized
+from ziplime.sweep.api import Data
 
 #: polars aggregation -> the window statistic it is (polars' std and var have ddof=1)
 AGGREGATIONS = {"mean": "mean", "sum": "sum", "std": "std", "var": "var", "min": "min",
@@ -42,12 +47,12 @@ def _refuse(what: str):
 class PolarsShim:
     """``pl`` inside a converted strategy."""
 
-    def col(self, name):
+    def col(self, name: str) -> 'Col':
         if not isinstance(name, str):
             raise NotConvertible("pl.col takes one column name in a sweep.")
         return Col(name)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name.startswith("__"):
             raise AttributeError(name)
         _refuse(f"pl.{name}")
@@ -56,25 +61,25 @@ class PolarsShim:
 class Col:
     """``pl.col(name)``: compared on ``sid``, it picks instruments; aggregated, a statistic."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str) -> None:
         self.name = name
 
-    def _sid(self):
+    def _sid(self) -> None:
         if self.name != "sid":
             raise NotConvertible(f"A history frame is filtered by sid in a sweep, not by "
                                  f"{self.name!r}.")
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> 'Pick':
         self._sid()
         return Pick([other])
 
-    def is_in(self, values):
+    def is_in(self, values) -> 'Pick':
         self._sid()
         return Pick(list(values))
 
     __hash__ = object.__hash__
 
-    def _statistic(self, op, ddof=1):
+    def _statistic(self, op: str, ddof: int = 1) -> 'Statistic':
         if self.name in ("sid", "date"):
             raise NotConvertible(f"pl.col({self.name!r}).{op}() is not supported in a sweep.")
         if ddof != 1:
@@ -115,7 +120,7 @@ class Col:
     def len(self):
         return self._statistic("len")
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name.startswith("__"):
             raise AttributeError(name)
         _refuse(f"pl.col(...).{name}")
@@ -125,13 +130,13 @@ class Statistic:
     """An aggregation in ``agg(...)``: its output name and how to compute it from the windows.
     ``compute(read)`` with ``read(field, op)`` -> (combinations × instruments)."""
 
-    def __init__(self, name: str, compute, field: str):
+    def __init__(self, name: str, compute: 'Callable', field: str) -> None:
         self.name, self.compute, self.field = name, compute, field
 
-    def alias(self, name: str):
+    def alias(self, name: str) -> 'Statistic':
         return Statistic(name, self.compute, self.field)
 
-    def _combine(self, other, op, reflected=False):
+    def _combine(self, other: 'Statistic | int | float', op: 'Callable', reflected: bool = False) -> 'Statistic':
         if isinstance(other, Statistic):
             right = other.compute
         elif isinstance(other, (int, float)) and not isinstance(other, bool):
@@ -146,35 +151,35 @@ class Statistic:
             return Statistic(name, lambda read: op(right(read), left(read)), self.field)
         return Statistic(self.name, lambda read: op(left(read), right(read)), self.field)
 
-    def __add__(self, other):
+    def __add__(self, other: 'Statistic | int | float'):
         return self._combine(other, operator.add)
 
-    def __radd__(self, other):
+    def __radd__(self, other: 'Statistic | int | float'):
         return self._combine(other, operator.add, reflected=True)
 
-    def __sub__(self, other):
+    def __sub__(self, other: 'Statistic | int | float'):
         return self._combine(other, operator.sub)
 
-    def __rsub__(self, other):
+    def __rsub__(self, other: 'Statistic | int | float'):
         return self._combine(other, operator.sub, reflected=True)
 
-    def __mul__(self, other):
+    def __mul__(self, other: 'Statistic | int | float'):
         return self._combine(other, operator.mul)
 
-    def __rmul__(self, other):
+    def __rmul__(self, other: 'Statistic | int | float'):
         return self._combine(other, operator.mul, reflected=True)
 
-    def __truediv__(self, other):
+    def __truediv__(self, other: 'Statistic | int | float'):
         return self._combine(other, operator.truediv)
 
-    def __rtruediv__(self, other):
+    def __rtruediv__(self, other: 'Statistic | int | float'):
         return self._combine(other, operator.truediv, reflected=True)
 
-    def __neg__(self):
+    def __neg__(self) -> 'Statistic':
         compute = self.compute
         return Statistic(self.name, lambda read: -compute(read), self.field)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name.startswith("__"):
             raise AttributeError(name)
         _refuse(f"pl.col(...).<aggregation>().{name}")
@@ -183,7 +188,7 @@ class Statistic:
 class Pick:
     """``pl.col("sid") == x`` / ``.is_in([...])``: which instruments a filter keeps."""
 
-    def __init__(self, values: list):
+    def __init__(self, values: list) -> None:
         self.values = values
 
 
@@ -191,7 +196,7 @@ class History:
     """``data.history`` over several instruments. ``assets``: [ALL] for the whole universe, or
     the instruments asked for."""
 
-    def __init__(self, data, assets: list, length, fields, frequency):
+    def __init__(self, data: 'Data', assets: list, length, fields: 'list[str] | None', frequency) -> None:
         self._data, self._assets, self._length = data, assets, length
         self._fields, self._frequency = fields, frequency
 
@@ -199,7 +204,7 @@ class History:
     def _xp(self):
         return self._data._backend.xp
 
-    def _read(self, field, op):
+    def _read(self, field: str, op: str):
         if self._fields is not None and field not in self._fields:
             raise KeyError(f"Field {field!r} was not asked for; asked for {self._fields}.")
         return self._data._window(ALL, field, op, self._length, self._frequency)
@@ -214,7 +219,7 @@ class History:
             chosen = here if chosen is None else xp.logical_or(chosen, here)
         return chosen
 
-    def _present(self, field=None):
+    def _present(self, field: 'str | None' = None):
         """Which instruments have rows in the frame: a group_by gives them a row."""
         field = field or (self._fields[0] if self._fields else "close")
         present = self._read(field, "count") >= 1
@@ -253,7 +258,7 @@ class History:
                                  f"would come back empty.")
         return asset
 
-    def group_by(self, *by, maintain_order: bool = False):
+    def group_by(self, *by, maintain_order: bool = False) -> 'Groups':
         keys = [key.name if isinstance(key, Col) else key for key in by]
         if keys == [["sid"]] or keys == [("sid",)]:
             keys = ["sid"]
@@ -266,7 +271,7 @@ class History:
         """No instrument has a row yet."""
         return self._xp.logical_not(self._xp.any(self._present(), axis=1, keepdims=True))
 
-    def __getitem__(self, field):
+    def __getitem__(self, field: str):
         raise NotConvertible(f"frame[{field!r}] of several instruments mixes their rows; {HINT}.")
 
     def __len__(self):
@@ -277,7 +282,7 @@ class History:
         raise NotConvertible(f"Iterating a frame of several instruments is not supported in a "
                              f"sweep; {HINT}.")
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name.startswith("__") or name.startswith("sweep_") or name in ("shape", "dtype"):
             raise AttributeError(name)
         _refuse(f"frame.{name}")
@@ -286,10 +291,10 @@ class History:
 class Groups:
     """``frame.group_by("sid")``."""
 
-    def __init__(self, frame: History):
+    def __init__(self, frame: History) -> None:
         self._frame = frame
 
-    def agg(self, *expressions, **named):
+    def agg(self, *expressions, **named) -> 'Table':
         statistics = []
         for expression in expressions:
             statistics += list(expression) if isinstance(expression, (list, tuple)) else [expression]
@@ -301,7 +306,7 @@ class Groups:
                                  ".median(), .first(), .last(), .count(), .len().")
         return Table(self._frame, statistics)
 
-    def _all_fields(self, op):
+    def _all_fields(self, op: str) -> 'Table':
         fields = self._frame._fields
         if not fields:
             raise NotConvertible(f"group_by('sid').{op}() needs the fields asked for: "
@@ -338,7 +343,7 @@ class Groups:
     def count(self):
         return self._all_fields("count")
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name.startswith("__") or name.startswith("sweep_"):
             raise AttributeError(name)
         _refuse(f"group_by('sid').{name}")
@@ -347,7 +352,7 @@ class Groups:
 class Table:
     """``group_by("sid").agg(...)``: a row per instrument that has rows in the frame."""
 
-    def __init__(self, frame: History, statistics: list):
+    def __init__(self, frame: History, statistics: list) -> None:
         self.columns = ["sid"] + [each.name for each in statistics]
         if len(set(self.columns)) != len(self.columns):
             raise NotConvertible(f"group_by('sid').agg(...) makes the columns {self.columns}; "
@@ -368,7 +373,7 @@ class Table:
     def is_empty(self):
         return self._xp.logical_not(self._xp.any(self._present, axis=1, keepdims=True))
 
-    def __getitem__(self, name):
+    def __getitem__(self, name: str):
         raise NotConvertible(f"table[{name!r}] is not supported in a sweep; read the rows: "
                              f"for row in table.iter_rows(named=True): row['sid'], row[...].")
 
@@ -378,7 +383,7 @@ class Table:
     def __iter__(self):
         raise NotConvertible("Iterate a grouped frame through iter_rows() in a sweep.")
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name.startswith("__") or name.startswith("sweep_") or name in ("shape", "dtype"):
             raise AttributeError(name)
         _refuse(f"group_by('sid').agg(...).{name}")
@@ -387,10 +392,10 @@ class Table:
 class Row:
     """A row of ``iter_rows(named=True)``: ``row["sid"]`` is the instrument, every one at once."""
 
-    def __init__(self, values: dict):
+    def __init__(self, values: dict) -> None:
         self._values = values
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str):
         if key == "sid":
             return ALL
         try:
@@ -398,5 +403,5 @@ class Row:
         except KeyError:
             raise KeyError(f"No column {key!r}; there are {['sid', *self._values]}.") from None
 
-    def get(self, key, default=None):
+    def get(self, key: str, default=None):
         return self[key] if key == "sid" or key in self._values else default

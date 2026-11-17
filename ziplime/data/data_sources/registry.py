@@ -37,7 +37,7 @@ ENTRY_POINT_GROUP = "ziplime.data_providers"
 class UnknownDataProvider(LookupError):
     """Raised when a provider name is not registered."""
 
-    def __init__(self, name: str, known: list[str]):
+    def __init__(self, name: str, known: list[str]) -> None:
         super().__init__(
             f"Unknown data provider {name!r}. Registered providers: {known or 'none'}. "
             f"A provider is missing if its package was removed or its dependencies are not installed."

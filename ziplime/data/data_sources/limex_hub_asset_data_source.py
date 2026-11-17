@@ -20,7 +20,7 @@ from ziplime.data.data_sources.asset_data_source import AssetDataSource
 
 
 class LimexHubAssetDataSource(AssetDataSource):
-    def __init__(self, limex_api_key: str, maximum_threads: int | None = None):
+    def __init__(self, limex_api_key: str, maximum_threads: int | None = None) -> None:
         super().__init__()
         self._limex_api_key = limex_api_key
         self._logger = structlog.get_logger(__name__)

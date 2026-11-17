@@ -92,6 +92,7 @@ example). The label for row i in a data node is the ith element of
 Each column of the array contains exchange rates for a given date. The label
 for column i in a data node is the ith element of /index/dts.
 """
+from collections.abc import Iterable
 
 import h5py
 import numpy as np
@@ -126,7 +127,7 @@ class HDF5FXRateReader(FXRateReader):
         Rate to use when ``get_rates`` is called requesting the default rate.
     """
 
-    def __init__(self, group, default_rate):
+    def __init__(self, group: 'h5py.Group', default_rate: str) -> None:
         self._group = group
         self._default_rate = default_rate
 
@@ -139,7 +140,7 @@ class HDF5FXRateReader(FXRateReader):
             )
 
     @classmethod
-    def from_path(cls, path, default_rate):
+    def from_path(cls, path: str, default_rate: str):
         """Construct from a file path.
 
         Parameters
@@ -178,7 +179,7 @@ class HDF5FXRateReader(FXRateReader):
         objects = bytes_array_to_native_str_object_array(bytes_array)
         return pd.Index(objects)
 
-    def get_rates(self, rate, quote, bases, dts):
+    def get_rates(self, rate: str, quote: str, bases: 'np.ndarray', dts: 'pd.DatetimeIndex'):
         """Get rates to convert ``bases`` into ``quote``.
 
         See :class:`ziplime.data.fx.base.FXRateReader` for details.
@@ -244,11 +245,16 @@ class HDF5FXRateReader(FXRateReader):
 class HDF5FXRateWriter:
     """Writer class for HDF5 files consumed by HDF5FXRateReader."""
 
-    def __init__(self, group, date_chunk_size=HDF5_FX_DEFAULT_CHUNK_SIZE):
+    def __init__(self, group: 'h5py.Group', date_chunk_size: int = HDF5_FX_DEFAULT_CHUNK_SIZE) -> None:
         self._group = group
         self._date_chunk_size = date_chunk_size
 
-    def write(self, dts, currencies, data):
+    def write(
+        self,
+        dts: 'pd.DatetimeIndex',
+        currencies: 'np.ndarray',
+        data: 'Iterable[tuple[str, str, np.ndarray]]',
+    ) -> None:
         """Write data to the file.
 
         Parameters
@@ -274,11 +280,11 @@ class HDF5FXRateWriter:
         self._write_index_group(dts, currencies)
         self._write_data_group(dts, currencies, data, chunks)
 
-    def _write_metadata(self):
+    def _write_metadata(self) -> None:
         self._group.attrs["version"] = HDF5_FX_VERSION
         self._group.attrs["last_updated_utc"] = str(pd.Timestamp.utcnow())
 
-    def _write_index_group(self, dts, currencies):
+    def _write_index_group(self, dts: 'pd.DatetimeIndex', currencies: 'np.ndarray') -> None:
         """Write content of /index."""
         if not is_sorted_ascending(dts):
             raise ValueError("dts is not sorted")
@@ -295,7 +301,13 @@ class HDF5FXRateWriter:
         self._log_writing(INDEX, CURRENCIES)
         index_group.create_dataset(CURRENCIES, data=currencies.astype("S3"))
 
-    def _write_data_group(self, dts, currencies, data, chunks):
+    def _write_data_group(
+        self,
+        dts: 'pd.DatetimeIndex',
+        currencies: 'np.ndarray',
+        data: 'Iterable[tuple[str, str, np.ndarray]]',
+        chunks: 'tuple[int, int] | None',
+    ) -> None:
         """Write content of /data."""
         data_group = self._group.create_group(DATA)
 
@@ -325,5 +337,5 @@ class HDF5FXRateWriter:
                 shuffle=True,
             )
 
-    def _log_writing(self, *path):
+    def _log_writing(self, *path: str) -> None:
         log.debug("Writing {}", "/".join(path))

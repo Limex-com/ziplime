@@ -18,6 +18,7 @@ import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+import pandas as pd
 
 from ziplime.mcp.errors import InvalidArguments, NotFound
 
@@ -123,7 +124,7 @@ def backtest_dir(backtest_id: str) -> Path:
     return backtests_dir() / _checked(backtest_id, "Backtest")
 
 
-def save_backtest(backtest_id: str, meta: dict, perf=None) -> Path:
+def save_backtest(backtest_id: str, meta: dict, perf: 'pd.DataFrame | None' = None) -> Path:
     """Parameters and result together, so a run can be read back whole."""
     path = backtest_dir(backtest_id)
     path.mkdir(parents=True, exist_ok=True)

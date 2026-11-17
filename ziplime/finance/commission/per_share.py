@@ -1,3 +1,6 @@
+
+from ziplime.finance.domain.order import Order
+from ziplime.finance.domain.transaction import Transaction
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.finance.commission import calculate_per_unit_commission
 from ziplime.finance.commission.equity_commission_model import EquityCommissionModel
@@ -24,13 +27,13 @@ class PerShare(EquityCommissionModel):
 
     def __init__(
         self,
-        cost,
-        min_trade_cost,
-    ):
+        cost: float,
+        min_trade_cost: float | None,
+    ) -> None:
         self.cost_per_share = cost
         self.min_trade_cost = min_trade_cost or 0
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             "{class_name}(cost_per_share={cost_per_share}, "
             "min_trade_cost={min_trade_cost})".format(
@@ -40,7 +43,7 @@ class PerShare(EquityCommissionModel):
             )
         )
 
-    def calculate(self, order, transaction):
+    def calculate(self, order: Order, transaction: Transaction) -> float:
         return calculate_per_unit_commission(
             order=order,
             transaction=transaction,

@@ -12,6 +12,7 @@ from ziplime.assets.entities.asset import Asset
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.constants.period import Period
 from ziplime.data.services.data_source import DataSource
+from ziplime.finance.asset_restrictions import Restrictions
 
 
 def _as_date(value: datetime.date | datetime.datetime) -> datetime.date:
@@ -20,7 +21,7 @@ def _as_date(value: datetime.date | datetime.datetime) -> datetime.date:
 
 
 @contextmanager
-def handle_non_market_minutes(bar_data):
+def handle_non_market_minutes(bar_data: 'BarData'):
     try:
         bar_data._handle_non_market_minutes = True
         yield
@@ -58,9 +59,9 @@ class BarData:
                  data_sources: dict[str, DataSource],
                  simulation_dt_func: Callable,
                  trading_calendar: ExchangeCalendar,
-                 restrictions,
+                 restrictions: 'Restrictions',
                  data_source_resolver: Callable[[str], Awaitable[DataSource]] | None = None,
-                 emission_rate: datetime.timedelta | None = None):
+                 emission_rate: datetime.timedelta | None = None) -> None:
         # self.data_bundle = data_bundle
         self.simulation_dt_func = simulation_dt_func
 
@@ -88,7 +89,7 @@ class BarData:
         # first_exchange = exchanges[list(exchanges.keys())[0]]
         # self.default_exchange = first_exchange
 
-    async def resolve_data_source(self, data_source) -> DataSource:
+    async def resolve_data_source(self, data_source: 'DataSource | str | None') -> DataSource:
         """Return the source a read is addressed to, mounting it on demand.
 
         Accepts the three things a strategy may pass as ``data_source``:
@@ -422,7 +423,7 @@ class BarData:
         return self._venue_is_open(asset=asset, dt=dt, session=session, session_label=session_label)
 
     def _venue_is_open(self, asset: ExchangeAsset, dt: datetime.datetime,
-                       session: datetime.date, session_label) -> bool:
+                       session: datetime.date, session_label: 'datetime.date | datetime.datetime') -> bool:
         """Whether the listing's own market is trading at this point in the simulation.
 
         The listing's calendar, not the simulation's. The two agree while a run stays on one
@@ -581,7 +582,7 @@ class BarData:
         return self._adjust_minutes
 
     @_handle_non_market_minutes.setter
-    def _handle_non_market_minutes(self, val):
+    def _handle_non_market_minutes(self, val: bool) -> None:
         self._adjust_minutes = val
 
     @property

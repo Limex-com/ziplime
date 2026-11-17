@@ -2,6 +2,7 @@ import datetime
 
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.slippage.slippage_model import SlippageModel
+from ziplime.finance.domain.order import Order
 
 
 class FixedSlippage(SlippageModel):
@@ -22,17 +23,17 @@ class FixedSlippage(SlippageModel):
     volume.
     """
 
-    def __init__(self, spread=0.0):
+    def __init__(self, spread: float = 0.0) -> None:
         super(FixedSlippage, self).__init__()
         self.spread = spread
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "{class_name}(spread={spread})".format(
             class_name=self.__class__.__name__,
             spread=self.spread,
         )
 
-    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order,
+    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: 'Order',
                             price: float = None):
         # `simulate` passes the bar's price; this used to take no `price`, so every order raised
         # TypeError, and the fallback read added a float to a frame and returned the full amount

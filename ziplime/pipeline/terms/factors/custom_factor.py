@@ -154,7 +154,7 @@ class CustomFactor(PositiveWindowLengthMixin, CustomTermMixin, Factor):
 
     dtype = float64_dtype
 
-    def _validate(self):
+    def _validate(self) -> None:
         try:
             super(CustomFactor, self)._validate()
         except UnsupportedDataType as exc:
@@ -172,7 +172,7 @@ class CustomFactor(PositiveWindowLengthMixin, CustomTermMixin, Factor):
                 ) from exc
             raise
 
-    def __getattribute__(self, name):
+    def __getattribute__(self, name: str):
         outputs = object.__getattribute__(self, "outputs")
         if outputs is None:
             return super(CustomFactor, self).__getattribute__(name)

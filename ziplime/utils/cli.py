@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import asyncclick as click
 
 
-def _coerce_tz(tz):
+def _coerce_tz(tz: str | datetime.tzinfo | None):
     if tz is None or isinstance(tz, datetime.tzinfo):
         return tz
     if isinstance(tz, str):
@@ -13,10 +13,10 @@ def _coerce_tz(tz):
 
 
 class _DatetimeParam(click.ParamType):
-    def __init__(self, tz=None):
+    def __init__(self, tz: str | datetime.tzinfo | None = None) -> None:
         self.tz = _coerce_tz(tz)
 
-    def parser(self, value):
+    def parser(self, value: str | datetime.date) -> datetime.datetime:
         if isinstance(value, datetime.datetime):
             dt = value
         elif isinstance(value, datetime.date):
@@ -34,10 +34,10 @@ class _DatetimeParam(click.ParamType):
         return dt
 
     @property
-    def name(self):
+    def name(self) -> str:
         return type(self).__name__.upper()
 
-    def convert(self, value, param, ctx):
+    def convert(self, value: 'str | datetime.date', param: 'click.Parameter | None', ctx: 'click.Context | None'):
         try:
             return self.parser(value)
         except (ValueError, TypeError):
@@ -72,10 +72,10 @@ class Date(_DatetimeParam):
         midnight.
     """
 
-    def __init__(self, tz=None, as_timestamp=False):
+    def __init__(self, tz: str | datetime.tzinfo | None = None, as_timestamp: bool = False) -> None:
         super(Date, self).__init__(tz=tz)
         self.as_timestamp = as_timestamp
 
-    def parser(self, value):
+    def parser(self, value: str | datetime.date) -> datetime.date | datetime.datetime:
         ts = super(Date, self).parser(value)
         return ts.replace(hour=0, minute=0, second=0, microsecond=0) if self.as_timestamp else ts.date()

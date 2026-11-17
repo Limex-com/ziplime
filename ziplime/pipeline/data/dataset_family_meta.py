@@ -6,7 +6,7 @@ from ziplime.pipeline.data.dataset_family_column import DataSetFamilyColumn
 
 
 class DataSetFamilyMeta(abc.ABCMeta):
-    def __new__(cls, name, bases, dict_):
+    def __new__(cls, name: str, bases: 'tuple[type, ...]', dict_):
         columns = {}
         for k, v in dict_.items():
             if isinstance(v, Column):

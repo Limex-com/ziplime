@@ -18,14 +18,14 @@ class ConstantCumulativeRiskMetric:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-    def __init__(self, field, value):
+    def __init__(self, field: str, value) -> None:
         self._field = field
         self._value = value
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                   exchanges: dict[str, Exchange]):
+                   exchanges: dict[str, Exchange]) -> None:
         packet["cumulative_risk_metrics"][self._field] = self._value
 
     def end_of_session(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                       exchanges: dict[str, Exchange]):
+                       exchanges: dict[str, Exchange]) -> None:
         packet["cumulative_risk_metrics"][self._field] = self._value

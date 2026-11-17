@@ -5,15 +5,19 @@ attribute, so continuous futures could not resolve to a contract at all. These a
 implementations behind the two roll styles a
 :class:`~ziplime.assets.domain.continuous_future.ContinuousFuture` may ask for.
 """
+
 import bisect
 import datetime
 
 import pandas as pd
 import polars as pl
 import structlog
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.domain.ordered_contracts import OrderedContracts
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.services.asset_service import AssetService
+from ziplime.data.services.data_source import DataSource
 
 
 def _as_date(value: datetime.date | datetime.datetime) -> datetime.date:
@@ -28,7 +32,7 @@ class RollFinder:
         mic: Restrict chains to a single exchange, if given.
     """
 
-    def __init__(self, asset_service, mic: str | None = None, logger=None):
+    def __init__(self, asset_service: 'AssetService', mic: str | None = None, logger=None) -> None:
         self._asset_service = asset_service
         self._mic = mic
         self._ordered_contracts: dict[str, OrderedContracts] = {}
@@ -92,8 +96,15 @@ class CalendarRollFinder(RollFinder):
         trading_calendar: Calendar used to count sessions.
     """
 
-    def __init__(self, asset_service, mic: str | None = None, roll_offset_days: int = 0,
-                 roll_offset_sessions: int | None = None, trading_calendar=None, logger=None):
+    def __init__(
+        self,
+        asset_service: 'AssetService',
+        mic: str | None = None,
+        roll_offset_days: int = 0,
+        roll_offset_sessions: int | None = None,
+        trading_calendar: 'ExchangeCalendar | None' = None,
+        logger=None,
+    ) -> None:
         super().__init__(asset_service=asset_service, mic=mic, logger=logger)
         if roll_offset_sessions is not None:
             if roll_offset_days:
@@ -150,8 +161,8 @@ class VolumeRollFinder(RollFinder):
     #: which keeps a single illiquid print from triggering a roll.
     THRESHOLD = 1.0
 
-    def __init__(self, asset_service, data_source, mic: str | None = None,
-                 grace_period_days: int = 1, logger=None):
+    def __init__(self, asset_service: 'AssetService', data_source: 'DataSource', mic: str | None = None,
+                 grace_period_days: int = 1, logger=None) -> None:
         super().__init__(asset_service=asset_service, mic=mic, logger=logger)
         self._data_source = data_source
         self._grace_period_days = grace_period_days

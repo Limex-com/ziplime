@@ -20,6 +20,7 @@ plain Python value and an ``if`` on it is an ordinary ``if``. What cannot be con
 instruments where one instrument's decision depends on the previous one, ``break``/``while`` on a
 value that differs between combinations, ``try`` -- is refused with the line and the reason.
 """
+
 import ast
 import builtins
 import copy
@@ -29,84 +30,19 @@ import os
 import sys
 import textwrap
 import types
+from collections.abc import Callable
+from collections.abc import Iterable
+from types import ModuleType
 
 import numpy as np
 
-
-class NotConvertible(Exception):
-    """The function cannot run for every combination at once."""
-
-
-class _AllAssets:
-    """The name and the instrument inside a loop over context.universe: every instrument.
-
-    ``name == "JNJ"`` or ``asset == context.universe["JNJ"]`` is a mask over the instruments."""
-
-    #: Set by the simulation: (names, listings, make an array)
-    _columns = None
-
-    def __repr__(self):
-        return "<every instrument>"
-
-    def __eq__(self, other):
-        if other is self:
-            return True
-        if hasattr(other, "sweep_equals_all"):
-            return other.sweep_equals_all()
-        names, listings, array = self.__dict__.get("_columns") or type(self)._columns
-        return array(np.array([[name == other or listing == other
-                                or getattr(listing, "sid", None) == other
-                                for name, listing in zip(names, listings)]]))
-
-    def __ne__(self, other):
-        equal = self.__eq__(other)
-        return (not equal) if isinstance(equal, bool) else ~equal
-
-    __hash__ = object.__hash__
-
-    @property
-    def sid(self):
-        """``asset.sid``: every instrument's sid -- a key and a filter like the instrument."""
-        return self
-
-    def __getattr__(self, name):
-        raise NotConvertible(
-            f"Inside a loop over context.universe one pass handles every instrument at once, so "
-            f"the instrument has no single .{name}.")
-
-
-ALL = _AllAssets()
-
-
-class Vectorized(list):
-    """A loop over context.universe: one pass, for every instrument. ``mask``: the instruments the
-    pass is for -- a per-instrument dict's keys, say -- True for all of them."""
-
-    mask = True
-
-    def __init__(self, items, mask=True):
-        super().__init__(items)
-        self.mask = mask
-
-
-class VectorUniverse(dict):
-    """context.universe in a sweep: len and lookup by name as a dict, iteration in one pass."""
-
-    def items(self):
-        return Vectorized([(ALL, ALL)])
-
-    def keys(self):
-        return Vectorized([ALL])
-
-    def values(self):
-        return Vectorized([ALL])
-
-    def __iter__(self):
-        return iter(Vectorized([ALL]))
-
-
-def is_array(value) -> bool:
-    return hasattr(value, "shape") and not isinstance(value, np.generic)
+from ziplime.sweep.all_assets import ALL
+from ziplime.sweep.all_assets import _AllAssets  # noqa: F401 - legacy type import
+from ziplime.sweep.api import Context, Data
+from ziplime.sweep.array_utils import is_array
+from ziplime.sweep.errors import NotConvertible
+from ziplime.sweep.vectorized_containers import VectorUniverse  # noqa: F401 - public compatibility export
+from ziplime.sweep.vectorized_containers import Vectorized
 
 
 # -- what converted code calls ------------------------------------------------------------------
@@ -114,7 +50,7 @@ def is_array(value) -> bool:
 class Runtime:
     """Masks and elementwise logic. A mask is True/False (the same everywhere) or an array."""
 
-    def __init__(self, xp):
+    def __init__(self, xp: 'ModuleType') -> None:
         self.xp = xp
         #: The current statement's mask: no order and no assignment where it is False
         self.mask = True
@@ -137,7 +73,7 @@ class Runtime:
                 else value != 0
         return bool(value)
 
-    def and_(self, left, right):
+    def and_(self, left, right: 'Callable'):
         """``left and right``; right is a function, not evaluated when left is False."""
         left = self.truth(left)
         if left is False:
@@ -151,7 +87,7 @@ class Runtime:
             return False
         return self.xp.logical_and(left, right)
 
-    def or_(self, left, right):
+    def or_(self, left, right: 'Callable'):
         left = self.truth(left)
         if left is True:
             return True
@@ -171,7 +107,7 @@ class Runtime:
     def alive(self, dead, skip):
         return self.not_(self.or_(dead, lambda: skip))
 
-    def sel(self, mask, new, old):
+    def sel(self, mask, new, old: 'Callable'):
         """Assignment under a mask: the new value where it holds, the previous one elsewhere."""
         if mask is True:
             return new
@@ -213,7 +149,7 @@ class Runtime:
             return yes if condition else no
         return self.choose(condition, yes, no)
 
-    def sort_list(self, items, key=None, reverse=False):
+    def sort_list(self, items, key: 'Callable | None' = None, reverse: bool = False):
         """``items.sort(key=..., reverse=...)``: a list of instruments ranked per combination;
         any other list sorted in place, as Python does."""
         from ziplime.sweep import cross
@@ -229,7 +165,7 @@ class Runtime:
             return self.not_(value.sweep_truth())
         return value is None
 
-    def nested(self, function):
+    def nested(self, function: 'Callable'):
         """A function defined inside a converted one: it runs under the mask it is called with."""
         def call(*args, **kwargs):
             saved = self.mask
@@ -239,7 +175,7 @@ class Runtime:
                 self.mask = saved
         return call
 
-    def plain(self, condition, line, what):
+    def plain(self, condition, line: int, what: str):
         """A condition Python has to decide by itself: it must be the same everywhere."""
         condition = self.truth(condition)
         if isinstance(condition, bool):
@@ -260,13 +196,13 @@ class Runtime:
                                  "single instruments.")
         return item in container
 
-    def delete(self, container, key, line):
+    def delete(self, container, key, line: int) -> None:
         if hasattr(container, "sweep_delete"):
             container.sweep_delete(key)
         elif self.plain(self.mask, line, "del"):
             del container[key]
 
-    def comprehension(self, iterable, value, condition, arity, kind):
+    def comprehension(self, iterable, value: 'Callable', condition: 'Callable', arity: int, kind: str):
         if hasattr(iterable, "sweep_vectorized"):
             iterable = iterable.sweep_vectorized()
         from ziplime.sweep.cross import CrossSection, cross_section_of
@@ -305,7 +241,7 @@ class Runtime:
         from ziplime.sweep.cross import SweepDict
         return SweepDict(self, value)
 
-    def loop(self, iterable, carried, line):
+    def loop(self, iterable, carried, line: int):
         if hasattr(iterable, "sweep_vectorized"):
             iterable = iterable.sweep_vectorized()
         if isinstance(iterable, Vectorized) and carried:
@@ -319,10 +255,10 @@ class Runtime:
 class _MathShim:
     """``math`` that accepts arrays: math.isnan(signals["close"][name])."""
 
-    def __init__(self, xp):
+    def __init__(self, xp: 'ModuleType') -> None:
         self._xp = xp
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         original = getattr(math, name)
         vector = getattr(self._xp, {"fabs": "abs"}.get(name, name), None)
         if not callable(original) or vector is None:
@@ -360,16 +296,16 @@ NUMPY_SUPPORTED = set(NUMPY_ELEMENTWISE) | NUMPY_REDUCTIONS | {"trunc"} | NUMPY_
 class _NumpyShim:
     """``np`` inside a converted strategy: its functions on the backend's arrays."""
 
-    def __init__(self, xp):
+    def __init__(self, xp: 'ModuleType') -> None:
         self._xp = xp
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         original = getattr(np, name)
         if name in NUMPY_CONSTANTS or not callable(original):
             return original
         return _HistoryAware(original, self._array_function(name, original), f"np.{name}")
 
-    def _array_function(self, name, original):
+    def _array_function(self, name: str, original: 'Callable'):
         xp = self._xp
         if name == "trunc":
             return lambda value: (xp.sign(value) * xp.floor(abs(value)) if is_array(value)
@@ -398,7 +334,7 @@ class _HistoryAware:
     (lazy.py) it is recorded, to run on the host with the real rows; otherwise ``plain``.
     ``np.maximum.accumulate`` and the other attributes of a ufunc are recorded the same way."""
 
-    def __init__(self, original, plain, name):
+    def __init__(self, original: 'Callable', plain: 'Callable', name: str) -> None:
         self._original, self._plain, self._name = original, plain, name
 
     def __call__(self, *args, **kwargs):
@@ -407,7 +343,7 @@ class _HistoryAware:
             return record(self._original, args, kwargs)
         return self._plain(*args, **kwargs)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name.startswith("__"):
             raise AttributeError(name)
         attribute = getattr(self._original, name)
@@ -425,14 +361,14 @@ class _Foreign:
     history rows are recorded (lazy.py); on values that differ between combinations they cannot
     run, and a call with plain numbers runs as written."""
 
-    def __init__(self, module):
+    def __init__(self, module: 'ModuleType') -> None:
         self._module = module
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         return foreign(getattr(self._module, name), f"{self._module.__name__}.{name}")
 
 
-def foreign(value, name):
+def foreign(value, name: str):
     import types as _types
 
     if isinstance(value, _types.ModuleType):
@@ -453,7 +389,7 @@ def foreign(value, name):
     return _HistoryAware(value, plain, name)
 
 
-def _reduce(xp, name, original, values, args, kwargs):
+def _reduce(xp: 'ModuleType', name: str, original, values, args, kwargs):
     if args or kwargs.get("axis") is not None:
         raise NotConvertible(f"np.{name} with an axis reduces over combinations in a sweep, not "
                              f"over what the strategy meant; reduce a list: np.{name}([a, b]).")
@@ -492,13 +428,13 @@ def _reduce(xp, name, original, values, args, kwargs):
 _RUNTIME_INF = [np.inf]
 
 
-def _builtins_shim(xp, runtime=None):
-    def scalar(original, vector):
+def _builtins_shim(xp: 'ModuleType', runtime: 'Runtime | None' = None):
+    def scalar(original: 'Callable', vector: 'Callable'):
         def function(value=0, *rest):
             return vector(value) if is_array(value) else original(value, *rest)
         return function
 
-    def reduce(original, combine):
+    def reduce(original: 'Callable', combine: 'Callable'):
         def function(iterable):
             items = list(iterable)
             if not any(map(is_array, items)):
@@ -513,7 +449,7 @@ def _builtins_shim(xp, runtime=None):
 
     from ziplime.sweep.lazy import contains_lazy, record
 
-    def history_aware(original, function):
+    def history_aware(original: 'Callable', function: 'Callable'):
         def call(*args, **kwargs):
             if contains_lazy(args, kwargs):
                 return record(original, args, kwargs)
@@ -530,7 +466,7 @@ def _builtins_shim(xp, runtime=None):
             return copy.copy(iterable)  # list(context.universe.values()) is still the universe
         return builtins.list(iterable)
 
-    def sorted_(iterable, *, key=None, reverse=False):
+    def sorted_(iterable, *, key: 'Callable | None' = None, reverse: bool = False):
         if cross.ranks_instruments(iterable):
             return cross.ranking(xp, iterable, key, reverse, runtime)
         if runtime is not None:
@@ -539,8 +475,8 @@ def _builtins_shim(xp, runtime=None):
                 return ranked
         return builtins.sorted(iterable, key=key, reverse=reverse)
 
-    def extreme(name, original, vector):
-        def function(*args, key=None, **kwargs):
+    def extreme(name: str, original: 'Callable', vector: 'Callable'):
+        def function(*args, key: 'Callable | None' = None, **kwargs):
             if len(args) == 1 and key is not None and cross.ranks_instruments(args[0]):
                 return cross.ranking(xp, args[0], key, name == "max", runtime)[0]
             if len(args) == 1 and isinstance(args[0], cross.CrossSection):
@@ -589,7 +525,7 @@ def _builtins_shim(xp, runtime=None):
 M, DEAD, SKIP, RT, RESULT = "_gpu_m", "_gpu_dead", "_gpu_skip", "_gpu_rt", "_gpu_result"
 
 
-def _template(code: str, **nodes) -> list[ast.stmt]:
+def _template(code: str, **nodes: 'ast.AST') -> list[ast.stmt]:
     tree = ast.parse(textwrap.dedent(code))
     # The template's own lines (1, 2...) would point at the top of the strategy's function: they
     # take the line of the statement they are generated for instead (block, fix_missing_locations)
@@ -599,7 +535,7 @@ def _template(code: str, **nodes) -> list[ast.stmt]:
                 delattr(node, attribute)
 
     class Fill(ast.NodeTransformer):
-        def visit_Name(self, node):
+        def visit_Name(self, node: 'ast.Name'):
             if node.id in nodes:
                 replacement = copy.deepcopy(nodes[node.id])
                 if hasattr(replacement, "ctx"):
@@ -610,7 +546,7 @@ def _template(code: str, **nodes) -> list[ast.stmt]:
     return Fill().visit(tree).body
 
 
-def _expression(code: str, **nodes) -> ast.expr:
+def _expression(code: str, **nodes: 'ast.AST') -> ast.expr:
     return _template(code, **nodes)[0].value
 
 
@@ -625,10 +561,10 @@ def _load(node: ast.expr) -> ast.expr:
 class _Expressions(ast.NodeTransformer):
     """and/or/not/if-else/chained comparisons to elementwise; await dropped."""
 
-    def visit_Await(self, node):
+    def visit_Await(self, node: 'ast.Await'):
         return self.visit(node.value)
 
-    def visit_BoolOp(self, node):
+    def visit_BoolOp(self, node: 'ast.BoolOp'):
         self.generic_visit(node)
         method = "and_" if isinstance(node.op, ast.And) else "or_"
         result = node.values[0]
@@ -636,17 +572,17 @@ class _Expressions(ast.NodeTransformer):
             result = _expression(f"{RT}.{method}(LEFT, lambda: RIGHT)", LEFT=result, RIGHT=value)
         return result
 
-    def visit_UnaryOp(self, node):
+    def visit_UnaryOp(self, node: 'ast.UnaryOp'):
         self.generic_visit(node)
         if isinstance(node.op, ast.Not):
             return _expression(f"{RT}.not_(VALUE)", VALUE=node.operand)
         return node
 
-    def visit_IfExp(self, node):
+    def visit_IfExp(self, node: 'ast.IfExp'):
         self.generic_visit(node)
         return _expression(f"{RT}.where(TEST, YES, NO)", TEST=node.test, YES=node.body, NO=node.orelse)
 
-    def visit_Compare(self, node):
+    def visit_Compare(self, node: 'ast.Compare'):
         self.generic_visit(node)
         if len(node.ops) == 1:
             op = node.ops[0]
@@ -666,26 +602,26 @@ class _Expressions(ast.NodeTransformer):
             result = _expression(f"{RT}.and_(LEFT, lambda: RIGHT)", LEFT=result, RIGHT=part)
         return result
 
-    def visit_Lambda(self, node):
+    def visit_Lambda(self, node: 'ast.Lambda'):
         return node  # a lambda's body is not a statement of the strategy
 
-    def visit_Dict(self, node):
+    def visit_Dict(self, node: 'ast.Dict'):
         self.generic_visit(node)
         return _expression(f"{RT}.dict(VALUE)", VALUE=node)
 
-    def visit_DictComp(self, node):
+    def visit_DictComp(self, node: 'ast.DictComp'):
         pair = ast.GeneratorExp(elt=ast.Tuple(elts=[node.key, node.value], ctx=ast.Load()),
                                 generators=node.generators)
         converted = self._comprehension(pair, kind="dict")
         return _expression(f"{RT}.dict(VALUE)", VALUE=node) if converted is pair else converted
 
-    def visit_GeneratorExp(self, node):
+    def visit_GeneratorExp(self, node: 'ast.GeneratorExp'):
         return self._comprehension(node)
 
-    def visit_ListComp(self, node):
+    def visit_ListComp(self, node: 'ast.ListComp'):
         return self._comprehension(node)
 
-    def _comprehension(self, node, kind=None):
+    def _comprehension(self, node: 'ast.GeneratorExp | ast.ListComp', kind: 'str | None' = None):
         """``(f(x) for x in xs if c(x))``: over instruments, one array with a mask -- a cross
         section that sum/any/all/max/min/len reduce per combination; otherwise as Python."""
         if len(node.generators) != 1 or node.generators[0].is_async:
@@ -712,7 +648,7 @@ class _Expressions(ast.NodeTransformer):
                            ITER=self.visit(generator.iter), VALUE=value, CONDITION=condition)
 
 
-def _is_sort(node) -> bool:
+def _is_sort(node: 'ast.AST') -> bool:
     return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and node.func.attr == "sort" and not node.args
             and isinstance(node.func.value, (ast.Name, ast.Attribute, ast.Subscript)))
@@ -742,7 +678,7 @@ def _carried(loop: ast.For) -> list[str]:
 
 
 class _Statements:
-    def __init__(self, filename: str):
+    def __init__(self, filename: str) -> None:
         self.filename = filename
         self.counter = 0
         self.expressions = _Expressions()
@@ -751,13 +687,13 @@ class _Statements:
         self.counter += 1
         return f"_gpu_{prefix}{self.counter}"
 
-    def expr(self, node):
+    def expr(self, node: 'ast.expr'):
         return self.expressions.visit(node)
 
-    def refuse(self, node, reason):
+    def refuse(self, node: 'ast.AST', reason: str):
         raise NotConvertible(f"{self.filename}, line {node.lineno}: {reason}")
 
-    def block(self, statements) -> list[ast.stmt]:
+    def block(self, statements: 'list[ast.stmt]') -> list[ast.stmt]:
         result = []
         for statement in statements:
             for new in self.statement(statement):
@@ -767,7 +703,7 @@ class _Statements:
                         ast.copy_location(child, statement)
         return result or [ast.Pass()]
 
-    def assign(self, target, value) -> list[ast.stmt]:
+    def assign(self, target: 'ast.expr', value: 'ast.expr') -> list[ast.stmt]:
         if isinstance(target, (ast.Tuple, ast.List)):
             temporary = self.fresh("t")
             result = _template(f"{temporary} = VALUE", VALUE=value)
@@ -779,7 +715,7 @@ class _Statements:
         return _template(f"TARGET = {RT}.sel({M}, VALUE, lambda: OLD)",
                          TARGET=target, VALUE=value, OLD=_load(target))
 
-    def statement(self, node) -> list[ast.stmt]:
+    def statement(self, node: 'ast.stmt') -> list[ast.stmt]:
         mask = _template(f"{RT}.mask = {M}")
         if isinstance(node, ast.Expr) and _is_sort(node.value):
             # lst.sort(key=...) on a list of instruments ranks them per combination
@@ -860,7 +796,7 @@ class _Statements:
         self.refuse(node, f"{names.get(type(node), type(node).__name__)} is not supported in a "
                           f"function the sweep runs for every combination.")
 
-    def function(self, node) -> list[ast.stmt]:
+    def function(self, node: 'ast.FunctionDef | ast.AsyncFunctionDef') -> list[ast.stmt]:
         """A nested function: converted like the one around it, and run under the mask of the
         statement that calls it."""
         if node.decorator_list:
@@ -906,7 +842,7 @@ class _Statements:
         result += _template(f"{M} = {RT}.and_({saved}, lambda: {RT}.alive({DEAD}, {SKIP}))")
         return result
 
-    def for_(self, node) -> list[ast.stmt]:
+    def for_(self, node: 'ast.For') -> list[ast.stmt]:
         if node.orelse:
             self.refuse(node, "for ... else is not supported.")
         skip, path = self.fresh("k"), self.fresh("p")
@@ -950,7 +886,7 @@ class _Statements:
         return result
 
 
-def _source(function) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, str, int]:
+def _source(function: 'Callable') -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, str, int]:
     try:
         source = textwrap.dedent(inspect.getsource(function))
     except (OSError, TypeError):
@@ -964,7 +900,7 @@ def _source(function) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, str, int]
     return definition, filename, first_line
 
 
-def _compile(function) -> types.FunctionType:
+def _compile(function: 'Callable') -> types.FunctionType:
     """The converted function; it takes the Runtime as an extra last argument."""
     definition, filename, first_line = _source(function)
     statements = _Statements(filename)
@@ -995,7 +931,7 @@ def _compile(function) -> types.FunctionType:
 HOOKS = {"initialize", "compute_signals", "handle_data_gpu", "analyze"}
 
 
-def user_module(module) -> bool:
+def user_module(module: 'ModuleType | str | None') -> bool:
     """A module of the strategy's own code: not the standard library, an installed package or
     ziplime. Its functions are converted like the strategy's."""
     import sysconfig
@@ -1018,7 +954,7 @@ def user_module(module) -> bool:
 class Converted:
     """A converted hook and the functions of the strategy's own modules it may call."""
 
-    def __init__(self, original, function, helpers: dict, helper_originals: dict):
+    def __init__(self, original: 'Callable', function: 'Callable', helpers: dict, helper_originals: dict) -> None:
         self.original = original
         self.function = function
         #: {(module, name): converted code} for functions of the strategy's own modules
@@ -1036,7 +972,7 @@ class Converted:
     def name(self) -> str:
         return self.original.__name__
 
-    def bind(self, xp, runtime: Runtime | None = None):
+    def bind(self, xp: 'ModuleType', runtime: Runtime | None = None):
         """The function ``(context, data)`` for one run: its own Runtime, and for each module of
         the strategy's code its own globals, with math, NumPy and builtins substituted and its
         functions replaced by their converted versions."""
@@ -1047,7 +983,7 @@ class Converted:
         builtins_ = {**vars(builtins), **_builtins_shim(xp, runtime)}
         namespaces = {}
 
-        def wrapper(module_name, name):
+        def wrapper(module_name: str, name: str):
             code = self.helpers[(module_name, name)]
             original = self.helper_originals[(module_name, name)]
             converted = types.FunctionType(code.__code__, namespace_of(original.__module__,
@@ -1085,7 +1021,7 @@ class Converted:
                 return foreign(value, getattr(value, "__name__", "it"))
             return value
 
-        def namespace_of(module_name, original_globals):
+        def namespace_of(module_name: str, original_globals):
             if module_name not in namespaces:
                 namespace = namespaces[module_name] = {}
                 namespace.update(original_globals)
@@ -1098,7 +1034,7 @@ class Converted:
         function = types.FunctionType(self.function.__code__, namespace, self.function.__name__,
                                       self.function.__defaults__)
 
-        def call(context, data, mask=True):
+        def call(context: 'Context', data: 'Data', mask=True):
             """``mask``: where the hook runs -- a scheduled function's rule in a compiled step."""
             runtime.mask = mask
             return function(context, data, runtime)
@@ -1125,16 +1061,16 @@ def _is_foreign(value) -> bool:
 class _ModuleProxy:
     """``import mylib`` in the strategy: ``mylib.helper`` is the converted helper."""
 
-    def __init__(self, module, namespace):
+    def __init__(self, module: 'ModuleType', namespace) -> None:
         self._module, self._namespace = module, namespace
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name in self._namespace:
             return self._namespace[name]
         return getattr(self._module, name)
 
 
-def convert(function) -> Converted:
+def convert(function: 'Callable') -> Converted:
     """A strategy hook ``(context, data)`` for every combination at once.
 
     Raises NotConvertible, naming the line, when it cannot be. Functions it reaches in the
@@ -1145,7 +1081,7 @@ def convert(function) -> Converted:
     helpers, originals = {}, {}
     seen_modules = set()
 
-    def visit(namespace: dict):
+    def visit(namespace: dict) -> None:
         for name, value in list(namespace.items()):
             if isinstance(value, types.ModuleType) and user_module(value) \
                     and value.__name__ not in seen_modules:
@@ -1171,7 +1107,7 @@ def convert(function) -> Converted:
     return Converted(function, converted, helpers, originals)
 
 
-def _text(function) -> str:
+def _text(function: 'Callable') -> str:
     try:
         return inspect.getsource(function)
     except (OSError, TypeError):
@@ -1184,7 +1120,7 @@ MUTATING = {"append", "extend", "update", "pop", "insert", "add", "clear", "remo
             "popitem", "discard", "sort", "reverse"}
 
 
-def context_writes(functions) -> tuple[set[str], set[str], list[str]]:
+def context_writes(functions: 'Iterable[Callable]') -> tuple[set[str], set[str], list[str]]:
     """``context.X`` attributes the functions assign, those they change in place
     (``context.X[k] = v``, ``del``, ``.pop()``), and reasons the step cannot be compiled.
 
@@ -1194,7 +1130,7 @@ def context_writes(functions) -> tuple[set[str], set[str], list[str]]:
     """
     written, in_place, reasons = set(), set(), []
 
-    def owner(node):
+    def owner(node: 'ast.AST'):
         """``context.X[...]`` / ``context.X.pop`` -> "X"."""
         while isinstance(node, (ast.Subscript, ast.Attribute)):
             if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)

@@ -6,8 +6,11 @@ from functools import partial
 from numbers import Number
 import operator
 import re
+from collections.abc import Callable
+from collections.abc import Iterable
 
 import pandas as pd
+import numpy as np
 
 from ziplime.lib.labelarray import LabelArray
 from ziplime.pipeline.dtypes import (
@@ -26,6 +29,7 @@ from ziplime.pipeline.terms.filters import ArrayPredicate, NumExprFilter
 from ziplime.pipeline.mixins import (
     RestrictedDTypeMixin,
 )
+from ziplime.pipeline.terms.filters.filter import Filter
 
 
 class Classifier(RestrictedDTypeMixin, ComputableTerm):
@@ -46,7 +50,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
     # We explicitly don't support classifier to classifier comparisons, since
     # the stored values likely don't mean the same thing. This may be relaxed
     # in the future, but for now we're starting conservatively.
-    def eq(self, other):
+    def eq(self, other: 'Number | str | bytes | None'):
         """
         Construct a Filter returning True for asset/date pairs where the output
         of ``self`` matches ``other``.
@@ -81,7 +85,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
                 opargs=(other,),
             )
 
-    def __ne__(self, other):
+    def __ne__(self, other: 'Number | str | bytes | None'):
         """
         Construct a Filter returning True for asset/date pairs where the output
         of ``self`` matches ``other.
@@ -101,7 +105,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
             # Numexpr doesn't know how to use LabelArrays.
             return ArrayPredicate(term=self, op=operator.ne, opargs=(other,))
 
-    def bad_compare(opname, other):
+    def bad_compare(opname: str, other):
         raise TypeError("cannot compare classifiers with %s" % opname)
 
     __gt__ = partial(bad_compare, ">")
@@ -205,7 +209,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
 
     # TODO: Support relabeling for integer dtypes.
     # @string_classifiers_only
-    def relabel(self, relabeler):
+    def relabel(self, relabeler: 'Callable[[str], str | None]'):
         """
         Convert ``self`` into a new classifier by mapping a function over each
         element produced by ``self``.
@@ -225,7 +229,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
 
         return Relabel(term=self, relabeler=relabeler)
 
-    def element_of(self, choices):
+    def element_of(self, choices: 'Iterable[str | int]'):
         """
         Construct a Filter indicating whether values are in ``choices``.
 
@@ -264,7 +268,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
                 )
             )
 
-        def only_contains(type_, values):
+        def only_contains(type_: 'type | tuple[type, ...]', values) -> bool:
             return all(isinstance(v, type_) for v in values)
 
         if self.dtype == int64_dtype:
@@ -299,14 +303,14 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
                 )
         raise AssertionError(f"Unknown dtype in Classifier.element_of {self.dtype}.")
 
-    def postprocess(self, data):
+    def postprocess(self, data: 'np.ndarray'):
         if self.dtype == int64_dtype:
             return data
         if not isinstance(data, LabelArray):
             raise AssertionError("Expected a LabelArray, got %s." % type(data))
         return data.as_categorical()
 
-    def to_workspace_value(self, result, assets):
+    def to_workspace_value(self, result: 'pd.Series', assets: 'pd.Index'):
         """
         Called with the result of a pipeline. This needs to return an object
         which can be put into the workspace to continue doing computations.
@@ -338,7 +342,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
     def _principal_computable_term_type(cls):
         return Classifier
 
-    def _to_integral(self, output_array):
+    def _to_integral(self, output_array: 'np.ndarray'):
         """
         Convert an array produced by this classifier into an array of integer
         labels and a missing value label.
@@ -356,7 +360,7 @@ class Classifier(RestrictedDTypeMixin, ComputableTerm):
             raise AssertionError("Unexpected Classifier dtype: %s." % self.dtype)
         return group_labels, null_label
 
-    def peer_count(self, mask=None):
+    def peer_count(self, mask: 'Filter | None' = None):
         """
         Construct a factor that gives the number of occurrences of
         each distinct category in a classifier.

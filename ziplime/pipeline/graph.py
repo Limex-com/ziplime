@@ -1,15 +1,18 @@
 """
 Dependency-Graph representation of Pipeline API terms.
 """
+
 import datetime
 import uuid
+from collections.abc import Iterable
+from collections.abc import Mapping
 
 import networkx as nx
 import pandas as pd
+import numpy as np
 from ziplime.lib.adjusted_array import AdjustedArray
 
 from ziplime.pipeline import LoadableTerm
-from ziplime.pipeline.visualize import display_graph
 from ziplime.pipeline.terms.term import Term
 from ziplime.pipeline.domain import Domain
 
@@ -57,7 +60,7 @@ class TermGraph:
     ExecutionPlan
     """
 
-    def __init__(self, terms):
+    def __init__(self, terms: 'dict[str, Term]') -> None:
         self.graph = nx.DiGraph()
 
         self._frozen = False
@@ -72,10 +75,10 @@ class TermGraph:
         # Mark that no more terms should be added to the graph.
         self._frozen = True
 
-    def __contains__(self, term):
+    def __contains__(self, term: 'Term'):
         return term in self.graph
 
-    def _add_to_graph(self, term, parents):
+    def _add_to_graph(self, term: 'Term', parents: 'set[Term]') -> None:
         """
         Add a term and all its children to ``graph``.
 
@@ -115,7 +118,7 @@ class TermGraph:
         """Name of the specially-designated ``screen`` term for the pipeline."""
         return SCREEN_NAME
 
-    def execution_order(self, workspace, refcounts):
+    def execution_order(self, workspace: 'Mapping[Term, np.ndarray | AdjustedArray]', refcounts: 'dict[Term, int]'):
         """
         Return a topologically-sorted list of the terms in ``self`` which
         need to be computed.
@@ -155,22 +158,28 @@ class TermGraph:
     # @lazyval
     @property
     def jpeg(self):
+        from ziplime.pipeline.visualize import display_graph
+
         return display_graph(self, "jpeg")
 
     # @lazyval
     @property
     def png(self):
+        from ziplime.pipeline.visualize import display_graph
+
         return display_graph(self, "png")
 
     # @lazyval
     @property
     def svg(self):
+        from ziplime.pipeline.visualize import display_graph
+
         return display_graph(self, "svg")
 
     def _repr_png_(self):
         return self.png.data
 
-    def initial_refcounts(self, initial_terms):
+    def initial_refcounts(self, initial_terms: 'Iterable[Term]'):
         """
         Calculate initial refcounts for execution of this graph.
 
@@ -192,7 +201,7 @@ class TermGraph:
 
         return refcounts
 
-    def _decref_dependencies_recursive(self, term, refcounts, garbage):
+    def _decref_dependencies_recursive(self, term: 'Term', refcounts: 'dict[Term, int]', garbage: 'set[Term]') -> None:
         """
         Decrement terms recursively.
 
@@ -211,7 +220,7 @@ class TermGraph:
                 garbage.add(parent)
                 self._decref_dependencies_recursive(parent, refcounts, garbage)
 
-    def decref_dependencies(self, term, refcounts):
+    def decref_dependencies(self, term: 'Term', refcounts: 'dict[Term, int]'):
         """
         Decrement in-edges for ``term`` after computation.
 
@@ -237,7 +246,7 @@ class TermGraph:
                 garbage.add(parent)
         return garbage
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.graph)
 
 
@@ -278,7 +287,7 @@ class ExecutionPlan(TermGraph):
         start_date: datetime.date,
         end_date: datetime.date,
         min_extra_rows: int = 0,
-    ):
+    ) -> None:
         super(ExecutionPlan, self).__init__(terms=terms)
 
         # Specialize all the LoadableTerms in the graph to our domain, so that

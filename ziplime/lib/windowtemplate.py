@@ -52,7 +52,7 @@ class AdjustedArrayWindow:
                  offset: int,
                  window_length: int,
                  perspective_offset: int,
-                 rounding_places):
+                 rounding_places: 'int | None') -> None:
         self.data = data
         self.view_kwargs = view_kwargs
         self.adjustments = adjustments
@@ -110,7 +110,7 @@ class AdjustedArrayWindow:
 
         return self.output
 
-    def _tick_forward(self, N: int):
+    def _tick_forward(self, N: int) -> None:
         anchor = self.anchor
         target = anchor + N
 
@@ -129,7 +129,7 @@ class AdjustedArrayWindow:
 
         self.anchor = target
 
-    def _update_output(self):
+    def _update_output(self) -> None:
         anchor = self.anchor
         view_kwargs = self.view_kwargs
 

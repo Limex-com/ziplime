@@ -66,5 +66,5 @@ class BondEvent:
     def pays_cash(self) -> bool:
         return self.event_type.pays_cash and self.value != 0.0
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.event_type.value}@{self.date} {self.value} {self.currency}"

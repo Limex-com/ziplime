@@ -30,6 +30,7 @@ the same bar for every instrument, so the instruments move together as they did:
 Every combination then runs on every path the way it ran on the real bars -- the same converted
 strategy, the same backend, every combination of a path in one call.
 """
+
 import contextlib
 import copy
 import dataclasses
@@ -45,16 +46,20 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import structlog
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.sweep.params import Family, SweepError, Synthetic
+from ziplime.assets.services.asset_service import AssetService
+from ziplime.data.domain.data_bundle import DataBundle
+from ziplime.sweep.params import SweepParams
 
 #: The fields a path rewrites; ``price`` follows ``close``.
 FIELDS = ("open", "high", "low", "close", "volume")
 #: What each path's run leaves for the summary.
 METRICS = ("sharpe", "total_return", "max_drawdown", "final_value", "fills")
 
-
 # -- the real bars --------------------------------------------------------------------------------
+
 
 @dataclasses.dataclass
 class Bars:
@@ -74,7 +79,7 @@ class Bars:
         return self.fields["close"].shape
 
 
-def side_by_side(data: pl.DataFrame, universe: dict, start: datetime.date, tz) -> Bars:
+def side_by_side(data: pl.DataFrame, universe: dict, start: datetime.date, tz: 'datetime.tzinfo') -> Bars:
     sids = [listing.sid for listing in universe.values()]
     position = {sid: k for k, sid in enumerate(sids)}
     frame = data.with_row_index("_row").filter(pl.col("sid").is_in(sids))
@@ -146,7 +151,7 @@ class Generator:
     """Draws paths of one family: for each path, the real bar each synthetic bar takes its shape
     and volume from, and the log returns ((bars of the run, instruments))."""
 
-    def __init__(self, family: Family, feats: Features, pool: np.ndarray, start: int):
+    def __init__(self, family: Family, feats: Features, pool: np.ndarray, start: int) -> None:
         self.family, self.feats, self.pool, self.start = family, feats, pool, start
         self.length = feats.returns.shape[0] - start
         self.pooled = feats.returns[pool]
@@ -160,10 +165,10 @@ class Generator:
 class Resampled(Generator):
     """Real bars, picked by position in the pool -- the same bar for every instrument."""
 
-    def positions(self, rng) -> np.ndarray:
+    def positions(self, rng: 'np.random.Generator') -> np.ndarray:
         raise NotImplementedError
 
-    def path(self, rng):
+    def path(self, rng: 'np.random.Generator'):
         source = self.pool[self.positions(rng)]
         returns = self.feats.returns[source]
         if self.family.drift == "zero":
@@ -172,12 +177,12 @@ class Resampled(Generator):
 
 
 class IID(Resampled):
-    def positions(self, rng):
+    def positions(self, rng: 'np.random.Generator'):
         return rng.integers(0, len(self.pool), self.length)
 
 
 class Shuffle(Resampled):
-    def positions(self, rng):
+    def positions(self, rng: 'np.random.Generator'):
         rounds = -(-self.length // len(self.pool))
         return np.concatenate([rng.permutation(len(self.pool)) for _ in range(rounds)])[:self.length]
 
@@ -186,11 +191,11 @@ class Blocks(Resampled):
     """Moving blocks of ``block`` bars; ``circular`` lets a block run past the end into the
     beginning, so every bar is as likely to be drawn."""
 
-    def __init__(self, *args, circular: bool):
+    def __init__(self, *args, circular: bool) -> None:
         super().__init__(*args)
         self.circular = circular
 
-    def positions(self, rng):
+    def positions(self, rng: 'np.random.Generator'):
         size = len(self.pool)
         block = min(self.family.block, size)
         count = -(-self.length // block)
@@ -201,7 +206,7 @@ class Blocks(Resampled):
 class Stationary(Resampled):
     """Blocks of geometric length, ``block`` bars on average, wrapping around the end."""
 
-    def positions(self, rng):
+    def positions(self, rng: 'np.random.Generator'):
         size = len(self.pool)
         new = rng.random(self.length) < 1.0 / self.family.block
         new[0] = True
@@ -215,7 +220,7 @@ class Meboot(Generator):
     """Vinod's maximum entropy bootstrap of each instrument's log close over the run, anchored at
     the last real close before it."""
 
-    def __init__(self, *args):
+    def __init__(self, *args) -> None:
         super().__init__(*args)
         close = self.feats.close
         self.levels = []
@@ -224,7 +229,7 @@ class Meboot(Generator):
             first = int(np.argmax(np.isfinite(series))) if np.isfinite(series).any() else None
             self.levels.append((first, series[first:] if first is not None else None))
 
-    def path(self, rng):
+    def path(self, rng: 'np.random.Generator'):
         returns = np.zeros((self.length, len(self.levels)))
         for column, (first, levels) in enumerate(self.levels):
             if levels is None or len(levels) < 3:
@@ -241,7 +246,7 @@ class Meboot(Generator):
 class Gaussian(Generator):
     """Log returns with the pool's means and covariance; ``df`` makes them a multivariate t."""
 
-    def __init__(self, *args, df: float | None):
+    def __init__(self, *args, df: float | None) -> None:
         super().__init__(*args)
         self.df = df
         covariance = np.atleast_2d(np.cov(self.pooled, rowvar=False))
@@ -249,7 +254,7 @@ class Gaussian(Generator):
         self.factor = np.linalg.cholesky(covariance + jitter * np.eye(len(covariance)))
         self.mean = np.zeros_like(self.drift) if self.family.drift == "zero" else self.drift
 
-    def path(self, rng):
+    def path(self, rng: 'np.random.Generator'):
         shocks = rng.standard_normal((self.length, len(self.mean)))
         if self.df is not None:
             # One mixing draw per bar for all instruments: a multivariate t of unit variance
@@ -262,7 +267,7 @@ class Garch(Generator):
     """GARCH(1,1) per instrument with variance targeting; the shocks are the real standardised
     residuals of one pooled date for all instruments at once."""
 
-    def __init__(self, *args):
+    def __init__(self, *args) -> None:
         super().__init__(*args)
         self.mean = np.zeros_like(self.drift) if self.family.drift == "zero" else self.drift
         residuals = self.feats.returns - self.drift
@@ -282,7 +287,7 @@ class Garch(Generator):
             beta * variance[self.start - 1]
         self.omega, self.alpha, self.beta = omega, alpha, beta
 
-    def path(self, rng):
+    def path(self, rng: 'np.random.Generator'):
         draws = rng.integers(0, len(self.pool), self.length)
         shocks = self.standardised[draws]
         returns = np.empty((self.length, len(self.mean)))
@@ -395,7 +400,7 @@ def fit_garch(residuals: np.ndarray) -> tuple[float, float, float]:
     if variance <= 0 or len(residuals) < 30:
         return variance, 0.0, 0.0
 
-    def loss(parameters):
+    def loss(parameters: 'np.ndarray'):
         alpha, beta = parameters
         if alpha < 0 or beta < 0 or alpha + beta >= 0.999:
             return 1e300
@@ -443,7 +448,7 @@ def build(bars: Bars, feats: Features, source: np.ndarray, returns: np.ndarray) 
     return out
 
 
-def as_bundle(bundle, bars: Bars, path: dict):
+def as_bundle(bundle: 'DataBundle', bars: Bars, path: dict):
     """The real bundle with the universe's rows rewritten to the path: the same rows, the same
     stamps -- only the numbers differ."""
     data = bundle.data
@@ -471,7 +476,13 @@ def as_bundle(bundle, bars: Bars, path: dict):
 
 # -- the sweep over every path --------------------------------------------------------------------
 
-async def refuse_splits(asset_service, universe: dict, calendar, start, end):
+async def refuse_splits(
+    asset_service: 'AssetService',
+    universe: dict,
+    calendar: 'ExchangeCalendar',
+    start: 'datetime.date',
+    end: 'datetime.date',
+) -> None:
     """A split happens on its date in the asset database, the price jump wherever the path put
     that bar: the two would not meet."""
     from ziplime.sweep.market import corporate_actions, run_sessions
@@ -485,8 +496,18 @@ async def refuse_splits(asset_service, universe: dict, calendar, start, end):
                          f"own. Sweep on synthetic paths over bars adjusted for splits.")
 
 
-async def run(*, params, say: Callable[[str], None], bundle, universe: dict, calendar,
-              asset_service, once, config_of, output: Path) -> pd.DataFrame:
+async def run(
+    *,
+    params: 'SweepParams',
+    say: Callable[[str], None],
+    bundle: 'DataBundle',
+    universe: dict,
+    calendar: 'ExchangeCalendar',
+    asset_service: 'AssetService',
+    once: 'Callable',
+    config_of: 'Callable',
+    output: Path,
+) -> pd.DataFrame:
     """The sweep on the real bars, then on every path of every family; the comparison."""
     synthetic: Synthetic = params.synthetic
     if params.emission_rate not in ("1d", "1D"):
@@ -646,11 +667,11 @@ def summarize(real: pd.DataFrame, results: dict, synthetic: Synthetic, sort_by: 
     real_best = int(np.flatnonzero(summary["real rank"].to_numpy() == 1)[0]) \
         if real_ok.any() else None
 
-    def combo(k):
+    def combo(k: int):
         return {name: (v.item() if hasattr(v, "item") else v)
                 for name, v in real.loc[k, parameters].items()}
 
-    def place(rank, total):
+    def place(rank: int, total: int):
         if np.isnan(rank):
             return "not ranked"
         return f"{int(rank):,} of {int(total):,} (top {math.ceil(rank / total * 100):.0f}%)" \

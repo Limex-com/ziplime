@@ -32,6 +32,7 @@ For an input that carries its own value series -- a vectorbt portfolio does --
 :func:`to_execution_result` reconciles the replayed book against it and refuses a result that does
 not match, so a divergence surfaces as an error rather than as a plausible number.
 """
+
 import dataclasses
 import datetime
 import math
@@ -40,6 +41,7 @@ import uuid
 import pandas as pd
 import polars as pl
 import structlog
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
@@ -55,6 +57,8 @@ from ziplime.finance.slippage.no_slippage import NoSlippage
 from ziplime.sources.benchmark_source import BenchmarkSource
 from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 from ziplime.trading.currency_results import currency_performance
+from ziplime.assets.services.asset_service import AssetService
+from ziplime.exchanges.exchange import Exchange
 
 _logger = structlog.get_logger(__name__)
 
@@ -72,7 +76,13 @@ class ReconciliationError(ValueError):
     single half, because it invites comparisons that mean nothing.
     """
 
-    def __init__(self, session, replayed: float, reported: float, tolerance: float):
+    def __init__(
+        self,
+        session: 'datetime.date | datetime.datetime',
+        replayed: float,
+        reported: float,
+        tolerance: float,
+    ) -> None:
         super().__init__(
             f"On {session} the replayed ledger holds {replayed:,.6f} but the source reports "
             f"{reported:,.6f} -- a difference of {abs(replayed - reported):,.6f}, beyond the "
@@ -238,7 +248,7 @@ def _reject_unrepresentable_instruments(listings: dict[str, ExchangeAsset]) -> N
     )
 
 
-def _reject_ignored_cost_models(exchange, listings: dict[str, ExchangeAsset]) -> None:
+def _reject_ignored_cost_models(exchange: 'Exchange', listings: dict[str, ExchangeAsset]) -> None:
     """Refuse an exchange whose cost models this path cannot run.
 
     vectorbt decides its own fills: it applies ``fees``, ``fixed_fees`` and ``slippage`` inside
@@ -299,10 +309,10 @@ async def to_execution_result(
         portfolio,
         listings: dict[str, ExchangeAsset],
         prices: pd.DataFrame,
-        trading_calendar,
-        exchange,
-        asset_service=None,
-        benchmark_source=None,
+        trading_calendar: 'ExchangeCalendar | None',
+        exchange: 'Exchange | None',
+        asset_service: 'AssetService | None' = None,
+        benchmark_source: 'BenchmarkSource | None' = None,
         metrics=None,
         emission_rate: datetime.timedelta = datetime.timedelta(days=1),
         trading_account_id: str = "vectorized_account",
@@ -527,7 +537,7 @@ async def to_execution_result(
     )
 
 
-def _session_boundaries(index) -> tuple[list[int], list[int]]:
+def _session_boundaries(index: 'pd.DatetimeIndex') -> tuple[list[int], list[int]]:
     """Positions of the first and last bar of each trading session, in chronological order.
 
     Ordered lists rather than sets, and that is not a detail. Built as sets, the session closes
@@ -554,8 +564,14 @@ def _session_boundaries(index) -> tuple[list[int], list[int]]:
     return opening, closing
 
 
-def _zero_benchmark(asset_service, trading_calendar, sessions, exchange,
-                    emission_rate: datetime.timedelta, index) -> BenchmarkSource:
+def _zero_benchmark(
+    asset_service: 'AssetService',
+    trading_calendar: 'ExchangeCalendar',
+    sessions: 'pd.DatetimeIndex',
+    exchange: 'Exchange',
+    emission_rate: datetime.timedelta,
+    index: 'pd.DatetimeIndex',
+) -> BenchmarkSource:
     """A benchmark of zero returns, for a run measured against nothing.
 
     The default metric set always asks for a benchmark -- alpha and beta are in it -- so there is

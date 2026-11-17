@@ -6,6 +6,7 @@ combination is an ordinary run of the engine, the combinations spread over the C
 the engine itself, so its numbers need no verification; it is just slower, by the factor the
 conversion would have saved.
 """
+
 import asyncio
 import concurrent.futures
 import contextlib
@@ -24,13 +25,18 @@ import pandas as pd
 
 from ziplime.sweep import report
 from ziplime.sweep.market import parse_rate
+from ziplime.assets.services.asset_service import AssetService
+from ziplime.data.domain.data_bundle import DataBundle
+from ziplime.sweep.initialize import Combinations
+from ziplime.sweep.params import SweepParams
+from ziplime.sweep.report import Stages
 
 #: Combinations per job: small enough to report progress, large enough to amortise a process's
 #: imports.
 PER_JOB = 4
 
 
-def _bundle_parts(bundle) -> dict:
+def _bundle_parts(bundle: 'DataBundle') -> dict:
     """What a worker needs to rebuild the bundle: its rows and how they are stamped."""
     return dict(name=bundle.name, version=bundle.version, start_date=bundle.start_date,
                 end_date=bundle.end_date, calendar=bundle.trading_calendar.name,
@@ -48,13 +54,22 @@ def _bundle_from(parts: dict):
     return DataBundle(trading_calendar=calendar, **parts)
 
 
-def _db_path(asset_service) -> str:
+def _db_path(asset_service: 'AssetService') -> str:
     url = asset_service._asset_repository.db_url
     return url.split("///", 1)[1] if "///" in url else url
 
 
-async def _run_one(*, params, algorithm_file: str, config: dict, bundle, asset_service,
-                   sources: list, folder: Path, record: bool = False):
+async def _run_one(
+    *,
+    params: 'SweepParams',
+    algorithm_file: str,
+    config: dict,
+    bundle: 'DataBundle',
+    asset_service: 'AssetService',
+    sources: list,
+    folder: Path,
+    record: bool = False,
+):
     from ziplime.core.run_simulation import run_simulation
     from ziplime.utils.calendar_utils import get_calendar
 
@@ -88,7 +103,7 @@ async def _run_one(*, params, algorithm_file: str, config: dict, bundle, asset_s
     return value, trades
 
 
-def _row(index: int, value: pd.Series, trades: list, params) -> pd.DataFrame:
+def _row(index: int, value: pd.Series, trades: list, params: 'SweepParams') -> pd.DataFrame:
     table = report.metrics(pd.DataFrame({index: value.to_numpy()}), params.total_cash,
                            pd.Series([len(trades)], index=[index]),
                            pd.Series([float("nan")], index=[index]), 0, params.periods_per_year)
@@ -122,9 +137,18 @@ def _worker(job: dict) -> pd.DataFrame:
     return asyncio.run(go())
 
 
-async def sweep_on_engine(*, params, algorithm_file: Path, combinations, indices: list[int],
-                          bundle, asset_service, sources: dict, say: Callable[[str], None],
-                          stages) -> pd.DataFrame:
+async def sweep_on_engine(
+    *,
+    params: 'SweepParams',
+    algorithm_file: Path,
+    combinations: 'Combinations',
+    indices: list[int],
+    bundle: 'DataBundle',
+    asset_service: 'AssetService',
+    sources: dict,
+    say: Callable[[str], None],
+    stages: 'Stages',
+) -> pd.DataFrame:
     """Every combination in ``indices`` through run_simulation, on ``workers`` processes."""
     workers = params.workers or os.cpu_count() or 1
     configs = [(index, combinations.config(index).model_dump()) for index in indices]
@@ -167,8 +191,16 @@ async def sweep_on_engine(*, params, algorithm_file: Path, combinations, indices
     return pd.concat(rows)
 
 
-async def best_fills(*, params, algorithm_file: Path, config: dict, bundle, asset_service,
-                     sources: dict, output: Path):
+async def best_fills(
+    *,
+    params: 'SweepParams',
+    algorithm_file: Path,
+    config: dict,
+    bundle: 'DataBundle',
+    asset_service: 'AssetService',
+    sources: dict,
+    output: Path,
+):
     """The best combination's trades from the engine, as best_fills.csv."""
     with tempfile.TemporaryDirectory() as folder:
         value, trades = await _run_one(params=params, algorithm_file=str(algorithm_file),

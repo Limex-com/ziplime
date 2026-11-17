@@ -8,6 +8,7 @@ from ziplime.utils.api_support import (
     require_not_initialized,
 )
 from ziplime.utils.algo_instance import get_algo_instance
+from ziplime.trading.base_trading_algorithm import BaseTradingAlgorithm
 
 
 def test_zipline_api_context_manager():
@@ -16,6 +17,20 @@ def test_zipline_api_context_manager():
     dummy_algo = object()
     with ZiplineAPI(dummy_algo):
         assert get_algo_instance() is dummy_algo
+
+    assert get_algo_instance() is initial
+
+
+def test_base_algorithm_contexts_restore_outer_instance_after_exception():
+    initial = get_algo_instance()
+    outer, inner = BaseTradingAlgorithm(), BaseTradingAlgorithm()
+
+    with ZiplineAPI(outer):
+        with pytest.raises(ValueError, match="callback failed"):
+            with ZiplineAPI(inner):
+                assert get_algo_instance() is inner
+                raise ValueError("callback failed")
+        assert get_algo_instance() is outer
 
     assert get_algo_instance() is initial
 

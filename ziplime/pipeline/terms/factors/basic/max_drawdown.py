@@ -1,5 +1,6 @@
 import numpy as np
 from numpy import fmax, isnan
+import pandas as pd
 
 from ziplime.pipeline.mixins import SingleInputMixin
 from ziplime.pipeline.terms.factors.custom_factor import CustomFactor
@@ -17,7 +18,7 @@ class MaxDrawdown(SingleInputMixin, CustomFactor):
 
     # ctx = ignore_nanwarnings()
 
-    def compute(self, today, assets, out, data):
+    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', data: 'np.ndarray') -> None:
         drawdowns = fmax.accumulate(data, axis=0) - data
         drawdowns[isnan(drawdowns)] = -np.inf
         drawdown_ends = nanargmax(drawdowns, axis=0)

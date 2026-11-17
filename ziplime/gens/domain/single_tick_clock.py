@@ -29,7 +29,9 @@ No strategy state lives in the clock. A fresh process seeds its ledger from the
 venue's portfolio before the loop (``synchronize_exchange_portfolio``) and
 re-runs ``initialize``, so one tick is self-contained.
 """
+
 import datetime
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.gens.domain.realtime_clock import RealtimeClock
 from ziplime.trading.enums.simulation_event import SimulationEvent
@@ -37,11 +39,11 @@ from ziplime.trading.enums.simulation_event import SimulationEvent
 
 class SingleTickClock(RealtimeClock):
     def __init__(self,
-                 trading_calendar,
+                 trading_calendar: 'ExchangeCalendar',
                  emission_rate: datetime.timedelta,
                  tick_dt: datetime.datetime | None = None,
                  timedelta_diff_from_current_time: datetime.timedelta | None = None,
-                 session_window_days: int = 7):
+                 session_window_days: int = 7) -> None:
         now = tick_dt or datetime.datetime.now(tz=trading_calendar.tz)
         if now.tzinfo is None:
             now = now.replace(tzinfo=trading_calendar.tz)

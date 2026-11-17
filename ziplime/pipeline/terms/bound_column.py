@@ -1,5 +1,8 @@
-
 from toolz import first
+from numpy.typing import DTypeLike
+from ziplime.pipeline.data.currency_conversion import CurrencyConversion
+from ziplime.pipeline.data.dataset_meta import DataSetMeta
+from ziplime.pipeline.domain import Domain
 from ziplime.currency import Currency
 from ziplime.data.fx import DEFAULT_FX_RATE
 from ziplime.pipeline.terms.asset_exists import AssetExists
@@ -46,14 +49,14 @@ class BoundColumn(LoadableTerm):
 
     def __new__(
             cls,
-            dtype,
+            dtype: 'DTypeLike',
             missing_value,
-            dataset,
-            name,
-            doc,
+            dataset: DataSetMeta,
+            name: str,
+            doc: 'str | None',
             metadata,
-            currency_conversion,
-            currency_aware,
+            currency_conversion: 'CurrencyConversion | None',
+            currency_aware: bool,
     ):
         if currency_aware and dtype != float64_dtype:
             raise AssertionError(
@@ -83,12 +86,12 @@ class BoundColumn(LoadableTerm):
 
     def _init(
             self,
-            dataset,
-            name,
-            doc,
+            dataset: DataSetMeta,
+            name: str,
+            doc: 'str | None',
             metadata,
-            currency_conversion,
-            currency_aware,
+            currency_conversion: 'CurrencyConversion | None',
+            currency_aware: bool,
             *args,
             **kwargs,
     ):
@@ -103,12 +106,12 @@ class BoundColumn(LoadableTerm):
     @classmethod
     def _static_identity(
             cls,
-            dataset,
-            name,
-            doc,
+            dataset: DataSetMeta,
+            name: str,
+            doc: 'str | None',
             metadata,
-            currency_conversion,
-            currency_aware,
+            currency_conversion: 'CurrencyConversion | None',
+            currency_aware: bool,
             *args,
             **kwargs,
     ):
@@ -143,14 +146,14 @@ class BoundColumn(LoadableTerm):
 
         return type(self)(**kw)
 
-    def specialize(self, domain):
+    def specialize(self, domain: Domain) -> "BoundColumn":
         """Specialize ``self`` to a concrete domain."""
         if domain == self.domain:
             return self
 
         return self._replace(dataset=self._dataset.specialize(domain))
 
-    def unspecialize(self):
+    def unspecialize(self) -> "BoundColumn":
         """
         Unspecialize a column to its generic form.
 
@@ -158,7 +161,7 @@ class BoundColumn(LoadableTerm):
         """
         return self.specialize(GENERIC)
 
-    def fx(self, currency: str | Currency):
+    def fx(self, currency: str | Currency) -> "BoundColumn":
         """
         Construct a currency-converted version of this column.
 
@@ -173,8 +176,6 @@ class BoundColumn(LoadableTerm):
             Column producing the same data as ``self``, but currency-converted
             into ``currency``.
         """
-        from ziplime.pipeline.data.dataset import CurrencyConversion
-
         conversion = self._currency_conversion
 
         if not self._currency_aware:
@@ -198,7 +199,7 @@ class BoundColumn(LoadableTerm):
         return self._currency_conversion
 
     @property
-    def currency_aware(self):
+    def currency_aware(self) -> bool:
         """
         Whether or not this column produces currency-denominated data.
         """
@@ -212,7 +213,7 @@ class BoundColumn(LoadableTerm):
         return self._dataset
 
     @property
-    def name(self):
+    def name(self) -> str:
         """
         The name of this column.
         """
@@ -226,7 +227,7 @@ class BoundColumn(LoadableTerm):
         return self._metadata.copy()
 
     @property
-    def qualname(self):
+    def qualname(self) -> str:
         """The fully-qualified name of this column."""
         out = ".".join([self.dataset.qualname, self.name])
         conversion = self._currency_conversion
@@ -255,13 +256,13 @@ class BoundColumn(LoadableTerm):
             ndim=self.ndim,
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "{qualname}::{dtype}".format(
             qualname=self.qualname,
             dtype=self.dtype.name,
         )
 
-    def graph_repr(self):
+    def graph_repr(self) -> str:
         """Short repr to use when rendering Pipeline graphs."""
         # Graphviz interprets `\l` as "divide label into lines, left-justified"
         return "BoundColumn:\\l  Dataset: {}\\l  Column: {}\\l".format(

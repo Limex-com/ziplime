@@ -3,6 +3,10 @@ import os
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+from alembic.runtime.migration import MigrationContext
+from sqlalchemy import Column
+from sqlalchemy.schema import SchemaItem
+from sqlalchemy.types import TypeEngine
 
 from ziplime.core.db.base import BaseModel
 
@@ -31,7 +35,13 @@ x_args = context.get_x_argument(as_dictionary=True)
 # ... etc.
 
 
-def include_object(object, name, type_, reflected, compare_to):
+def include_object(
+    object: 'SchemaItem',
+    name: 'str | None',
+    type_: str,
+    reflected: bool,
+    compare_to: 'SchemaItem | None',
+):
     """
     Exclude views from Alembic's consideration.
     """
@@ -50,7 +60,7 @@ def get_url():
     return f"{db_url_scheme_sync}://{user}:{password}@{server}/{db}"
 
 
-def run_migrations_offline():
+def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
     This configures the context with just a URL
@@ -71,8 +81,13 @@ def run_migrations_offline():
         context.run_migrations()
 
 
-def my_compare_type(context, inspected_column,
-                    metadata_column, inspected_type, metadata_type):
+def my_compare_type(
+    context: 'MigrationContext',
+    inspected_column: 'Column',
+    metadata_column: 'Column',
+    inspected_type: 'TypeEngine',
+    metadata_type: 'TypeEngine',
+) -> bool | None:
     # return False if the metadata_type is the same as the inspected_type
     # or None to allow the default implementation to compare these
     # types. a return value of True means the two types do not
@@ -83,7 +98,7 @@ def my_compare_type(context, inspected_column,
     return None
 
 
-def run_migrations_online():
+def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
     In this scenario we need to create an Engine

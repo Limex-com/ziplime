@@ -10,7 +10,7 @@ from ziplime.config.base_algorithm_config import BaseAlgorithmConfig
 class AlgorithmFile:
 
     def __init__(self, algorithm_file: str, algorithm_config_file: str | None = None,
-                 logger: logging.Logger = structlog.get_logger(__name__)):
+                 logger: logging.Logger = structlog.get_logger(__name__)) -> None:
         """
         Initializes the algorithm environment by loading the specified algorithm script and its optional
         configuration file. The module is dynamically imported and expected functions are retrieved

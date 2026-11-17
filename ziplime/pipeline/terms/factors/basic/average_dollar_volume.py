@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.data import EquityPricing
 from ziplime.pipeline.terms.factors.custom_factor import CustomFactor
 from ziplime.utils.math_utils import nansum
@@ -14,5 +17,12 @@ class AverageDollarVolume(CustomFactor):
 
     inputs = [EquityPricing.close, EquityPricing.volume]
 
-    def compute(self, today, assets, out, close, volume):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        close: 'np.ndarray',
+        volume: 'np.ndarray',
+    ) -> None:
         out[:] = nansum(close * volume, axis=0) / len(close)

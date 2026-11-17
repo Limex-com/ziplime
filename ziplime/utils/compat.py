@@ -6,7 +6,7 @@ from math import ceil
 from types import MappingProxyType as mappingproxy
 
 
-def consistent_round(val):
+def consistent_round(val: float) -> int:
     if (val % 1) >= 0.5:
         return ceil(val)
     else:

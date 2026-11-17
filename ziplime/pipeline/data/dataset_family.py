@@ -1,15 +1,18 @@
 from itertools import repeat
 
 from collections import OrderedDict
+from collections.abc import Hashable
+from collections.abc import Mapping
 
 from ziplime.pipeline.data.dataset_family_meta import DataSetFamilyMeta
 from ziplime.pipeline.data.dataset_family_slice import DataSetFamilySlice
 from ziplime.pipeline.domain import GENERIC
 from ziplime.utils.formatting import plural, s
 
-
 # XXX: This docstring was mostly written when the abstraction here was
 # "MultiDimensionalDataSet". It probably needs some rewriting.
+
+
 class DataSetFamily(metaclass=DataSetFamilyMeta):
     """
     Base class for Pipeline dataset families.
@@ -91,11 +94,11 @@ class DataSetFamily(metaclass=DataSetFamilyMeta):
 
         __isabstractmethod__ = True
 
-        def __get__(self, instance, owner):
+        def __get__(self, instance: 'DataSetFamily | None', owner: 'type[DataSetFamily]'):
             return []
 
     @classmethod
-    def _canonical_key(cls, args, kwargs):
+    def _canonical_key(cls, args: 'tuple[Hashable, ...]', kwargs: 'dict[str, Hashable]'):
         extra_dims = cls.extra_dims
         dimensions_set = set(extra_dims)
         if not set(kwargs) <= dimensions_set:
@@ -169,7 +172,7 @@ class DataSetFamily(metaclass=DataSetFamilyMeta):
         return coords, tuple(coords.items())
 
     @classmethod
-    def _make_dataset(cls, coords):
+    def _make_dataset(cls, coords: 'Mapping[str, Hashable]'):
         """Construct a new dataset given the coordinates."""
 
         class Slice(cls._SliceType):
@@ -182,7 +185,7 @@ class DataSetFamily(metaclass=DataSetFamilyMeta):
         return Slice
 
     @classmethod
-    def slice(cls, *args, **kwargs):
+    def slice(cls, *args: 'Hashable', **kwargs: 'Hashable'):
         """Take a slice of a DataSetFamily to produce a dataset
         indexed by asset and date.
 

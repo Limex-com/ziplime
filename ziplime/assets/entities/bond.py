@@ -44,7 +44,7 @@ class Bond(Asset):
     price_quotation: PriceQuotation = PriceQuotation.PERCENT_OF_FACE
     is_amortized: bool = False
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.id)
 
     @property

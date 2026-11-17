@@ -1,4 +1,6 @@
 from numpy import errstate as np_errstate
+import numpy as np
+import pandas as pd
 from ziplime.pipeline.mixins import SingleInputMixin
 from ziplime.pipeline.terms.factors.custom_factor import CustomFactor
 
@@ -18,7 +20,7 @@ class PercentChange(SingleInputMixin, CustomFactor):
 
     window_safe = True
 
-    def _validate(self):
+    def _validate(self) -> None:
         super(PercentChange, self)._validate()
         if self.window_length < 2:
             raise ValueError(
@@ -28,6 +30,6 @@ class PercentChange(SingleInputMixin, CustomFactor):
                 "length of 2.".format(window_length=self.window_length)
             )
 
-    def compute(self, today, assets, out, values):
+    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', values: 'np.ndarray') -> None:
         with np_errstate(divide="ignore", invalid="ignore"):
             out[:] = (values[-1] - values[0]) / abs(values[0])

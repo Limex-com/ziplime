@@ -26,10 +26,10 @@ class FuturesRoot:
     #: Currency the exchange collects margin in; not necessarily ``quote_currency``.
     margin_currency: str = "EUR"
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.root_symbol, self.exchange.mic))
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.root_symbol}-{self.exchange.mic}"
 
     @property

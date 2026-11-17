@@ -9,16 +9,16 @@ from ziplime.utils.math_utils import nanmean, nanstd
 # because the transformation function is part of the instance hash key.
 
 
-def demean(row):
+def demean(row: 'np.ndarray'):
     return row - nanmean(row)
 
 
-def zscore(row):
+def zscore(row: 'np.ndarray'):
     with np.errstate(divide="ignore", invalid="ignore"):
         return (row - nanmean(row)) / nanstd(row)
 
 
-def winsorize(row, min_percentile, max_percentile):
+def winsorize(row: 'np.ndarray', min_percentile: float, max_percentile: float):
     """
     This implementation is based on scipy.stats.mstats.winsorize
     """

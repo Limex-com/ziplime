@@ -1,4 +1,5 @@
 """Metrics per combination, the ranking, and the files a sweep leaves behind."""
+
 import contextlib
 import datetime
 import io
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 import pandas as pd
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.core.run_simulation import run_simulation
 from ziplime.exchanges.simulation_exchange import SimulationExchange
@@ -17,6 +19,13 @@ from ziplime.finance.commission.no_commission import NoCommission
 from ziplime.finance.slippage.no_slippage import NoSlippage
 from ziplime.vectorized import to_execution_result
 from ziplime.vectorized.kernel import compare_execution_results
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.services.asset_service import AssetService
+from ziplime.config.base_algorithm_config import BaseAlgorithmConfig
+from ziplime.data.domain.data_bundle import DataBundle
+from ziplime.finance.commission.commission_model import CommissionModel
+from ziplime.finance.slippage.slippage_model import SlippageModel
+from ziplime.sweep.params import SweepParams
 
 ONE_DAY = datetime.timedelta(days=1)
 
@@ -52,11 +61,11 @@ def ranking(table: pd.DataFrame, sort_by: str, top: int, min_fills: int) -> str:
 class Stages:
     """Where the time went: data, signals, the first GPU batch (compilation included), the rest."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.began = time.perf_counter()
         self.seconds = defaultdict(float)
 
-    def add(self, name: str, seconds: float):
+    def add(self, name: str, seconds: float) -> None:
         self.seconds[name] += seconds
 
     def report(self) -> str:
@@ -67,10 +76,23 @@ class Stages:
         return "Stages:\n" + "\n".join(lines) + f"\n  {'total':<44} {total:8.2f} s"
 
 
-async def verify_with_engine(*, params, algorithm_file: Path, config_path: Path, calendar,
-                             asset_service, bundle, universe, exact, close, commission, slippage,
-                             future_commission=None, future_slippage=None,
-                             say: Callable[[str], None]):
+async def verify_with_engine(
+    *,
+    params: 'SweepParams',
+    algorithm_file: Path,
+    config_path: Path,
+    calendar: 'ExchangeCalendar',
+    asset_service: 'AssetService',
+    bundle: 'DataBundle',
+    universe: 'dict[str, ExchangeAsset]',
+    exact,
+    close,
+    commission: 'CommissionModel',
+    slippage: 'SlippageModel',
+    future_commission: 'CommissionModel | None' = None,
+    future_slippage: 'SlippageModel | None' = None,
+    say: Callable[[str], None],
+):
     """The best combination through run_simulation -- the event-driven engine -- and the trades
     compared."""
     from ziplime.sweep.market import parse_rate
@@ -128,7 +150,7 @@ async def verify_with_engine(*, params, algorithm_file: Path, config_path: Path,
     return comparison.agrees or split
 
 
-def write_best_config(output: Path, config) -> Path:
+def write_best_config(output: Path, config: 'BaseAlgorithmConfig') -> Path:
     path = output / "best_config.json"
     path.write_text(json.dumps(config.model_dump(), indent=2) + "\n", encoding="utf-8")
     return path

@@ -102,7 +102,7 @@ class OptionContract(Asset):
     settlement_type: SettlementType = SettlementType.CASH
     premium_style: PremiumStyle = PremiumStyle.UPFRONT
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Every cash amount an option produces is a price times this number: the premium paid, the
         # value of the position, the settlement at expiry. A zero multiplier makes all three zero
         # and nothing raises -- the contract simply trades for free and settles for nothing.
@@ -118,7 +118,7 @@ class OptionContract(Asset):
                 f"nothing in every one of them. Some feeds leave `multiplier` empty and carry the "
                 f"size in `contract_size`; use that instead.")
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.id)
 
     @property

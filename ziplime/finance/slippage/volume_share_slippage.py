@@ -37,9 +37,9 @@ class VolumeShareSlippage(SlippageModel):
 
     def __init__(
             self,
-            volume_limit=DEFAULT_EQUITY_VOLUME_SLIPPAGE_BAR_LIMIT,
-            price_impact=0.1,
-    ):
+            volume_limit: float = DEFAULT_EQUITY_VOLUME_SLIPPAGE_BAR_LIMIT,
+            price_impact: float = 0.1,
+    ) -> None:
         super(VolumeShareSlippage, self).__init__()
 
         self.volume_limit = volume_limit

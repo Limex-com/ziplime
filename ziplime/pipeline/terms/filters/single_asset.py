@@ -1,6 +1,11 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.errors import NonExistentAssetInTimeFrame
 from ziplime.pipeline.terms.filters import Filter
 from ziplime.utils.numpy_utils import repeat_first_axis
+from ziplime.assets.domain.continuous_future import ContinuousFuture
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 
 class SingleAsset(Filter):
@@ -11,21 +16,21 @@ class SingleAsset(Filter):
     inputs = []
     window_length = 1
 
-    def __new__(cls, asset):
+    def __new__(cls, asset: 'ExchangeAsset | ContinuousFuture'):
         return super(SingleAsset, cls).__new__(cls, asset=asset)
 
-    def _init(self, asset, *args, **kwargs):
+    def _init(self, asset: 'ExchangeAsset | ContinuousFuture', *args, **kwargs):
         self._asset = asset
         return super(SingleAsset, self)._init(*args, **kwargs)
 
     @classmethod
-    def _static_identity(cls, asset, *args, **kwargs):
+    def _static_identity(cls, asset: 'ExchangeAsset | ContinuousFuture', *args, **kwargs):
         return (
             super(SingleAsset, cls)._static_identity(*args, **kwargs),
             asset,
         )
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         is_my_asset = assets == self._asset.sid
         out = repeat_first_axis(is_my_asset, len(mask))
         # Raise an exception if `self._asset` does not exist for the entirety
@@ -38,6 +43,6 @@ class SingleAsset(Filter):
             )
         return out
 
-    def graph_repr(self):
+    def graph_repr(self) -> str:
         # Graphviz interprets `\l` as "divide label into lines, left-justified"
         return "SingleAsset:\\l  asset: {!r}\\l".format(self._asset)

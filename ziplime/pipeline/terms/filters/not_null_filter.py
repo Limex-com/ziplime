@@ -1,7 +1,11 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.lib.labelarray import LabelArray
 from ziplime.pipeline.mixins import SingleInputMixin
 from ziplime.pipeline.terms.filters import Filter
 from ziplime.utils.numpy_utils import is_missing
+from ziplime.pipeline.terms.term import Term
 
 
 class NotNullFilter(SingleInputMixin, Filter):
@@ -16,13 +20,13 @@ class NotNullFilter(SingleInputMixin, Filter):
 
     window_length = 0
 
-    def __new__(cls, term):
+    def __new__(cls, term: 'Term'):
         return super(NotNullFilter, cls).__new__(
             cls,
             inputs=(term,),
         )
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         data = arrays[0]
         if isinstance(data, LabelArray):
             return ~data.is_missing()

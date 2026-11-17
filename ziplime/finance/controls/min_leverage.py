@@ -1,4 +1,10 @@
+import datetime
+import pandas as pd
+
 from ziplime.finance.controls.account_control import AccountControl
+from ziplime.domain.account import Account
+from ziplime.domain.bar_data import BarData
+from ziplime.domain.portfolio import Portfolio
 
 
 class MinLeverage(AccountControl):
@@ -16,12 +22,18 @@ class MinLeverage(AccountControl):
     double the account value by the deadline date.
     """
 
-    def __init__(self, min_leverage, deadline):
+    def __init__(self, min_leverage: float, deadline: 'pd.Timestamp') -> None:
         super(MinLeverage, self).__init__(min_leverage=min_leverage, deadline=deadline)
         self.min_leverage = min_leverage
         self.deadline = deadline
 
-    async def validate(self, _portfolio, account, algo_datetime, _algo_current_data):
+    async def validate(
+        self,
+        _portfolio: 'Portfolio',
+        account: 'Account',
+        algo_datetime: 'datetime.datetime',
+        _algo_current_data: 'BarData',
+    ) -> None:
         """Make validation checks if we are after the deadline.
         Fail if the leverage is less than the min leverage.
         """

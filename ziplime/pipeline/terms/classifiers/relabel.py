@@ -1,3 +1,7 @@
+from collections.abc import Callable
+import numpy as np
+import pandas as pd
+
 from ziplime.lib.labelarray import LabelArray
 from ziplime.pipeline.terms.classifiers import Classifier
 from ziplime.utils.numpy_utils import (
@@ -26,7 +30,7 @@ class Relabel(SingleInputMixin, Classifier):
     params = ("relabeler",)
 
     # TODO: Support relabeling for integer dtypes.
-    def __new__(cls, term: categorical_dtype, relabeler):
+    def __new__(cls, term: categorical_dtype, relabeler: 'Callable'):
         return super(Relabel, cls).__new__(
             cls,
             inputs=(term,),
@@ -35,7 +39,7 @@ class Relabel(SingleInputMixin, Classifier):
             relabeler=relabeler,
         )
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         relabeler = self.params["relabeler"]
         data = arrays[0]
 

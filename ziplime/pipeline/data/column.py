@@ -1,3 +1,5 @@
+from numpy.typing import DTypeLike
+
 from ziplime.utils.numpy_utils import float64_dtype
 
 
@@ -8,12 +10,12 @@ class Column:
 
     def __init__(
             self,
-            dtype,
+            dtype: 'DTypeLike',
             missing_value=None,
-            doc=None,
+            doc: 'str | None' = None,
             metadata=None,
-            currency_aware=False,
-    ):
+            currency_aware: bool = False,
+    ) -> None:
         if currency_aware and dtype != float64_dtype:
             raise ValueError(
                 "Columns cannot be constructed with currency_aware={}, "
@@ -28,7 +30,7 @@ class Column:
         self.metadata = metadata.copy() if metadata is not None else {}
         self.currency_aware = currency_aware
 
-    def bind(self, name):
+    def bind(self, name: str):
         from ziplime.pipeline.data.bound_column_descr import BoundColumnDescr
 
         """

@@ -4,6 +4,7 @@ import datetime
 import math
 from abc import abstractmethod
 from typing import Literal
+from collections.abc import Iterable
 
 import structlog
 from pandas import isnull
@@ -18,6 +19,8 @@ from ziplime.errors import LiquidityExceeded
 from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.shared import FinancialModelMeta
 from ziplime.finance.domain.transaction import Transaction
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.finance.domain.order import Order
 
 SELL = 1 << 0
 BUY = 1 << 1
@@ -63,7 +66,7 @@ class SlippageModel(metaclass=FinancialModelMeta):
     # Asset types that are compatible with the given model.
     allowed_asset_types = (Equity, Bond, FuturesContract, OptionContract, Currency)
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._volume_for_bar = 0
         self._logger = structlog.get_logger(__name__)
 
@@ -72,7 +75,7 @@ class SlippageModel(metaclass=FinancialModelMeta):
         return self._volume_for_bar
 
     @abstractmethod
-    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order, price: float = None):
+    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: 'Order', price: float = None):
         """Compute the number of shares and price to fill for ``order`` in the
         current minute.
 
@@ -110,8 +113,8 @@ class SlippageModel(metaclass=FinancialModelMeta):
         """
         raise NotImplementedError("process_order")
 
-    async def simulate(self, exchange,
-                       assets: frozenset[Asset], orders_for_asset, current_dt: datetime.datetime,
+    async def simulate(self, exchange: 'Exchange',
+                       assets: frozenset[Asset], orders_for_asset: 'Iterable[Order]', current_dt: datetime.datetime,
                        same_bar_execution: bool,
                        price_used_in_order_execution: Literal["open", "close", "low", "high"]):
         self._volume_for_bar = 0
@@ -188,7 +191,7 @@ class SlippageModel(metaclass=FinancialModelMeta):
                 self._volume_by_asset[order.asset] = self._volume_for_bar
                 yield order, txn
 
-    def volume_filled(self, asset, dt) -> int:
+    def volume_filled(self, asset: 'ExchangeAsset', dt: 'datetime.datetime') -> int:
         """Shares of ``asset`` already filled in the bar at ``dt``."""
         if getattr(self, "_volume_dt", None) != dt:
             return 0

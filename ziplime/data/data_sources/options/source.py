@@ -108,7 +108,7 @@ class ContractSpec:
         """Whether this contract is listed and expires on the same session."""
         return self.listed_date == self.expiration_date
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.listing_symbol, self.mic))
 
 

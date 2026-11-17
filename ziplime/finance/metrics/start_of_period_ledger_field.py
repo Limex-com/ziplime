@@ -27,7 +27,7 @@ class StartOfPeriodLedgerField:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-    def __init__(self, ledger_field, packet_field=None):
+    def __init__(self, ledger_field: str, packet_field: 'str | None' = None) -> None:
         self._get_ledger_field = op.attrgetter(ledger_field)
         if packet_field is None:
             self._packet_field = ledger_field.rsplit(".", 1)[-1]
@@ -38,13 +38,13 @@ class StartOfPeriodLedgerField:
     def start_of_simulation(
             self, ledger: Ledger, emission_rate: datetime.timedelta, trading_calendar: ExchangeCalendar,
             sessions: pd.DatetimeIndex, benchmark_source: BenchmarkSource
-    ):
+    ) -> None:
         self._start_of_simulation = self._get_ledger_field(ledger)
 
-    def start_of_session(self, ledger, session, exchanges: dict[str, Exchange]):
+    def start_of_session(self, ledger: 'Ledger', session: 'datetime.datetime', exchanges: dict[str, Exchange]) -> None:
         self._previous_day = self._get_ledger_field(ledger)
 
-    def _end_of_period(self, sub_field, packet, ledger):
+    def _end_of_period(self, sub_field: str, packet, ledger: 'Ledger') -> None:
         # if not hasattr(self, "_previous_day"):
         #     self._previous_day = self._get_ledger_field(ledger)
         packet_field = self._packet_field
@@ -52,9 +52,9 @@ class StartOfPeriodLedgerField:
         packet[sub_field][packet_field] = self._previous_day
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                   exchanges: dict[str, Exchange]):
+                   exchanges: dict[str, Exchange]) -> None:
         self._end_of_period("minute_perf", packet, ledger)
 
     def end_of_session(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                       exchanges: dict[str, Exchange]):
+                       exchanges: dict[str, Exchange]) -> None:
         self._end_of_period("daily_perf", packet, ledger)

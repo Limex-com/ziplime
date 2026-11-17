@@ -17,7 +17,7 @@ class DataSource:
                  original_frequency: datetime.timedelta | Period,
                  data_type: DataType,
                  trading_calendar: ExchangeCalendar,
-                 aggregation_specification: dict[str, str] = None):
+                 aggregation_specification: dict[str, str] = None) -> None:
         """
         Attributes:
             name (str): The name of the data source.

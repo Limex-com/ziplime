@@ -112,7 +112,7 @@ class BundleRegistry(abc.ABC):
         """
         raise NotImplementedError
 
-    async def register_bundle(self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool):
+    async def register_bundle(self, data_bundle: DataBundle, bundle_storage: BundleStorage, merge: bool) -> None:
         """
         Registers a data bundle and persists its associated metadata.
 

@@ -51,7 +51,7 @@ SYNTHETIC_DATA_WARNING = (
 class SyntheticDataPerformanceClaim(RuntimeError):
     """Raised when performance figures are asked for from synthetic prices."""
 
-    def __init__(self, source_name: str):
+    def __init__(self, source_name: str) -> None:
         super().__init__(
             f"{SYNTHETIC_DATA_WARNING}\n"
             f"The prices came from {source_name!r}. Report what the run *did* -- contracts traded, "
@@ -103,7 +103,7 @@ class ChainSpec:
     multiplier: float = 100.0
     tick_size: float = 0.01
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.near_step <= 0 or self.far_step <= 0:
             raise ValueError("Strike steps must be positive.")
         if self.far_reach < self.near_reach:
@@ -210,7 +210,7 @@ class SyntheticOptionChainSource(OptionChainSource):
                  venue: OptionVenue | None = None,
                  root: str | None = None,
                  life_sessions: int = 0,
-                 rate: float = 0.04):
+                 rate: float = 0.04) -> None:
         self.underlying_symbol = underlying_symbol
         self.mic = mic
         self.chain = chain or ChainSpec()

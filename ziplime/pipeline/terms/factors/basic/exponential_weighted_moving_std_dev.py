@@ -3,6 +3,8 @@ from numpy import (
     sqrt,
     sum as np_sum,
 )
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.terms.factors.basic.exponential_weighted_factor import ExponentialWeightedFactor
 from ziplime.pipeline.terms.factors.utils.exponential_weights import exponential_weights
@@ -39,7 +41,14 @@ class ExponentialWeightedMovingStdDev(ExponentialWeightedFactor):
     :func:`pandas.DataFrame.ewm`
     """
 
-    def compute(self, today, assets, out, data, decay_rate):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        data: 'np.ndarray',
+        decay_rate: float,
+    ) -> None:
         weights = exponential_weights(len(data), decay_rate)
 
         mean = average(data, axis=0, weights=weights)

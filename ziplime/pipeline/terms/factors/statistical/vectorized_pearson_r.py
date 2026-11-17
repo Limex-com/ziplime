@@ -3,7 +3,12 @@ import numpy as np
 from ziplime.utils.math_utils import nanmean
 
 
-def vectorized_pearson_r(dependents, independents, allowed_missing, out=None):
+def vectorized_pearson_r(
+    dependents: 'np.ndarray',
+    independents: 'np.ndarray',
+    allowed_missing: int,
+    out: 'np.ndarray | None' = None,
+):
     """Compute Pearson's r between columns of ``dependents`` and ``independents``.
 
     Parameters

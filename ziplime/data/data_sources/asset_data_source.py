@@ -8,7 +8,7 @@ from ziplime.assets.services.asset_service import AssetService
 
 class AssetDataSource:
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     async def get_assets(self, exchanges: list[ExchangeInfo], **kwargs) -> AssetsImport:

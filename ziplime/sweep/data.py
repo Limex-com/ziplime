@@ -3,6 +3,7 @@
 The same :class:`DataBundle` feeds the sweep and the verification run, so a difference between the
 two can only come from the simulation, never from the data.
 """
+
 import contextlib
 import datetime
 import hashlib
@@ -17,6 +18,7 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import structlog
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.constants.data_type import DataType
 from ziplime.data.domain.data_bundle import DataBundle
@@ -24,12 +26,14 @@ from ziplime.sweep.params import SweepError
 from ziplime.utils.bundle_utils import get_bundle_service, get_market_data_source
 from ziplime.utils.calendar_utils import get_calendar
 from ziplime.vectorized.signals import PricePanel
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.services.asset_service import AssetService
 
 ONE_DAY = datetime.timedelta(days=1)
 
 
 async def load_market_data(*, bundle: str | None, version: str | None, storage: Path,
-                           cache_dir: Path | None, universe: dict, calendar,
+                           cache_dir: Path | None, universe: dict, calendar: 'ExchangeCalendar',
                            first: datetime.date, last: datetime.date,
                            say: Callable[[str], None],
                            rate: datetime.timedelta = ONE_DAY) -> DataBundle:
@@ -64,7 +68,7 @@ async def load_market_data(*, bundle: str | None, version: str | None, storage: 
         say(f"The bundle ends on {covered_to}; the run stops there.")
         last = covered_to
 
-    async def load(assets):
+    async def load(assets: 'list[ExchangeAsset] | None'):
         # load_bundle warns once per missing bar; the sweep reports gaps itself
         structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.ERROR))
         try:
@@ -173,7 +177,7 @@ def rekeyed(bundle: DataBundle, universe: dict, name: str,
         timestamp=bundle.timestamp)
 
 
-async def load_yahoo(universe: dict, calendar, first: datetime.date, last: datetime.date,
+async def load_yahoo(universe: dict, calendar: 'ExchangeCalendar', first: datetime.date, last: datetime.date,
                      cache_dir: Path | None, say: Callable[[str], None]) -> DataBundle:
     """Daily bars from Yahoo as a bundle. Cached in ``cache_dir``: Yahoo's adjusted prices move
     slightly from one download to the next, and a sweep has to be reproducible."""
@@ -197,7 +201,7 @@ async def load_yahoo(universe: dict, calendar, first: datetime.date, last: datet
         original_frequency=ONE_DAY, timestamp=data["date"].max())
 
 
-async def download_bars(universe: dict, calendar, first: datetime.date,
+async def download_bars(universe: dict, calendar: 'ExchangeCalendar', first: datetime.date,
                         last: datetime.date) -> pl.DataFrame:
     """Bundle rows from Yahoo, stamped at the calendar's session closes."""
     by_symbol = {listing.symbol: listing for listing in universe.values()}
@@ -250,8 +254,8 @@ def price_panel(bundle: DataBundle, universe: dict, start: datetime.date, warmup
     return panel, in_run
 
 
-async def attach_datasets(panel: PricePanel, declared: dict, universe: dict, calendar,
-                          start: datetime.date, end: datetime.date, asset_service,
+async def attach_datasets(panel: PricePanel, declared: dict, universe: dict, calendar: 'ExchangeCalendar',
+                          start: datetime.date, end: datetime.date, asset_service: 'AssetService',
                           registered: dict) -> PricePanel:
     """``context.datasets`` resolved as of every bar, as TradingAlgorithm._attach_datasets does:
     the same sources, read over everything they hold up to the run's end, through the same
@@ -285,7 +289,13 @@ async def attach_datasets(panel: PricePanel, declared: dict, universe: dict, cal
     return PricePanel({field: getattr(panel, field) for field in panel.fields}, panel.index, datasets)
 
 
-async def _mount(address: str, asset_service, calendar, start, end):
+async def _mount(
+    address: str,
+    asset_service: 'AssetService',
+    calendar: 'ExchangeCalendar',
+    start: 'datetime.date',
+    end: 'datetime.date',
+):
     """A dataset named by address -- hf://owner/name/config, or a scheme an extension registered."""
     import inspect
 

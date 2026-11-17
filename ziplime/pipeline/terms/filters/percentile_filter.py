@@ -1,8 +1,12 @@
+from typing import TYPE_CHECKING
+
 from numpy import (
     float64,
     nan,
     nanpercentile,
 )
+import numpy as np
+import pandas as pd
 
 from ziplime.errors import (
     BadPercentileBounds,
@@ -11,6 +15,10 @@ from ziplime.pipeline.mixins import (
     SingleInputMixin,
 )
 from ziplime.pipeline.terms.filters import Filter
+
+# Factor imports the filter package during initialization.
+if TYPE_CHECKING:
+    from ziplime.pipeline.terms.factors.factor import Factor
 
 
 class PercentileFilter(SingleInputMixin, Filter):
@@ -29,7 +37,7 @@ class PercentileFilter(SingleInputMixin, Filter):
 
     window_length = 0
 
-    def __new__(cls, factor, min_percentile, max_percentile, mask):
+    def __new__(cls, factor: 'Factor', min_percentile: float, max_percentile: float, mask: 'Filter | None'):
         return super(PercentileFilter, cls).__new__(
             cls,
             inputs=(factor,),
@@ -38,13 +46,13 @@ class PercentileFilter(SingleInputMixin, Filter):
             max_percentile=max_percentile,
         )
 
-    def _init(self, min_percentile, max_percentile, *args, **kwargs):
+    def _init(self, min_percentile: float, max_percentile: float, *args, **kwargs):
         self._min_percentile = min_percentile
         self._max_percentile = max_percentile
         return super(PercentileFilter, self)._init(*args, **kwargs)
 
     @classmethod
-    def _static_identity(cls, min_percentile, max_percentile, *args, **kwargs):
+    def _static_identity(cls, min_percentile: float, max_percentile: float, *args, **kwargs):
         return (
             super(PercentileFilter, cls)._static_identity(*args, **kwargs),
             min_percentile,
@@ -63,7 +71,7 @@ class PercentileFilter(SingleInputMixin, Filter):
             )
         return super(PercentileFilter, self)._validate()
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         """
         For each row in the input, compute a mask of all values falling between
         the given percentiles.
@@ -91,7 +99,7 @@ class PercentileFilter(SingleInputMixin, Filter):
         )
         return (lower_bounds <= data) & (data <= upper_bounds)
 
-    def graph_repr(self):
+    def graph_repr(self) -> str:
         # Graphviz interprets `\l` as "divide label into lines, left-justified"
         return "{}:\\l  min: {}, max: {}\\l".format(
             type(self).__name__,

@@ -5,19 +5,29 @@ is an array (combinations × instruments), or (combinations × 1) / (1 × instru
 not vary along an axis. Order sizing follows the engine's formulas line for line -- see the
 methods below for which line of TradingAlgorithm each mirrors.
 """
+
 import datetime
 import types
+from types import ModuleType
 
 import numpy as np
 
-from ziplime.sweep.convert import ALL, NotConvertible, VectorUniverse, Vectorized, is_array
+from ziplime.sweep.all_assets import ALL
+from ziplime.sweep.array_utils import is_array
+from ziplime.sweep.costs import Costs
+from ziplime.sweep.errors import NotConvertible
+from ziplime.sweep.vectorized_containers import VectorUniverse, Vectorized
 from ziplime.sweep.params import SweepError
+from ziplime.assets.domain.asset_type import AssetType
+from ziplime.sweep.backends import Backend
+
+from ziplime.sweep.windows import Windows
 
 
 class Columns:
     """Which column an instrument is."""
 
-    def __init__(self, universe: dict, backend):
+    def __init__(self, universe: dict, backend: 'Backend') -> None:
         self.names = list(universe)
         self.by_name = {name: k for k, name in enumerate(self.names)}
         self.by_asset = {listing: k for k, listing in enumerate(universe.values())}
@@ -86,7 +96,7 @@ class AssetState:
     would decide them; a loop over its items runs for the instruments it holds.
     """
 
-    def __init__(self, initial: dict, columns: Columns, context):
+    def __init__(self, initial: dict, columns: Columns, context: 'Context') -> None:
         self._columns, self._context = columns, context
         xp = columns.backend.xp
         values = np.full((1, len(columns.names)), np.nan)
@@ -111,14 +121,14 @@ class AssetState:
     def dump(self, like):
         return self._v + like * 0, self._xp.logical_or(self._p, like != like)
 
-    def load(self, values, present):
+    def load(self, values, present) -> None:
         self._v, self._p = values, present
 
     # the dict's behaviour
     def __getitem__(self, key):
         return self._columns.select(self._v, key)
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key, value) -> None:
         where = self._where(key)
         xp = self._xp
         self._v = xp.where(where, value, self._v) if where is not True \
@@ -132,7 +142,7 @@ class AssetState:
         return self._xp.where(self._columns.select(self._p, key),
                               self._columns.select(self._v, key), fallback)
 
-    def sweep_delete(self, key):
+    def sweep_delete(self, key) -> None:
         where = self._where(key)
         self._p = self._xp.logical_and(self._p, self._xp.logical_not(where)) \
             if where is not True else self._p & False
@@ -144,7 +154,7 @@ class AssetState:
         self.sweep_delete(key)
         return value
 
-    def clear(self):
+    def clear(self) -> None:
         self.sweep_delete(ALL)
 
     def sweep_contains(self, key):
@@ -175,7 +185,7 @@ class AssetState:
 class ByName:
     """``signals["fast"]``: ``[name]`` -- that instrument's column, ``[every instrument]`` -- all."""
 
-    def __init__(self, values, columns: Columns):
+    def __init__(self, values, columns: Columns) -> None:
         self._values, self._columns = values, columns
 
     def __getitem__(self, name):
@@ -189,19 +199,19 @@ class ByName:
 
 
 class Signals:
-    def __init__(self, backend, columns: Columns):
+    def __init__(self, backend: 'Backend', columns: Columns) -> None:
         self._backend, self._columns, self.now = backend, columns, {}
 
-    def _raw(self, name):
+    def _raw(self, name: str):
         try:
             return self.now[name]
         except KeyError:
             raise KeyError(f"No signal {name!r}. There are: {sorted(self.now)}.") from None
 
-    def __getitem__(self, name):
+    def __getitem__(self, name: str) -> 'ByName':
         return ByName(self._raw(name), self._columns)
 
-    def is_ready(self, name):
+    def is_ready(self, name: str):
         """(combinations × 1): the signal has a number for some instrument at this bar."""
         xp, row = self._backend.xp, self._raw(name)
         if row.dtype == self._backend.bool:
@@ -215,7 +225,7 @@ class Column:
     """One field of ``data.current(...)`` / ``data.history(...)``: ``[k]`` is the k-th asset asked
     for (``data.current(assets=[a, b])["close"][1]``)."""
 
-    def __init__(self, values: list):
+    def __init__(self, values: list) -> None:
         self._values = values
 
     def __getitem__(self, k):
@@ -223,15 +233,15 @@ class Column:
             return self._values[k]
         raise NotConvertible("Index a data.current column by position: frame['close'][0].")
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._values)
 
 
 class Frame:
-    def __init__(self, columns: dict):
+    def __init__(self, columns: dict) -> None:
         self._columns = columns
 
-    def __getitem__(self, field):
+    def __getitem__(self, field: str):
         try:
             return self._columns[field]
         except KeyError:
@@ -241,11 +251,11 @@ class Frame:
 class WindowColumn:
     """One field of ``data.history(assets=[asset], bar_count=n, ...)``: its statistics."""
 
-    def __init__(self, data, asset, field, length, frequency=None):
+    def __init__(self, data: 'Data', asset, field: str, length, frequency=None) -> None:
         self._data, self._asset, self._field, self._length = data, asset, field, length
         self._frequency = frequency
 
-    def _op(self, op):
+    def _op(self, op: str):
         return self._data._window(self._asset, self._field, op, self._length, self._frequency)
 
     def mean(self):
@@ -309,7 +319,7 @@ class WindowColumn:
         return leaf(data, column, self._field, self._length, data.before,
                     data._daily(self._frequency))
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         # Anything else of the engine's polars Series -- to_numpy(), pct_change(), rolling_mean()
         if name.startswith("__") or name.startswith("sweep_") or name in ("shape", "dtype", "mask"):
             raise AttributeError(name)
@@ -317,11 +327,11 @@ class WindowColumn:
 
 
 class Window:
-    def __init__(self, data, asset, length, fields, frequency=None):
+    def __init__(self, data: 'Data', asset, length, fields, frequency=None) -> None:
         self._data, self._asset, self._length, self._fields = data, asset, length, fields
         self._frequency = frequency
 
-    def __getitem__(self, field):
+    def __getitem__(self, field: str) -> 'WindowColumn':
         if self._fields is not None and field not in self._fields:
             raise KeyError(f"Field {field!r} was not asked for.")
         return WindowColumn(self._data, self._asset, field, self._length, self._frequency)
@@ -334,7 +344,7 @@ class Window:
 class Data:
     """``data``: current values, history windows and can_trade, for the bar being simulated."""
 
-    def __init__(self, columns: Columns, backend, windows):
+    def __init__(self, columns: Columns, backend: 'Backend', windows: 'Windows | None') -> None:
         self._columns, self._backend, self._windows = columns, backend, windows
         #: {field: (1 × instruments)} at this bar; set by the simulation
         self.now = {}
@@ -347,7 +357,7 @@ class Data:
     def current_dt(self):
         return self.dt
 
-    def current(self, assets=None, fields=None, data_source=None, **kwargs):
+    def current(self, assets=None, fields=None, data_source: 'str | None' = None, **kwargs) -> 'Frame':
         if fields is None:
             raise NotConvertible("data.current needs fields=[...].")
         if data_source is not None:
@@ -361,7 +371,7 @@ class Data:
         return Frame({field: Column([self._columns.select(source[field], asset) for asset in assets])
                       for field in fields})
 
-    def history(self, assets=None, bar_count=None, frequency=None, fields=None, data_source=None,
+    def history(self, assets=None, bar_count=None, frequency=None, fields=None, data_source: 'str | None' = None,
                 since=None, **kwargs):
         if since is not None or data_source is not None:
             raise NotConvertible("data.history(since=...) and data_source are not supported in a "
@@ -403,11 +413,11 @@ class Data:
         raise NotConvertible(f"history(frequency={frequency!r}) on a {market.rate} run: a sweep "
                              f"reads the run's own bars or days.")
 
-    def _window(self, asset, field, op, length, frequency=None):
+    def _window(self, asset, field: str, op: str, length, frequency=None):
         return self._columns.select(
             self._windows.value(field, op, length, self.before, self._daily(frequency)), asset)
 
-    def returns(self, assets=None, bar_count=None, field="close", data_source=None):
+    def returns(self, assets=None, bar_count=None, field: str = "close", data_source: 'str | None' = None):
         """BarData.returns: ``{instrument: last / first - 1}`` over its last ``bar_count`` rows,
         absent where it has fewer than two or a non-positive first price."""
         from ziplime.sweep.cross import SweepDict
@@ -447,10 +457,10 @@ class Data:
 class Portfolio:
     """The ledger's portfolio snapshot at this bar."""
 
-    def __init__(self, columns: Columns):
+    def __init__(self, columns: Columns) -> None:
         self._columns = columns
 
-    def update(self, xp, cash, held, marks, multiplier, is_future):
+    def update(self, xp: 'ModuleType', cash, held, marks, multiplier, is_future) -> None:
         self.cash = cash
         self.held = held
         exposure = held * marks * multiplier
@@ -463,21 +473,21 @@ class Portfolio:
         return self._columns.select(self.held, asset)
 
     @property
-    def positions(self):
+    def positions(self) -> 'Positions':
         return Positions(self)
 
 
 class Position:
     """``portfolio.positions.get(asset)``: the position's amount, for every combination."""
 
-    def __init__(self, amount):
+    def __init__(self, amount) -> None:
         self.amount = amount
 
     def sweep_truth(self):
         """The engine keeps only open positions: a missing one is None, an open one is truthy."""
         return self.amount != 0
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name.startswith("__") or name.startswith("sweep_") or name in ("shape", "dtype"):
             raise AttributeError(name)
         raise NotConvertible(f"position.{name} is not simulated in a sweep; position.amount is.")
@@ -487,7 +497,7 @@ class Positions:
     """``context.portfolio.positions`` looked up by instrument, as the engine's map allows: only
     open positions are in it."""
 
-    def __init__(self, portfolio: Portfolio):
+    def __init__(self, portfolio: Portfolio) -> None:
         self._portfolio = portfolio
 
     def _amount(self, asset):
@@ -496,11 +506,11 @@ class Positions:
                                  "supported in a sweep; look the position up by the asset.")
         return self._portfolio.get_asset_positions_amount(asset)
 
-    def get(self, asset, default=None):
+    def get(self, asset, default=None) -> 'Position':
         # A position that is not open has amount 0, as the default's .amount would be read
         return Position(self._amount(asset))
 
-    def __getitem__(self, asset):
+    def __getitem__(self, asset) -> 'Position':
         return Position(self._amount(asset))
 
     def sweep_contains(self, asset):
@@ -526,23 +536,23 @@ class Positions:
 class Style:
     """MarketOrder / LimitOrder / StopOrder / StopLimitOrder whose prices may be arrays."""
 
-    def __init__(self, limit_price=None, stop_price=None):
+    def __init__(self, limit_price=None, stop_price=None) -> None:
         self.limit_price, self.stop_price = limit_price, stop_price
 
 
-def MarketOrder(*args, **kwargs):
+def MarketOrder(*args, **kwargs) -> 'Style':
     return Style()
 
 
-def LimitOrder(limit_price, *args, **kwargs):
+def LimitOrder(limit_price, *args, **kwargs) -> 'Style':
     return Style(limit_price=limit_price)
 
 
-def StopOrder(stop_price, *args, **kwargs):
+def StopOrder(stop_price, *args, **kwargs) -> 'Style':
     return Style(stop_price=stop_price)
 
 
-def StopLimitOrder(limit_price, stop_price, *args, **kwargs):
+def StopLimitOrder(limit_price, stop_price, *args, **kwargs) -> 'Style':
     return Style(limit_price=limit_price, stop_price=stop_price)
 
 
@@ -550,12 +560,12 @@ STYLES = {"MarketOrder": MarketOrder, "LimitOrder": LimitOrder, "StopOrder": Sto
           "StopLimitOrder": StopLimitOrder}
 
 
-def _consistent_round(xp, value):
+def _consistent_round(xp: 'ModuleType', value):
     """Half away from zero, as ziplime's consistent_round."""
     return xp.sign(value) * xp.floor(abs(value) + 0.5)
 
 
-def asymmetric_round(xp, price, prefer_round_down, tick: float = 0.01):
+def asymmetric_round(xp: 'ModuleType', price, prefer_round_down, tick: float = 0.01):
     """finance.execution.asymmetric_round_price for arrays: buy limits round down, sell limits up,
     stops the other way."""
     diff = (0.95 - 0.5) * tick - np.finfo(float).eps * 10
@@ -569,8 +579,8 @@ def asymmetric_round(xp, price, prefer_round_down, tick: float = 0.01):
 class Context:
     """TradingAlgorithm for every combination: what a converted strategy calls on ``context``."""
 
-    def __init__(self, *, config, signals: Signals, portfolio: Portfolio, data: Data, backend,
-                 universe: dict, columns: Columns, costs, state: dict):
+    def __init__(self, *, config, signals: Signals, portfolio: Portfolio, data: Data, backend: 'Backend',
+                 universe: dict, columns: Columns, costs: 'Costs', state: dict) -> None:
         self.algorithm = types.SimpleNamespace(config=config)
         self.signals, self.portfolio, self.universe = signals, portfolio, VectorUniverse(universe)
         self._data, self._backend, self._columns, self._costs = data, backend, columns, costs
@@ -581,19 +591,19 @@ class Context:
         for name, value in state.items():
             self.set_state(name, value)
 
-    def set_state(self, name, value):
+    def set_state(self, name: str, value) -> None:
         """What initialize put on the context; a dict keyed by instrument becomes an AssetState."""
         if asset_map(value, self._columns):
             value = AssetState(value, self._columns, self)
         setattr(self, name, value)
 
     # What the simulation reads back after the strategy's hooks ran
-    def reset_orders(self):
+    def reset_orders(self) -> None:
         #: This bar's orders, in the order they were placed: (amount, limit, stop)
         self.new_orders = []
 
     # -- placing an order
-    def _place(self, asset, amount, style=None, limit_price=None, stop_price=None):
+    def _place(self, asset, amount, style: 'Style | None' = None, limit_price=None, stop_price=None) -> None:
         if self._in_before_trading_start:
             raise SweepError("Orders are not allowed in before_trading_start (the engine raises "
                              "OrderInBeforeTradingStart).")
@@ -636,29 +646,37 @@ class Context:
         return xp.minimum(estimated, new_quantity)
 
     # -- the order API
-    def order(self, asset, amount, style=None, limit_price=None, stop_price=None, **kwargs):
+    def order(self, asset, amount, style: 'Style | None' = None, limit_price=None, stop_price=None, **kwargs) -> None:
         self._place(asset, amount + self.xp.zeros_like(self.portfolio.held), style,
                     limit_price, stop_price)
 
-    def order_value(self, asset, value, style=None, limit_price=None, stop_price=None, **kwargs):
+    def order_value(
+        self,
+        asset,
+        value,
+        style: 'Style | None' = None,
+        limit_price=None,
+        stop_price=None,
+        **kwargs,
+    ) -> None:
         self._place(asset, self._value_amount(value), style, limit_price, stop_price)
 
-    def order_percent(self, asset, percent, style=None, **kwargs):
+    def order_percent(self, asset, percent, style: 'Style | None' = None, **kwargs) -> None:
         self._costs.require_percent_sizing()
         self._place(asset, self._percent_amount(percent), style)
 
-    def order_target(self, asset, target, style=None, **kwargs):
+    def order_target(self, asset, target, style: 'Style | None' = None, **kwargs) -> None:
         self._place(asset, target - self.portfolio.held, style)
 
-    def order_target_value(self, asset, target, style=None, **kwargs):
+    def order_target_value(self, asset, target, style: 'Style | None' = None, **kwargs) -> None:
         self._place(asset, self._value_amount(target) - self.portfolio.held, style)
 
-    def order_target_percent(self, asset, target, style=None, reserved_percentage_for_fees=None,
-                             **kwargs):
+    def order_target_percent(self, asset, target, style: 'Style | None' = None, reserved_percentage_for_fees=None,
+                             **kwargs) -> None:
         self._costs.require_percent_sizing()
         self._place(asset, self._percent_amount(target) - self.portfolio.held, style)
 
-    def rebalance(self, weights, style=None, exchange_name=None):
+    def rebalance(self, weights, style: 'Style | None' = None, exchange_name: 'str | None' = None) -> None:
         """TradingAlgorithm.rebalance: every named instrument to its weight (order_target_percent),
         a zero weight and every held instrument not named closed by an order for minus the
         position; an instrument that cannot trade is left alone."""
@@ -689,7 +707,14 @@ class Context:
     def get_datetime(self, *args, **kwargs):
         return self._data.dt
 
-    def symbol(self, symbol, mic=None, asset_type=None, country_code=None, **kwargs):
+    def symbol(
+        self,
+        symbol: str,
+        mic: 'str | None' = None,
+        asset_type: 'AssetType | None' = None,
+        country_code: 'str | None' = None,
+        **kwargs,
+    ):
         """An instrument of the universe by its ticker: handle_data may look instruments up."""
         if "@" in symbol:
             symbol, mic = symbol.split("@")
@@ -701,10 +726,10 @@ class Context:
                          f"context.universe; a sweep simulates the universe's instruments -- "
                          f"look it up in initialize.")
 
-    def symbols(self, *symbols, **kwargs):
+    def symbols(self, *symbols: str, **kwargs):
         return [self.symbol(symbol, **kwargs) for symbol in symbols]
 
-    def record(self, *args, **kwargs):
+    def record(self, *args, **kwargs) -> None:
         return None
 
 

@@ -1,13 +1,16 @@
 import datetime
+from collections.abc import Callable
 from ziplime.utils.compat import contextmanager as _contextmanager
 from ziplime.pipeline.terms.term import Term
 from ziplime.pipeline.pipeline import Pipeline
+from ziplime.pipeline.terms.computable_term import ComputableTerm
+from ziplime.pipeline.terms.loadable_term import LoadableTerm
 # Keep track of which methods of PipelineHooks are contextmanagers. Used by
 # DelegatingHooks to properly delegate to sub-hooks.
 PIPELINE_HOOKS_CONTEXT_MANAGERS = set()
 
 
-def contextmanager(f):
+def contextmanager(f: 'Callable'):
     """
     Wrapper for contextlib.contextmanager that tracks which methods of
     PipelineHooks are contextmanagers in CONTEXT_MANAGER_METHODS.
@@ -68,7 +71,7 @@ class PipelineHooks:
         """
 
     @contextmanager
-    def loading_terms(self, terms):
+    def loading_terms(self, terms: 'list[LoadableTerm]'):
         """Contextmanager entered when loading a batch of LoadableTerms.
 
         Parameters
@@ -78,7 +81,7 @@ class PipelineHooks:
         """
 
     @contextmanager
-    def computing_term(self, term):
+    def computing_term(self, term: 'ComputableTerm'):
         """Contextmanager entered when computing a ComputableTerm.
 
         Parameters

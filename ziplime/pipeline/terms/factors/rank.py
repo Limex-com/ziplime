@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.terms.factors.factor import Factor
 from ziplime.pipeline.terms.asset_exists import AssetExists
 from ziplime.errors import UnknownRankMethod
@@ -5,6 +8,7 @@ from ziplime.lib.rank import masked_rankdata_2d
 from ziplime.pipeline.mixins import SingleInputMixin
 
 from ziplime.utils.numpy_utils import float64_dtype
+from ziplime.pipeline.terms.filters.filter import Filter
 
 _RANK_METHODS = frozenset(["average", "min", "max", "dense", "ordinal"])
 
@@ -37,7 +41,7 @@ class Rank(SingleInputMixin, Factor):
     dtype = float64_dtype
     window_safe = True
 
-    def __new__(cls, factor, method, ascending, mask):
+    def __new__(cls, factor: 'Factor', method: str, ascending: bool, mask: 'Filter | None'):
         return super(Rank, cls).__new__(
             cls,
             inputs=(factor,),
@@ -46,13 +50,13 @@ class Rank(SingleInputMixin, Factor):
             mask=mask,
         )
 
-    def _init(self, method, ascending, *args, **kwargs):
+    def _init(self, method: str, ascending: bool, *args, **kwargs):
         self._method = method
         self._ascending = ascending
         return super(Rank, self)._init(*args, **kwargs)
 
     @classmethod
-    def _static_identity(cls, method, ascending, *args, **kwargs):
+    def _static_identity(cls, method: str, ascending: bool, *args, **kwargs):
         return (
             super(Rank, cls)._static_identity(*args, **kwargs),
             method,
@@ -70,7 +74,7 @@ class Rank(SingleInputMixin, Factor):
             )
         return super(Rank, self)._validate()
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         """
         For each row in the input, compute a like-shaped array of per-row
         ranks.
@@ -83,7 +87,7 @@ class Rank(SingleInputMixin, Factor):
             self._ascending,
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if self.mask is AssetExists():
             # Don't include mask in repr if it's the default.
             mask_info = ""
@@ -97,7 +101,7 @@ class Rank(SingleInputMixin, Factor):
             mask_info=mask_info,
         )
 
-    def graph_repr(self):
+    def graph_repr(self) -> str:
         # Graphviz interprets `\l` as "divide label into lines, left-justified"
         return "Rank:\\l  method: {!r}\\l  mask: {}\\l".format(
             self._method,

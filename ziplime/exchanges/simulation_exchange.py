@@ -65,7 +65,7 @@ class SimulationExchange(Exchange):
                  currency_slippage: SlippageModel | None = None,
                  currency_commission: CommissionModel | None = None,
                  automatic_currency_exchange: bool = True,
-                 ):
+                 ) -> None:
         super().__init__(name=name,
                          canonical_name=name,
                          clock=clock,

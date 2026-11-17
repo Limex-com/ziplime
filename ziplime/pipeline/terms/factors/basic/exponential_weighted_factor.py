@@ -1,6 +1,5 @@
-
-
 from numbers import Number
+from collections.abc import Iterable
 from numpy import (
     exp,
     log,
@@ -8,6 +7,7 @@ from numpy import (
 
 from ziplime.pipeline.mixins import SingleInputMixin
 from ziplime.pipeline.terms.factors.custom_factor import CustomFactor
+from ziplime.pipeline.terms.term import Term
 
 
 class ExponentialWeightedFactor(SingleInputMixin, CustomFactor):
@@ -43,7 +43,7 @@ class ExponentialWeightedFactor(SingleInputMixin, CustomFactor):
     params = ("decay_rate",)
 
     @classmethod
-    def from_span(cls, inputs, window_length, span: Number, **kwargs):
+    def from_span(cls, inputs: 'Iterable[Term]', window_length: int, span: Number, **kwargs):
         """
         Convenience constructor for passing `decay_rate` in terms of `span`.
 
@@ -83,7 +83,7 @@ class ExponentialWeightedFactor(SingleInputMixin, CustomFactor):
         )
 
     @classmethod
-    def from_halflife(cls, inputs, window_length, halflife: Number, **kwargs):
+    def from_halflife(cls, inputs: 'Iterable[Term]', window_length: int, halflife: Number, **kwargs):
         """
         Convenience constructor for passing ``decay_rate`` in terms of half
         life.
@@ -125,7 +125,7 @@ class ExponentialWeightedFactor(SingleInputMixin, CustomFactor):
         )
 
     @classmethod
-    def from_center_of_mass(cls, inputs, window_length, center_of_mass, **kwargs):
+    def from_center_of_mass(cls, inputs: 'Iterable[Term]', window_length: int, center_of_mass: float, **kwargs):
         """
         Convenience constructor for passing `decay_rate` in terms of center of
         mass.

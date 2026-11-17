@@ -14,7 +14,7 @@ class SingleExecutionClock(TradingClock):
                  end_date: datetime.datetime,
                  trading_calendar: ExchangeCalendar,
                  emission_rate: datetime.timedelta,
-                 execute_on_period_end_bool: bool = True):
+                 execute_on_period_end_bool: bool = True) -> None:
         super().__init__(trading_calendar=trading_calendar, emission_rate=emission_rate)
         start_date = normalize_datetime(start_date, trading_calendar.tz)
         end_date = normalize_datetime(end_date, trading_calendar.tz)

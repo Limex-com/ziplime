@@ -28,16 +28,24 @@ batch, from what the first bar read; a compiled step only checks it (see
 differs between combinations becomes :class:`Select`: both records, chosen per combination once
 they are numbers.
 """
+
 import operator
 import os
 import pickle
 import sys
 import types
+from collections.abc import Callable
 
 import numpy as np
 
-from ziplime.sweep.convert import ALL, NotConvertible, is_array
+from ziplime.sweep.all_assets import ALL
+from ziplime.sweep.array_utils import is_array
+from ziplime.sweep.errors import NotConvertible, Rediscover
 from ziplime.sweep.params import SweepError
+from ziplime.sweep.api import Data
+from ziplime.sweep.windows import Windows
+from ziplime.sweep.market import HistoryRows
+from ziplime.sweep.market import Market
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -62,7 +70,7 @@ def where_in_strategy() -> str:
 class Param:
     """A value that differs between combinations, inside a record."""
 
-    def __init__(self, value):
+    def __init__(self, value) -> None:
         self.value = value
 
 
@@ -70,7 +78,7 @@ class Leaf:
     """``data.history(assets=[asset], bar_count=n, fields=[field])[field]`` at the bar.
     ``column``: the instrument, or ALL inside a loop over the universe -- every one."""
 
-    def __init__(self, data, column, field, length, before, daily):
+    def __init__(self, data: 'Data', column, field: str, length, before: bool, daily: bool) -> None:
         self.data, self.column, self.field = data, column, field
         self.length, self.before, self.daily = length, before, daily
 
@@ -80,7 +88,7 @@ class Lazy:
 
     __array_priority__ = 1000  # NumPy defers to the operators below
 
-    def __init__(self, node):
+    def __init__(self, node) -> None:
         object.__setattr__(self, "node", node)
 
     # -- arithmetic is recorded; comparisons are numbers
@@ -158,7 +166,7 @@ class Lazy:
     def __getitem__(self, key):
         return record(operator.getitem, (self, key))
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> 'Lazy':
         if name.startswith("__") or name.startswith("sweep_") or name in ("shape", "dtype", "ndim",
                                                                          "mask", "_values"):
             raise AttributeError(name)
@@ -187,14 +195,14 @@ class Lazy:
     def __float__(self):
         raise NotConvertible(f"{where_in_strategy()}: float() of history here.")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<history computation {self.node[0]}>"
 
 
 class _Method:
     """``obj.name(...)``, as a function of the object: part of a record's key."""
 
-    def __init__(self, name):
+    def __init__(self, name: str) -> None:
         self.name = name
 
     def __call__(self, owner, *args, **kwargs):
@@ -203,17 +211,17 @@ class _Method:
     def __eq__(self, other):
         return isinstance(other, _Method) and other.name == self.name
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(("method", self.name))
 
 
 class Select:
     """A record in some combinations and another value in the rest: ``mask`` chooses."""
 
-    def __init__(self, mask, yes, no):
+    def __init__(self, mask, yes, no) -> None:
         self.mask, self.yes, self.no = mask, yes, no
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name.startswith("__") or name.startswith("sweep_") or name in ("shape", "dtype", "ndim"):
             raise AttributeError(name)
         return _distribute(lambda value: getattr(value, name), self)
@@ -230,11 +238,11 @@ class Select:
     __hash__ = object.__hash__
 
 
-def _distribute(function, select: Select):
+def _distribute(function: 'Callable', select: Select) -> 'Select':
     return Select(select.mask, function(select.yes), function(select.no))
 
 
-def _arith(name):
+def _arith(name: str):
     def method(self, other):
         return _distribute(lambda value: getattr(operator, name)(value, other), self)
 
@@ -271,7 +279,7 @@ def contains_lazy(*values) -> bool:
     return False
 
 
-def record(function, args, kwargs=None):
+def record(function: 'Callable', args, kwargs=None):
     """``function(*args, **kwargs)`` with a record among the arguments: a longer record."""
     kwargs = kwargs or {}
     for k, arg in enumerate(args):
@@ -311,7 +319,7 @@ def _wrap(value):
                          f"computation on history; numbers, strings and history are.")
 
 
-def _binary(op, left, right):
+def _binary(op: 'Callable', left, right):
     other = right if is_lazy(left) else left
     if is_array(other) or _is_sweep_value(other):
         # A value of the step (the cash, a config field, a signal) meets the record: the record is
@@ -324,7 +332,7 @@ def _is_sweep_value(value) -> bool:
     return hasattr(value, "sweep_vectorized") or hasattr(value, "sweep_len")
 
 
-def _compare(op, left, right):
+def _compare(op: 'Callable', left, right):
     return op(value_of(left), value_of(right))
 
 
@@ -353,11 +361,11 @@ class Objects:
     which object a combination uses is a parameter of the record, so each model is asked once.
     ``index``: None for one object, or (combinations × 1) positions in ``objects``."""
 
-    def __init__(self, objects: list, index=None):
+    def __init__(self, objects: list, index=None) -> None:
         object.__setattr__(self, "_objects", objects)
         object.__setattr__(self, "_index", index)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name.startswith("__") or name.startswith("sweep_") or name in ("shape", "dtype", "ndim"):
             raise AttributeError(name)
         if name in CHANGING:
@@ -373,7 +381,7 @@ class Objects:
                                  f"between combinations is not supported in a sweep.")
         return _ObjectMethod(self, name)
 
-    def __setattr__(self, name, value):
+    def __setattr__(self, name: str, value):
         raise NotConvertible(f"{where_in_strategy()}: an object kept on the context is changed "
                              f"(.{name} = ...) during the run; a sweep cannot follow that.")
 
@@ -381,7 +389,7 @@ class Objects:
 class _ObjectCall:
     """``objects[position].name(*args)``: the function a record of a method call keeps."""
 
-    def __init__(self, objects: list, name: str):
+    def __init__(self, objects: list, name: str) -> None:
         self.objects, self.name = objects, name
 
     def __call__(self, position, *args, **kwargs):
@@ -395,16 +403,16 @@ class _ObjectCall:
     def __eq__(self, other):
         return isinstance(other, _ObjectCall) and other._identity() == self._identity()
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self._identity())
 
     @property
-    def __name__(self):
+    def __name__(self) -> str:
         return f"{type(self.objects[0]).__name__}.{self.name}"
 
 
 class _ObjectMethod:
-    def __init__(self, owner: Objects, name: str):
+    def __init__(self, owner: Objects, name: str) -> None:
         self.owner, self.name = owner, name
 
     def __call__(self, *args, **kwargs):
@@ -468,7 +476,7 @@ def _leaves(value):
             yield from _leaves(item)
 
 
-def leaf(data, column, field, length, before, daily) -> Lazy:
+def leaf(data: 'Data', column, field: str, length, before: bool, daily: bool) -> Lazy:
     return Lazy(("leaf", Leaf(data, column, field, length, before, daily)))
 
 
@@ -476,7 +484,7 @@ class _Template:
     """A record's key and what replaying it needs: its parameters in order, and whether it
     reads the loop's instrument (then it is computed for every instrument)."""
 
-    def __init__(self, value: Lazy):
+    def __init__(self, value: Lazy) -> None:
         self.params = []
         self.per_column = False
         self.key = self._key(value)
@@ -510,7 +518,7 @@ class _Template:
         return ("value", type(value).__name__, value)
 
 
-def _function_key(function):
+def _function_key(function: 'Callable'):
     try:
         hash(function)
         return function
@@ -518,7 +526,7 @@ def _function_key(function):
         return ("object", id(function))
 
 
-def replay(value, rows, t: int, column: int, params: tuple):
+def replay(value, rows: 'HistoryRows', t: int, column: int, params: tuple):
     """The record with real rows at bar ``t`` for instrument ``column`` and these parameter
     values. ``rows``: HistoryRows."""
     position = [0]
@@ -561,7 +569,7 @@ class _Rows:
     """History rows at a bar, as the engine's polars Series once anything but to_numpy is
     asked of them."""
 
-    def __init__(self, values: np.ndarray, field: str):
+    def __init__(self, values: np.ndarray, field: str) -> None:
         self.values, self.field = values, field
 
     def series(self):
@@ -588,7 +596,7 @@ class _Unrunnable(Exception):
     the record itself."""
 
 
-def compile_plan(key, rows):
+def compile_plan(key, rows: 'HistoryRows'):
     """A record's key -- which describes the record completely -- as a function
     ``(t, column, params) -> value``: what :func:`replay` computes, without walking the record at
     every bar. ``rows``: HistoryRows."""
@@ -597,7 +605,7 @@ def compile_plan(key, rows):
         _, where, field, length, before, daily = key
         length_of = compile_plan(length, rows)
 
-        def leaf_rows(t, c, P):
+        def leaf_rows(t, c, P) -> '_Rows':
             column = c if where == "all" else where
             return _Rows(rows.window(field, column, t, length_of(t, c, P), before, daily), field)
         return leaf_rows
@@ -648,7 +656,7 @@ def compile_plan(key, rows):
     raise _Unrunnable()
 
 
-def replay_series(plan, n_bars: int, columns, params) -> np.ndarray:
+def replay_series(plan: 'Callable', n_bars: int, columns: 'list[int]', params) -> np.ndarray:
     """A compiled record's value at every bar, for each of ``columns``: (bars, columns)."""
     result = np.full((n_bars, len(columns)), np.nan)
     for j, column in enumerate(columns):
@@ -722,7 +730,7 @@ ELEMENTWISE = {operator.add, operator.sub, operator.mul, operator.truediv, opera
                operator.neg, operator.abs}
 
 
-def fast_series(key, params, market, columns) -> np.ndarray | None:
+def fast_series(key, params, market: 'Market', columns: 'list[int]') -> np.ndarray | None:
     """A record at every bar without replaying it bar by bar, if it is made of
     ``talib.X(history[-k:], ...)[-1]`` for functions in WINDOW_LOCAL -- each run once over each
     instrument's whole history and read at the bar's last row, the same number as the window's --
@@ -738,7 +746,7 @@ def fast_series(key, params, market, columns) -> np.ndarray | None:
     return np.broadcast_to(result, (market.n_bars, len(columns))).astype(np.float64)
 
 
-def _series(key, params, market, columns):
+def _series(key, params, market: 'Market', columns: 'list[int]'):
     if key[0] in ("value", "param"):
         value = _constant(key, params)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -756,7 +764,7 @@ def _series(key, params, market, columns):
     raise _NotFast()
 
 
-def _row_of_window(key, params, market, columns) -> np.ndarray:
+def _row_of_window(key, params, market: 'Market', columns: 'list[int]') -> np.ndarray:
     """``history[-k:][j]``: one row of the window -- the window's first (``[0]``) or last
     (``[-1]``) price -- at every bar, by index; NaN where the window has no such row (an
     IndexError at that bar)."""
@@ -779,7 +787,7 @@ def _row_of_window(key, params, market, columns) -> np.ndarray:
     return result
 
 
-def _last_of_window_local(key, params, market, columns) -> np.ndarray:
+def _last_of_window_local(key, params, market: 'Market', columns: 'list[int]') -> np.ndarray:
     """``talib.X(window, ...)[-1]``, or ``talib.X(window...)[j][-1]`` for its j-th output, with
     one or more windows of one instrument's history (high, low, close)."""
     if _constant(key[2][1], params) != -1:
@@ -862,7 +870,7 @@ PARALLEL_FROM = 2_000_000
 _WORKER = {}
 
 
-def _start_worker(market_arrays: dict):
+def _start_worker(market_arrays: dict) -> None:
     from ziplime.sweep.market import HistoryRows
 
     market = types.SimpleNamespace(**market_arrays)
@@ -870,7 +878,7 @@ def _start_worker(market_arrays: dict):
     os.environ["ZIPLIME_SWEEP_REPLAY_WORKERS"] = "1"
 
 
-def _replay_job(job):
+def _replay_job(job: 'tuple'):
     key, params, columns = job
     plan = compile_plan(key, _WORKER["rows"])
     return replay_series(plan, _WORKER["n_bars"], columns, params)
@@ -888,7 +896,7 @@ class LazyRegistry:
     Lives on the run's Windows: ``now`` and ``stacks`` are the windows' own, so the step's inputs
     carry these values as they carry history windows (compiled steps included)."""
 
-    def __init__(self, windows):
+    def __init__(self, windows: 'Windows') -> None:
         self.windows = windows
         #: key -> stack name, record (for replaying), per_column
         self.records = {}
@@ -941,12 +949,12 @@ class LazyRegistry:
         except Exception:
             return None
 
-    def begin_step(self):
+    def begin_step(self) -> None:
         """A bar starts: records are asked for in the same order at every bar."""
         self._occurrence = {}
         self.misses = []
 
-    def begin_discovery(self):
+    def begin_discovery(self) -> None:
         """A batch starts: its combinations' parameter values are seen anew."""
         self._seen, self._rows = {}, {}
 
@@ -961,7 +969,7 @@ class LazyRegistry:
         return [tuple(int(v) if float(v).is_integer() else v for v in row)
                 for row in zip(*[h.tolist() for h in host])]
 
-    def _request(self, name, params, k=None) -> bool:
+    def _request(self, name: str, params, k: 'int | None' = None) -> bool:
         """Note the parameter values seen; True if any were new."""
         known = set(self.values.get(name, ()))
         if not params:
@@ -978,7 +986,7 @@ class LazyRegistry:
         self.values[name] = sorted(known | new)
         return True
 
-    def _row_index(self, name, k, combinations: int):
+    def _row_index(self, name: str, k: int, combinations: int):
         """Each combination's row of the record's values for its k-th use in the bar, from the
         values discovery saw -- once a batch, not at every bar; None if discovery did not see it."""
         if (name, k) not in self._rows:
@@ -992,8 +1000,6 @@ class LazyRegistry:
         return self._rows[(name, k)]
 
     def value(self, value: Lazy):
-        from ziplime.sweep.engine import Rediscover
-
         windows, xp = self.windows, self.windows.backend.xp
         template = _Template(value)
         name = self._name(template, value)
@@ -1012,7 +1018,7 @@ class LazyRegistry:
             return self._compiled_value(name, k, rows, table, template.params)
         return xp.take(rows, self._match(table, template.params), axis=0)
 
-    def _compiled_value(self, name, k, rows, table, params):
+    def _compiled_value(self, name: str, k: int, rows, table, params):
         """In a compiled step the parameters cannot be read on the host. Each combination's row
         was found once for the batch from what discovery saw; the step only checks, one
         comparison a combination, that the parameter is still the row's value. Where it is not
@@ -1062,7 +1068,7 @@ class LazyRegistry:
         v = float(np.asarray(self.windows.backend.numpy(param)).reshape(-1)[0])
         return int(v) if v.is_integer() else v
 
-    def prepare(self):
+    def prepare(self) -> None:
         """Every record's value at every bar, for each distinct set of parameter values: a TA-Lib
         function of one window once on the whole history (fast_series), anything else replayed
         bar by bar -- on the CPU's cores when there is enough of it."""
@@ -1092,7 +1098,7 @@ class LazyRegistry:
                 stack[:, k, :] = self._cache[(key, params)]
             self.windows.stacks[name] = self.windows.backend.array(stack)
 
-    def _replay_pending(self, pending, rows, market):
+    def _replay_pending(self, pending, rows: 'HistoryRows', market: 'Market') -> None:
         work = sum(market.n_bars * len(columns) for _, _, columns, _ in pending)
         jobs, local = [], []
         for key, params, columns, value in pending:
@@ -1135,7 +1141,7 @@ class LazyRegistry:
             self.method[key] = "bar by bar"
 
     @staticmethod
-    def _replay(value, rows, t, column, params):
+    def _replay(value, rows: 'HistoryRows', t: int, column: int, params):
         try:
             result = replay(value, rows, t, column, params)
         except NotConvertible:

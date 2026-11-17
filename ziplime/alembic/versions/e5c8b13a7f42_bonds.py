@@ -23,7 +23,7 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade():
+def upgrade() -> None:
     op.create_table(
         'bonds',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -78,7 +78,7 @@ def upgrade():
                     unique=False)
 
 
-def downgrade():
+def downgrade() -> None:
     op.drop_index(op.f('ix_bond_events_record_date'), table_name='bond_events')
     op.drop_index(op.f('ix_bond_events_date'), table_name='bond_events')
     op.drop_index(op.f('ix_bond_events_asset_id'), table_name='bond_events')

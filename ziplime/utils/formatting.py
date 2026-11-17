@@ -1,4 +1,7 @@
-def s(word, seq, suffix="s"):
+from collections.abc import Sized
+
+
+def s(word: str, seq: 'Sized', suffix: str = "s"):
     """Adds a suffix to ``word`` if some sequence has anything other than
     exactly one element.
 
@@ -22,7 +25,7 @@ def s(word, seq, suffix="s"):
     return word + suffix
 
 
-def plural(singular, plural, seq):
+def plural(singular: str, plural: str, seq: 'Sized'):
     """Selects a singular or plural word based on the length of a sequence.
 
     Parameters
@@ -45,7 +48,7 @@ def plural(singular, plural, seq):
     return plural
 
 
-def bulleted_list(items, indent=0, bullet_type="-"):
+def bulleted_list(items, indent: int = 0, bullet_type: str = "-") -> str:
     """Format a bulleted list of values.
 
     Parameters

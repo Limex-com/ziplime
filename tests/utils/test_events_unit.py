@@ -1,8 +1,14 @@
 import datetime
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 import pytz
 
+from ziplime.trading.base_trading_algorithm import BaseTradingAlgorithm
 from ziplime.utils.calendar_utils import get_calendar
+from ziplime.utils.event_rule import EventRule
 from ziplime.utils.events import (
     AfterOpen,
     Always,
@@ -25,6 +31,62 @@ from ziplime.utils.events import (
     make_eventrule,
     time_rules,
 )
+
+
+def test_base_algorithm_import_does_not_load_scheduler_or_concrete_algorithm():
+    result = subprocess.run(
+        [sys.executable, "-c", "\n".join([
+            "import sys",
+            "from ziplime.trading.base_trading_algorithm import BaseTradingAlgorithm",
+            "assert 'ziplime.utils.events' not in sys.modules",
+            "assert 'ziplime.trading.trading_algorithm' not in sys.modules",
+        ])],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_event_rule_keeps_legacy_import_and_abstract_contract():
+    from ziplime.utils.events import EventRule as LegacyEventRule
+
+    assert LegacyEventRule is EventRule
+    assert isinstance(Always(), LegacyEventRule)
+    with pytest.raises(TypeError, match="abstract"):
+        EventRule()
+
+
+@pytest.mark.asyncio
+async def test_custom_extracted_rule_dispatches_base_algorithm_context():
+    threshold = datetime.datetime(2024, 1, 1, 10, 0, tzinfo=pytz.utc)
+
+    class AtOrAfter(EventRule):
+        def should_trigger(self, dt: datetime.datetime) -> bool:
+            return dt >= threshold
+
+    rule = AtOrAfter()
+    assert rule.cal is None
+    calendar = get_calendar("XNYS")
+    rule.cal = calendar
+    assert rule.cal is calendar
+
+    context, data = BaseTradingAlgorithm(), object()
+    called = []
+
+    async def callback(algorithm, current_data):
+        called.append((algorithm, current_data))
+
+    manager = EventManager()
+    manager.add_event(Event(rule=rule, callback=callback))
+
+    await manager.handle_data(context, data, threshold - datetime.timedelta(minutes=1))
+    assert called == []
+    await manager.handle_data(context, data, threshold)
+    assert called == [(context, data)]
 
 
 def test_ensure_utc():

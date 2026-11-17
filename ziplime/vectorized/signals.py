@@ -27,7 +27,9 @@ computation whose leakage shows up at those rows -- which is every accidental le
 since full-sample normalisation and negative shifts move nearly every row -- and cannot promise to
 catch one contrived to hide between them. It is a smoke alarm, not a proof.
 """
+
 import datetime
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -58,7 +60,7 @@ class PricePanel:
     """
 
     def __init__(self, frames: dict[str, pd.DataFrame], index: pd.DatetimeIndex,
-                 datasets: dict[str, "PricePanel"] | None = None):
+                 datasets: dict[str, "PricePanel"] | None = None) -> None:
         self._frames = frames
         self.index = index
         self._datasets = datasets or {}
@@ -221,7 +223,7 @@ def as_of_panel(rows: pl.DataFrame, names: dict[int, str], index: pd.DatetimeInd
 class SignalRow:
     """One bar of one signal: ``row["JNJ"]``, or a bare value for a per-portfolio signal."""
 
-    def __init__(self, name: str, value):
+    def __init__(self, name: str, value) -> None:
         self._name = name
         self._value = value
 
@@ -267,7 +269,7 @@ class SignalPanel:
     look ahead here by being careless, only by reaching past this object entirely.
     """
 
-    def __init__(self, frames: dict[str, pd.DataFrame | pd.Series], clock):
+    def __init__(self, frames: dict[str, pd.DataFrame | pd.Series], clock: 'Callable[[], datetime.datetime]') -> None:
         self._frames = frames
         self._clock = clock
         # Every signal shares the panel's index -- `normalise_signals` refuses one that does not --
@@ -369,7 +371,10 @@ def _numeric_where_possible(column: pd.Series) -> pd.Series:
         return column
 
 
-def normalise_signals(returned, index: pd.DatetimeIndex) -> dict[str, pd.DataFrame | pd.Series]:
+def normalise_signals(
+    returned: 'pd.DataFrame | pd.Series | dict[str, pd.DataFrame | pd.Series]',
+    index: pd.DatetimeIndex,
+) -> dict[str, pd.DataFrame | pd.Series]:
     """Accept what a strategy naturally returns, and insist it is indexed like the panel.
 
     A frame whose index does not match the panel's cannot be read by bar at all -- every lookup
@@ -403,8 +408,13 @@ def normalise_signals(returned, index: pd.DatetimeIndex) -> dict[str, pd.DataFra
     return frames
 
 
-def verify_causality(compute, panel: PricePanel, computed: dict[str, pd.DataFrame | pd.Series],
-                     cuts: int = DEFAULT_CUTS, warmup: int = 0) -> None:
+def verify_causality(
+    compute: 'Callable[[PricePanel], dict[str, pd.DataFrame | pd.Series]]',
+    panel: PricePanel,
+    computed: dict[str, pd.DataFrame | pd.Series],
+    cuts: int = DEFAULT_CUTS,
+    warmup: int = 0,
+) -> None:
     """Re-run a signal computation on truncated history and refuse it if the answer changes.
 
     The check is the definition of causality made executable: a signal at bar ``t`` is honest only
@@ -441,7 +451,7 @@ def verify_causality(compute, panel: PricePanel, computed: dict[str, pd.DataFram
                               rows=rows, stamp=panel.index[rows - 1])
 
 
-def _compare_last_row(name: str, full, partial, rows: int, stamp) -> None:
+def _compare_last_row(name: str, full, partial, rows: int, stamp: 'pd.Timestamp') -> None:
     """Fail unless the truncated computation reproduces the full one's value at that bar."""
     full_values = np.asarray(pd.Series(full).to_numpy() if isinstance(full, pd.Series) else [full])
     part_values = np.asarray(pd.Series(partial).to_numpy() if isinstance(partial, pd.Series) else [partial])

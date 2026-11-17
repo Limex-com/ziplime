@@ -1,7 +1,11 @@
 from pandas import DataFrame
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.loaders.data_frame_loader import DataFrameLoader
 from ziplime.pipeline.loaders.pipeline_loader import PipelineLoader
+from ziplime.pipeline.domain import Domain
+from ziplime.pipeline.terms.bound_column import BoundColumn
 
 
 class PrecomputedLoader(PipelineLoader):
@@ -25,7 +29,7 @@ class PrecomputedLoader(PipelineLoader):
     Adjustments are unsupported by this loader.
     """
 
-    def __init__(self, constants, dates, sids):
+    def __init__(self, constants, dates, sids) -> None:
         loaders = {}
         for column, const in constants.items():
             frame = DataFrame(
@@ -42,7 +46,14 @@ class PrecomputedLoader(PipelineLoader):
 
         self._loaders = loaders
 
-    async def load_adjusted_array(self, domain, columns, dates, sids, mask):
+    async def load_adjusted_array(
+        self,
+        domain: 'Domain',
+        columns: 'list[BoundColumn]',
+        dates: 'pd.DatetimeIndex',
+        sids: 'pd.Index',
+        mask: 'np.ndarray',
+    ):
         """Load by delegating to sub-loaders."""
         out = {}
         for col in columns:

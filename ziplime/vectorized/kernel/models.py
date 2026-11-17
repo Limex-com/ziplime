@@ -60,7 +60,7 @@ class ExecutionTiming:
     signal_at: Literal["close"] = "close"
     execute_at: TimingMode = "next_open"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.signal_at != "close":
             raise VectorKernelError(
                 f"signal_at={self.signal_at!r} is not supported; this version reads signals off "
@@ -219,12 +219,12 @@ class VectorSimulationResult:
 # ---------------------------------------------------------------------------------------------
 
 class _Wrapper:
-    def __init__(self, index: pd.DatetimeIndex):
+    def __init__(self, index: pd.DatetimeIndex) -> None:
         self.index = index
 
 
 class _Orders:
-    def __init__(self, records_readable: pd.DataFrame):
+    def __init__(self, records_readable: pd.DataFrame) -> None:
         self.records_readable = records_readable
 
 
@@ -240,7 +240,7 @@ class VectorPortfolio:
     the kernel's own contract.
     """
 
-    def __init__(self, result: VectorSimulationResult):
+    def __init__(self, result: VectorSimulationResult) -> None:
         self._result = result
         self.wrapper = _Wrapper(result.index)
         frame = result.fills_frame()

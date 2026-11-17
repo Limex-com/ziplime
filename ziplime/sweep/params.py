@@ -17,6 +17,7 @@ same thing, so a sweep file reads like the arguments of the run it stands for::
 Each key of ``grid`` is a field of the algorithm's ``AlgorithmConfig`` -- what a ``config_file``
 would set for a single run -- or, for a nested field, a short name with an explicit ``path``.
 """
+
 import copy
 import datetime
 import itertools
@@ -34,6 +35,8 @@ from ziplime.finance.commission.per_trade import PerTrade
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
 from ziplime.finance.slippage.fixed_slippage import FixedSlippage
 from ziplime.finance.slippage.no_slippage import NoSlippage
+from ziplime.finance.commission.commission_model import CommissionModel
+from ziplime.finance.slippage.slippage_model import SlippageModel
 
 #: Where bundles and the asset database live unless the sweep file says otherwise -- the same
 #: defaults as the ``ziplime`` command line.
@@ -90,7 +93,7 @@ class Commission(Strict):
         }[self.type]()
 
     @classmethod
-    def of(cls, model) -> "Commission":
+    def of(cls, model: 'CommissionModel') -> "Commission":
         """The sweep's description of a ziplime commission model (set_commission in initialize)."""
         if model is None or isinstance(model, NoCommission):
             return cls()
@@ -119,7 +122,7 @@ class Slippage(Strict):
         return NoSlippage()
 
     @classmethod
-    def of(cls, model) -> "Slippage":
+    def of(cls, model: 'SlippageModel') -> "Slippage":
         """The sweep's description of a ziplime slippage model (set_slippage in initialize)."""
         if model is None or isinstance(model, NoSlippage):
             return cls()

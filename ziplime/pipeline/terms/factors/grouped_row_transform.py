@@ -1,8 +1,14 @@
+from collections.abc import Callable
+
 from numpy import empty_like, where
+import numpy as np
+import pandas as pd
 
 from ziplime.lib.normalize import naive_grouped_rowwise_apply
 from ziplime.pipeline.terms.factors.factor import Factor
 from ziplime.pipeline.terms.classifiers import Everything
+from ziplime.pipeline.terms.classifiers.classifier import Classifier
+from ziplime.pipeline.terms.filters.filter import Filter
 
 
 class GroupedRowTransform(Factor):
@@ -45,13 +51,13 @@ class GroupedRowTransform(Factor):
 
     def __new__(
             cls,
-            transform,
+            transform: 'Callable',
             transform_args,
-            factor,
-            groupby,
-            dtype,
+            factor: 'Factor',
+            groupby: 'Classifier | None',
+            dtype: 'np.dtype',
             missing_value,
-            mask,
+            mask: 'Filter | None',
             **kwargs,
     ):
 
@@ -74,20 +80,20 @@ class GroupedRowTransform(Factor):
             **kwargs,
         )
 
-    def _init(self, transform, transform_args, *args, **kwargs):
+    def _init(self, transform: 'Callable', transform_args, *args, **kwargs):
         self._transform = transform
         self._transform_args = transform_args
         return super(GroupedRowTransform, self)._init(*args, **kwargs)
 
     @classmethod
-    def _static_identity(cls, transform, transform_args, *args, **kwargs):
+    def _static_identity(cls, transform: 'Callable', transform_args, *args, **kwargs):
         return (
             super(GroupedRowTransform, cls)._static_identity(*args, **kwargs),
             transform,
             transform_args,
         )
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         data = arrays[0]
         group_labels, null_label = self.inputs[1]._to_integral(arrays[1])
         # Make a copy with the null code written to masked locations.

@@ -42,7 +42,7 @@ class FixedBasisPointsSlippage(SlippageModel):
       equities.
     """
 
-    def __init__(self, basis_points=5.0, volume_limit=0.1):
+    def __init__(self, basis_points: float = 5.0, volume_limit: float = 0.1) -> None:
         super(FixedBasisPointsSlippage, self).__init__()
         if volume_limit <= 0:
             raise ValueError(f"volume_limit must be positive, got {volume_limit!r}.")

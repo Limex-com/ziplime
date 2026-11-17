@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Self
 import pathlib
 import re
+from collections.abc import Callable
 
 import aiocache
 import pandas as pd
@@ -76,7 +77,7 @@ from ziplime.assets.repositories.asset_repository import AssetRepository
 from ziplime.assets.utils import _encode_continuous_future_sid, Lifetimes
 
 
-def _asset_identity(asset) -> tuple:
+def _asset_identity(asset: 'Asset') -> tuple:
     """What tells two stored assets apart before either has an id: type, ISIN and name -- and, for
     a contract, its expiry.
 
@@ -109,7 +110,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
     :class:`ziplime.assets.repositories.AssetsRepository`
     """
 
-    def __init__(self, db_url: str, future_chain_predicates):
+    def __init__(self, db_url: str, future_chain_predicates: 'dict[str, Callable[[ExchangeAsset], bool]]') -> None:
         self.db_url = db_url
         self._asset_cache = {}
         self._asset_type_cache = {}
@@ -1797,8 +1798,15 @@ class SqlAlchemyAssetRepository(AssetRepository):
         self._ordered_contracts[cache_key] = ordered_contracts
         return ordered_contracts
 
-    async def create_continuous_future(self, root_symbol: str, offset: int, roll_style: str,
-                                       adjustment: str | None, mic: str | None = None, roll_offset_days: int | None = None) -> ContinuousFuture:
+    async def create_continuous_future(
+        self,
+        root_symbol: str,
+        offset: int,
+        roll_style: str,
+        adjustment: str | None,
+        mic: str | None = None,
+        roll_offset_days: int | None = None,
+    ) -> ContinuousFuture:
         """Build a :class:`ContinuousFuture` specifier for a stored chain.
 
         ``root_symbol`` may name its exchange (``NG@XNYM``), as ``mic`` does; see

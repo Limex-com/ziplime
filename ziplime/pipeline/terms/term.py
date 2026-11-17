@@ -5,13 +5,17 @@ Base class for Filters, Factors and Classifiers
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from weakref import WeakValueDictionary
-
+from collections.abc import Hashable
+from numpy.typing import DTypeLike
+import numpy as np
+import pandas as pd
 
 from ziplime.errors import NonSliceableTerm
 
 from ziplime.pipeline.domain import GENERIC
 from ziplime.assets.entities.asset import Asset
 from ziplime.pipeline.terms.utils import validate_dtype
+from ziplime.pipeline.domain import Domain
 
 
 class Term(ABC):
@@ -68,11 +72,11 @@ class Term(ABC):
 
     def __new__(
         cls,
-        domain=None,
-        dtype=None,
+        domain: 'Domain | None' = None,
+        dtype: 'DTypeLike | None' = None,
         missing_value=None,
-        window_safe=None,
-        ndim=None,
+        window_safe: 'bool | None' = None,
+        ndim: 'int | None' = None,
         # params is explicitly not allowed to be passed to an instance.
         *args,
         **kwargs,
@@ -191,7 +195,7 @@ class Term(ABC):
             param_values.append((key, value))
         return tuple(param_values)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         """
         Noop constructor to play nicely with our caching __new__.  Subclasses
         should implement _init instead of this method.
@@ -218,7 +222,15 @@ class Term(ABC):
         return slice_type(self, key)
 
     @classmethod
-    def _static_identity(cls, domain, dtype, missing_value, window_safe, ndim, params):
+    def _static_identity(
+        cls,
+        domain: 'Domain',
+        dtype: 'np.dtype',
+        missing_value,
+        window_safe: bool,
+        ndim: int,
+        params: 'tuple[tuple[str, Hashable], ...]',
+    ):
         """
         Return the identity of the Term that would be constructed from the
         given arguments.
@@ -232,7 +244,15 @@ class Term(ABC):
         """
         return (cls, domain, dtype, missing_value, window_safe, ndim, params)
 
-    def _init(self, domain, dtype, missing_value, window_safe, ndim, params):
+    def _init(
+        self,
+        domain: 'Domain',
+        dtype: 'np.dtype',
+        missing_value,
+        window_safe: bool,
+        ndim: int,
+        params: 'tuple[tuple[str, Hashable], ...]',
+    ):
         """
         Parameters
         ----------
@@ -282,7 +302,7 @@ class Term(ABC):
 
         return self
 
-    def _validate(self):
+    def _validate(self) -> None:
         """
         Assert that this term is well-formed.  This should be called exactly
         once, at the end of Term._init().
@@ -291,7 +311,13 @@ class Term(ABC):
         # call super().
         self._subclass_called_super_validate = True
 
-    def compute_extra_rows(self, all_dates, start_date, end_date, min_extra_rows):
+    def compute_extra_rows(
+        self,
+        all_dates: 'pd.DatetimeIndex',
+        start_date: 'pd.Timestamp',
+        end_date: 'pd.Timestamp',
+        min_extra_rows: int,
+    ):
         """
         Calculate the number of extra rows needed to compute ``self``.
 

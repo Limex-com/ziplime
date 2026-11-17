@@ -1,12 +1,16 @@
 from math import sqrt
+from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
 import structlog
+import polars as pl
 
 from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.option_contract import OptionContract
+from ziplime.finance.bonds import BondBook
+from ziplime.finance.domain.position import Position
 
 logger = structlog.get_logger(__name__)
 
@@ -74,7 +78,7 @@ class PositionStats:
     # cdef object underlying_value_array
     # cdef object underlying_index_array
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.gross_exposure = 0.0
         self.gross_value = 0.0
         self.long_exposure = 0.0
@@ -105,7 +109,7 @@ class PositionStats:
         return self
 
 
-def _bond_unit_value(bond_book, bond, position) -> float:
+def _bond_unit_value(bond_book: 'BondBook | None', bond: 'Bond', position: 'Position') -> float:
     """Money one bond of ``position`` is worth at its current mark.
 
     Falls back to the bare quote when no schedule is loaded and the bond quotes in money; for a
@@ -119,7 +123,12 @@ def _bond_unit_value(bond_book, bond, position) -> float:
     return bond_book.dirty_value(bond, position.last_sale_price, as_of)
 
 
-def calculate_position_tracker_stats(positions, position_count: int, stats, bond_book=None):
+def calculate_position_tracker_stats(
+    positions: 'Iterable[Position]',
+    position_count: int,
+    stats: 'PositionStats',
+    bond_book: 'BondBook | None' = None,
+):
     """Calculate various stats about the current positions.
 
     Parameters
@@ -264,9 +273,9 @@ def calculate_position_tracker_stats(positions, position_count: int, stats, bond
     stats.shorts_count = shorts_count
 
 
-def minute_annual_volatility(date_labels,
-                             minute_returns,
-                             daily_returns):
+def minute_annual_volatility(date_labels: 'pl.Series | np.ndarray',
+                             minute_returns: 'pl.Series | np.ndarray',
+                             daily_returns: 'pl.Series | np.ndarray'):
     """Pre-compute the minute cumulative volatility field.
     """
     out = np.empty_like(minute_returns)

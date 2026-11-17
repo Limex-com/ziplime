@@ -11,6 +11,7 @@ import structlog
 from numpy import integer as any_integer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import InstrumentedAttribute
 
 from ziplime.assets.entities.asset import Asset
 from ziplime.assets.models.divident_payout_model import DividendPayoutModel
@@ -60,7 +61,7 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
     :class:`ziplime.data.adjustments.SQLiteAdjustmentWriter`
     """
 
-    def __init__(self, db_url: str):
+    def __init__(self, db_url: str) -> None:
         self.db_url = db_url
 
     def __enter__(self):
@@ -106,7 +107,11 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
         assets: pd.Index,
     ) -> tuple[list[Any], list[Any], list[Any]]:
 
-        async def fetch(model, date_column, selected_ids):
+        async def fetch(
+            model: 'type[SplitModel] | type[MergerModel] | type[DividendPayoutModel]',
+            date_column: 'InstrumentedAttribute[datetime.date]',
+            selected_ids: 'set[int]',
+        ):
             if not selected_ids:
                 return []
             rows = []
@@ -378,7 +383,7 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
         # Stock dividends are not supported yet, so a position never receives one.
         return []
 
-    def calc_dividend_ratios(self, dividends):
+    def calc_dividend_ratios(self, dividends: 'pd.DataFrame | None'):
         """Calculate the ratios to apply to equities when looking back at pricing
         history so that the price is smoothed over the ex_date, when the market
         adjusts to the change in equity value due to upcoming dividend.

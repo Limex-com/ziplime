@@ -19,7 +19,7 @@ async def _process_data(data: pl.DataFrame,
                         name: str,
                         symbols: list[str],
                         trading_calendar: ExchangeCalendar,
-                        frequency: datetime.timedelta | Period, ):
+                        frequency: datetime.timedelta | Period, ) -> None | pl.DataFrame:
     """Ingest data for a given bundle.        """
     _logger.info(f"Ingesting custom bundle: name={name}, date_start={date_start}, date_end={date_end}, "
                  f"symbols={symbols}, frequency={frequency}")

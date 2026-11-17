@@ -18,10 +18,10 @@ class ExchangeAsset:
     asset: Asset
     quote: Asset
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.sid)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.symbol}-{self.mic}-({self.sid})"
 
     @property

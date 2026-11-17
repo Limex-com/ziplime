@@ -28,7 +28,7 @@ _COLUMNS = (
 )
 
 
-def upgrade():
+def upgrade() -> None:
     for table in ("futures_contracts", "futures_root_symbols"):
         with op.batch_alter_table(table) as batch_op:
             for name, default in _COLUMNS:
@@ -36,7 +36,7 @@ def upgrade():
                                               server_default=default))
 
 
-def downgrade():
+def downgrade() -> None:
     for table in ("futures_root_symbols", "futures_contracts"):
         with op.batch_alter_table(table) as batch_op:
             for name, _ in reversed(_COLUMNS):

@@ -27,7 +27,7 @@ class AssetExists(Term):
     mask = None
     windowed = False
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "AssetExists()"
 
     graph_repr = __repr__

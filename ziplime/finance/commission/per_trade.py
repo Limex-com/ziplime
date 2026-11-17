@@ -1,3 +1,6 @@
+
+from ziplime.finance.domain.order import Order
+from ziplime.finance.domain.transaction import Transaction
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.finance.commission.commission_model import CommissionModel
 
@@ -15,7 +18,7 @@ class PerTrade(CommissionModel):
         The flat amount of commissions paid per equity trade.
     """
 
-    def __init__(self, cost, ):
+    def __init__(self, cost: float, ) -> None:
         """
         Cost parameter is the cost of a trade, regardless of share count.
         $5.00 per trade is fairly typical of discount exchanges.
@@ -24,13 +27,13 @@ class PerTrade(CommissionModel):
         # logic does not floor to an integer.
         self.cost = float(cost)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "{class_name}(cost_per_trade={cost})".format(
             class_name=self.__class__.__name__,
             cost=self.cost,
         )
 
-    def calculate(self, order, transaction):
+    def calculate(self, order: Order, transaction: Transaction) -> float:
         """
         If the order hasn't had a commission paid yet, pay the fixed
         commission.

@@ -1,8 +1,10 @@
 from typing import Literal
+import pandas as pd
 
 from ziplime.errors import UnsupportedPipelineOutput
 
-from ziplime.pipeline.domain import Domain, GENERIC, infer_domain
+from ziplime.pipeline.domain import Domain, GENERIC
+from ziplime.pipeline.domain_inference import infer_domain
 from ziplime.pipeline.graph import ExecutionPlan, TermGraph, SCREEN_NAME
 from ziplime.pipeline.terms.asset_exists import AssetExists
 from ziplime.pipeline.terms.computable_term import ComputableTerm
@@ -36,7 +38,7 @@ class Pipeline:
 
     __slots__ = ("_columns", "_screen", "_domain", "__weakref__")
 
-    def __init__(self, columns: dict | None = None, screen: Filter | None = None, domain: Domain = GENERIC):
+    def __init__(self, columns: dict | None = None, screen: Filter | None = None, domain: Domain = GENERIC) -> None:
         if columns is None:
             columns = {}
 
@@ -90,7 +92,7 @@ class Pipeline:
         """
         return self._screen
 
-    def add(self, term: Term, name: str, overwrite: bool = False):
+    def add(self, term: Term, name: str, overwrite: bool = False) -> None:
         """Add a column.
 
         The results of computing ``term`` will show up as a column in the
@@ -143,7 +145,7 @@ class Pipeline:
         """
         return self.columns.pop(name)
 
-    def set_screen(self, screen: Filter, overwrite: bool | int):
+    def set_screen(self, screen: Filter, overwrite: bool | int) -> None:
         """Set a screen on this Pipeline.
 
         Parameters
@@ -165,7 +167,13 @@ class Pipeline:
             )
         self._screen = screen
 
-    def to_execution_plan(self, domain, default_screen, start_date, end_date):
+    def to_execution_plan(
+        self,
+        domain: 'Domain',
+        default_screen: 'Filter',
+        start_date: 'pd.Timestamp',
+        end_date: 'pd.Timestamp',
+    ):
         """
         Compile into an ExecutionPlan.
 
@@ -202,7 +210,7 @@ class Pipeline:
             end_date=end_date,
         )
 
-    def to_simple_graph(self, default_screen):
+    def to_simple_graph(self, default_screen: 'Filter'):
         """
         Compile into a simple TermGraph with no extra row metadata.
 
@@ -218,7 +226,7 @@ class Pipeline:
         """
         return TermGraph(self._prepare_graph_terms(default_screen))
 
-    def _prepare_graph_terms(self, default_screen):
+    def _prepare_graph_terms(self, default_screen: 'Filter'):
         """Helper for to_graph and to_execution_plan."""
         columns = self.columns.copy()
         screen = self.screen
@@ -249,7 +257,7 @@ class Pipeline:
             raise AssertionError("Unknown graph format %r." % format)
 
     @staticmethod
-    def validate_column(column_name: str, term: Term):
+    def validate_column(column_name: str, term: Term) -> None:
         if term.ndim == 1:
             raise UnsupportedPipelineOutput(column_name=column_name, term=term)
 

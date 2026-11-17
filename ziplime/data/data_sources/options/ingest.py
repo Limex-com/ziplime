@@ -15,10 +15,12 @@ The order matters and is not obvious:
    **underlying's** -- one bundle, because a strategy that trades an option and reads its
    underlying's price is doing one thing, not two.
 """
+
 import datetime
 
 import polars as pl
 import structlog
+from exchange_calendars import ExchangeCalendar
 
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.option_contract import OptionContract
@@ -104,7 +106,7 @@ async def build_option_bundle(
         underlying_bars: pl.DataFrame,
         sessions: list[datetime.date],
         timestamps: pl.Series,
-        trading_calendar,
+        trading_calendar: 'ExchangeCalendar',
         emission_rate: datetime.timedelta,
         bundle_name: str | None = None,
 ) -> tuple[DataBundle, list[ExchangeAsset]]:

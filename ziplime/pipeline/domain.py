@@ -17,6 +17,7 @@ Currently, this means that a domain defines two things:
 
 import datetime
 from textwrap import dedent
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -45,10 +46,10 @@ class Domain:
        concepts.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.assets = None
 
-    def sessions(self):
+    def sessions(self) -> pd.DatetimeIndex:
         """Get all trading sessions for the calendar of this domain.
 
         This determines the row labels of Pipeline outputs for pipelines run on
@@ -61,7 +62,7 @@ class Domain:
         """
 
     @property
-    def country_code(self):
+    def country_code(self) -> str:
         """The country code for this domain.
 
         Returns
@@ -70,7 +71,7 @@ class Domain:
             The two-character country iso3166 country code for this domain.
         """
 
-    def data_query_cutoff_for_sessions(self, sessions):
+    def data_query_cutoff_for_sessions(self, sessions: pd.DatetimeIndex) -> pd.DatetimeIndex:
         """Compute the data query cutoff time for the given sessions.
 
         Parameters
@@ -86,7 +87,7 @@ class Domain:
             "available" on each session.
         """
 
-    def roll_forward(self, dt):
+    def roll_forward(self, dt: 'pd.Timestamp'):
         """Given a date, align it to the calendar of the pipeline's domain.
 
         Parameters
@@ -111,19 +112,19 @@ class Domain:
 class GenericDomain(Domain):
     """Special singleton class used to represent generic DataSets and Columns."""
 
-    def sessions(self):
+    def sessions(self) -> pd.DatetimeIndex:
         raise NotImplementedError("Can't get sessions for generic domain.")
 
     @property
-    def country_code(self):
+    def country_code(self) -> str:
         raise NotImplementedError("Can't get country code for generic domain.")
 
-    def data_query_cutoff_for_sessions(self, sessions):
+    def data_query_cutoff_for_sessions(self, sessions: pd.DatetimeIndex) -> pd.DatetimeIndex:
         raise NotImplementedError(
             "Can't compute data query cutoff times for generic domain.",
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "GENERIC"
 
 
@@ -148,8 +149,8 @@ class EquityCalendarDomain(Domain):
     """
 
     def __init__(
-            self, country_code: str, calendar_name: str, data_query_offset=-np.timedelta64(45, "m")
-    ):
+            self, country_code: str, calendar_name: str, data_query_offset: 'np.timedelta64' = -np.timedelta64(45, "m")
+    ) -> None:
         self._country_code = country_code
         self.calendar_name = calendar_name
         self._data_query_offset = (
@@ -164,7 +165,7 @@ class EquityCalendarDomain(Domain):
             )
 
     @property
-    def country_code(self):
+    def country_code(self) -> str:
         return self._country_code
 
     # @lazyval
@@ -172,10 +173,10 @@ class EquityCalendarDomain(Domain):
     def calendar(self):
         return get_calendar(self.calendar_name)
 
-    def sessions(self):
+    def sessions(self) -> pd.DatetimeIndex:
         return self.calendar.sessions
 
-    def data_query_cutoff_for_sessions(self, sessions):
+    def data_query_cutoff_for_sessions(self, sessions: pd.DatetimeIndex) -> pd.DatetimeIndex:
         opens = self.calendar.first_minutes.reindex(sessions)
         missing_mask = pd.isnull(opens)
         if missing_mask.any():
@@ -187,53 +188,11 @@ class EquityCalendarDomain(Domain):
 
         return pd.DatetimeIndex(opens) + self._data_query_offset
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "EquityCalendarDomain({!r}, {!r})".format(
             self.country_code,
             self.calendar_name,
         )
-
-
-def infer_domain(terms):
-    """Infer the domain from a collection of terms.
-
-    The algorithm for inferring domains is as follows:
-
-    - If all input terms have a domain of GENERIC, the result is GENERIC.
-
-    - If there is exactly one non-generic domain in the input terms, the result
-      is that domain.
-
-    - Otherwise, an AmbiguousDomain error is raised.
-
-    Parameters
-    ----------
-    terms : iterable[ziplime.pipeline.Term]
-
-    Returns
-    -------
-    inferred : Domain or None
-
-    Raises
-    ------
-    AmbiguousDomain
-        Raised if more than one concrete domain is present in the input terms.
-    """
-    domains = {t.domain for t in terms}
-    num_domains = len(domains)
-
-    if num_domains == 0:
-        return GENERIC
-    elif num_domains == 1:
-        return domains.pop()
-    elif num_domains == 2 and GENERIC in domains:
-        domains.remove(GENERIC)
-        return domains.pop()
-    else:
-        # Remove GENERIC if it's present before raising. Showing it to the user
-        # is confusing because it doesn't contribute to the error.
-        domains.discard(GENERIC)
-        raise AmbiguousDomain(sorted(domains, key=repr))
 
 
 # This would be better if we provided more context for which domains came from
@@ -247,7 +206,7 @@ class AmbiguousDomain(Exception):
         {domains}"""
     )
 
-    def __init__(self, domains):
+    def __init__(self, domains: 'list[Domain]') -> None:
         self.domains = domains
 
     def __str__(self):
@@ -282,7 +241,7 @@ class EquitySessionDomain(Domain):
             country_code: str,
             data_query_time: datetime.time | None = None,
             data_query_date_offset: int = 0,
-    ):
+    ) -> None:
         self._country_code = country_code
         self._sessions = sessions
 
@@ -296,16 +255,30 @@ class EquitySessionDomain(Domain):
         self._data_query_date_offset = data_query_date_offset
 
     @property
-    def country_code(self):
+    def country_code(self) -> str:
         return self._country_code
 
-    def sessions(self):
+    def sessions(self) -> pd.DatetimeIndex:
         return self._sessions
 
-    def data_query_cutoff_for_sessions(self, sessions):
+    def data_query_cutoff_for_sessions(self, sessions: pd.DatetimeIndex) -> pd.DatetimeIndex:
         return days_at_time(
             sessions,
             self._data_query_time,
             self._data_query_time.tzinfo,
             self._data_query_date_offset,
         )
+
+
+def __getattr__(name: str) -> Callable:
+    # Preserve the public import without making domain definitions depend on Term.
+    if name == "infer_domain":
+        from ziplime.pipeline.domain_inference import infer_domain
+
+        globals()[name] = infer_domain
+        return infer_domain
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | {"infer_domain"})

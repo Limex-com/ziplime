@@ -1,4 +1,9 @@
+import datetime
+
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.domain.portfolio import Portfolio
 from ziplime.finance.controls.trading_control import TradingControl
+from ziplime.domain.bar_data import BarData
 
 
 class MaxOrderCount(TradingControl):
@@ -6,14 +11,15 @@ class MaxOrderCount(TradingControl):
     placed in a given trading day.
     """
 
-    def __init__(self, on_error, max_count):
+    def __init__(self, on_error: str, max_count: int) -> None:
 
         super(MaxOrderCount, self).__init__(on_error, max_count=max_count)
         self.orders_placed = 0
         self.max_count = max_count
         self.current_date = None
 
-    async def validate(self, asset, amount, portfolio, algo_datetime, algo_current_data):
+    async def validate(self, asset: ExchangeAsset, amount: int, portfolio: Portfolio,
+                       algo_datetime: 'datetime.datetime', algo_current_data: 'BarData') -> None:
         """Fail if we've already placed self.max_count orders today."""
         algo_date = algo_datetime.date()
 

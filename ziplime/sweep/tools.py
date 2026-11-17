@@ -4,6 +4,7 @@
 show how the strategy converts; ``doctor`` says which backends this machine has. The command line
 in ``ziplime/__main__.py`` only parses options and prints.
 """
+
 import datetime
 import importlib.metadata
 import importlib.util
@@ -14,13 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from ziplime.sweep.params import ConfigPath, Range, SweepError
+from ziplime.config.base_algorithm_config import BaseAlgorithmConfig
 
 #: Combinations ``check`` runs at most: enough to show how the strategy converts and whether a
 #: parameter changes anything, few enough to take seconds on the CPU
 CHECK_COMBINATIONS = 16
 
-
 # -- the command line's --grid and --set ----------------------------------------------------------
+
 
 def parse_value(text: str) -> Any:
     """A command-line value: JSON where it parses (``5``, ``0.5``, ``true``, ``[1, 2]``), else the
@@ -79,7 +81,7 @@ def config_class(algorithm_file: Path):
     return found
 
 
-def suggested_grid(config) -> dict[str, list]:
+def suggested_grid(config: 'BaseAlgorithmConfig') -> dict[str, list]:
     """A starting grid around each number's default: half, the default and twice it."""
     grid = {}
     for name, field in config.model_fields.items():

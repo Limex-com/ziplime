@@ -1,4 +1,6 @@
 from numexpr import evaluate
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.data import EquityPricing
 from ziplime.pipeline.terms.factors import CustomFactor
@@ -29,7 +31,15 @@ class FastStochasticOscillator(CustomFactor):
     window_safe = True
     window_length = 14
 
-    def compute(self, today, assets, out, closes, lows, highs):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        closes: 'np.ndarray',
+        lows: 'np.ndarray',
+        highs: 'np.ndarray',
+    ) -> None:
 
         highest_highs = nanmax(highs, axis=0)
         lowest_lows = nanmin(lows, axis=0)

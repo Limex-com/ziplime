@@ -24,12 +24,12 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade():
+def upgrade() -> None:
     with op.batch_alter_table('options_contracts') as batch_op:
         batch_op.add_column(sa.Column('premium_style', sa.String(), nullable=False,
                                       server_default='UPFRONT'))
 
 
-def downgrade():
+def downgrade() -> None:
     with op.batch_alter_table('options_contracts') as batch_op:
         batch_op.drop_column('premium_style')

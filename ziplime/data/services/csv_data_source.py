@@ -25,7 +25,7 @@ class CSVDataSource(DataSource):
                  asset_service: AssetService,
                  trading_calendar: ExchangeCalendar,
                  data_type: DataType,
-                 ):
+                 ) -> None:
         self._csv_file_name = csv_file_name
         self._column_mapping = column_mapping
         self._logger = structlog.get_logger(__name__)

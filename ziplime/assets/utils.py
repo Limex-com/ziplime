@@ -43,7 +43,7 @@ SYMBOL_COLUMNS = frozenset(
 )
 
 
-def split_delimited_symbol(symbol):
+def split_delimited_symbol(symbol: str):
     """
     Takes in a symbol that may be delimited and splits it in to a company
     symbol and share class symbol. Also returns the fuzzy symbol, which is the
@@ -173,7 +173,7 @@ def build_grouped_ownership_map(conn, table, key_from_row, value_from_row, group
 
 
 @curry
-def _filter_kwargs(names, dict_):
+def _filter_kwargs(names: 'set[str] | frozenset[str]', dict_):
     """Filter out kwargs from a dictionary.
 
     Parameters
@@ -235,8 +235,14 @@ CONTINUOUS_FUTURE_ADJUSTMENT_STYLE_IDS = {
 }
 
 
-def _encode_continuous_future_sid(root_symbol, offset, roll_style, adjustment_style, mic=None,
-                                  roll_offset_days=None):
+def _encode_continuous_future_sid(
+    root_symbol: str,
+    offset: int,
+    roll_style: str,
+    adjustment_style: 'str | None',
+    mic: 'str | None' = None,
+    roll_offset_days: 'int | None' = None,
+):
     # Generate a unique int identifier. The exchange is part of it: NG on the Moscow Exchange and
     # NG on NYMEX are two chains, and so are Si (Moscow) and SI (COMEX), which upper() made one.
     values = (

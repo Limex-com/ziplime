@@ -1,9 +1,10 @@
 from operator import itemgetter
+from collections.abc import Callable
 from toolz import curry
 
 
 @curry
-def apply(f, *args, **kwargs):
+def apply(f: 'Callable', *args, **kwargs):
     """Apply a function to arguments.
 
     Parameters
@@ -45,7 +46,7 @@ instance = apply
 
 
 @curry
-def set_attribute(name, value):
+def set_attribute(name: str, value):
     """
     Decorator factory for setting attributes on a function.
 
@@ -63,7 +64,7 @@ def set_attribute(name, value):
     'foo'
     """
 
-    def decorator(f):
+    def decorator(f: 'Callable'):
         setattr(f, name, value)
         return f
 

@@ -4,11 +4,16 @@ A sweep must never quietly produce different numbers from the engine. Whatever t
 or calls on ``context``, ``context.portfolio`` and ``data`` that the sweep does not reproduce is
 reported with its line, all of it at once, before anything is computed.
 """
+
 import ast
 import inspect
 import textwrap
+from collections.abc import Callable
+from collections.abc import Iterable
 
 from ziplime.sweep.params import SweepError
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.sweep.convert import Converted
 
 CONTEXT = {
     "algorithm", "signals", "universe", "portfolio", "xp",
@@ -28,7 +33,7 @@ HINTS = {
 }
 
 
-def problems(functions, state_names: set[str]) -> list[str]:
+def problems(functions: 'Iterable[Callable]', state_names: set[str]) -> list[str]:
     """Every unsupported use in ``functions``, as ``file, line N: ...``."""
     found = []
     for function in functions:
@@ -63,7 +68,7 @@ def problems(functions, state_names: set[str]) -> list[str]:
     return found
 
 
-def _say(filename, line, what, name):
+def _say(filename: str, line: int, what: str, name: str):
     hint = HINTS.get(name)
     return f"{filename}, line {line}: {what} is not available in a sweep" + (f" -- {hint}" if hint else "")
 
@@ -84,7 +89,7 @@ def _module_of(value) -> str:
     return module or ""
 
 
-def _chain(node):
+def _chain(node: 'ast.AST'):
     """``a.b.c`` -> ("a", ["b", "c"]); None for anything that does not start with a name."""
     parts = []
     while isinstance(node, ast.Attribute):
@@ -93,7 +98,7 @@ def _chain(node):
     return (node.id, list(reversed(parts))) if isinstance(node, ast.Name) else None
 
 
-def _reads(node, names: set[str], data: str) -> bool:
+def _reads(node: 'ast.Call', names: set[str], data: str) -> bool:
     """Whether a call's arguments read history: a name holding history rows, or data.history."""
     for argument in [*node.args, *(k.value for k in node.keywords)]:
         for child in ast.walk(argument):
@@ -105,7 +110,7 @@ def _reads(node, names: set[str], data: str) -> bool:
     return False
 
 
-def _history_names(definition, data: str) -> set[str]:
+def _history_names(definition: 'ast.FunctionDef | ast.AsyncFunctionDef', data: str) -> set[str]:
     """Names that hold history rows or what is computed from them: assigned from data.history
     or from such a name, or filled with them (``prices[s] = df["close"].to_numpy()``)."""
     names = set()
@@ -126,7 +131,7 @@ def _history_names(definition, data: str) -> set[str]:
             return names
 
 
-def foreign_calls(functions, state: dict) -> list[str]:
+def foreign_calls(functions: 'Iterable[Callable]', state: dict) -> list[str]:
     """Calls into code the sweep cannot run for every combination: other libraries, objects of
     other libraries kept on the context, functions of the strategy's other modules.
 
@@ -214,7 +219,7 @@ def foreign_calls(functions, state: dict) -> list[str]:
 
 
 
-def containers(hooks, state: dict, universe: dict) -> list[str]:
+def containers(hooks: 'Iterable[Converted]', state: dict, universe: dict) -> list[str]:
     """Containers on the context changed in place that are not per-instrument dicts of numbers.
 
     ``context.entry[asset] = price`` is held as arrays; ``context.seen.append(x)`` or a dict of
@@ -241,7 +246,13 @@ def containers(hooks, state: dict, universe: dict) -> list[str]:
     return found
 
 
-def check(functions, state_names: set[str], state: dict | None = None, hooks=(), universe=None):
+def check(
+    functions: 'Iterable[Callable]',
+    state_names: set[str],
+    state: dict | None = None,
+    hooks: 'Iterable[Converted]' = (),
+    universe: 'dict[str, ExchangeAsset] | None' = None,
+) -> None:
     found = problems(functions, state_names) + foreign_calls(functions, state or {})
     if universe is not None:
         found += containers(hooks, state or {}, universe)

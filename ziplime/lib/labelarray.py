@@ -5,11 +5,13 @@ An ndarray subclass for working with arrays of strings.
 from functools import total_ordering
 from operator import eq, ne
 import re
+from collections.abc import Callable
 
 import numpy as np
 from numpy import ndarray
 import pandas as pd
 from toolz import compose
+from numpy.typing import DTypeLike
 
 from ziplime.utils.compat import unicode
 from ziplime.utils.functional import instance
@@ -28,12 +30,12 @@ from ziplime.lib.factorize import (
 )
 
 
-def compare_arrays(left, right):
+def compare_arrays(left: 'np.ndarray', right: 'np.ndarray'):
     "Eq check with a short-circuit for identical objects."
     return left is right or ((left.shape == right.shape) and (left == right).all())
 
 
-def _make_unsupported_method(name):
+def _make_unsupported_method(name: str):
     def method(*args, **kwargs):
         raise NotImplementedError("Method %s is not supported on LabelArrays." % name)
 
@@ -48,7 +50,7 @@ class MissingValueMismatch(ValueError):
     mismatched missing_values.
     """
 
-    def __init__(self, left, right):
+    def __init__(self, left: 'str | bytes | None', right: 'str | bytes | None') -> None:
         super(MissingValueMismatch, self).__init__(
             "LabelArray missing_values don't match:"
             " left={}, right={}".format(left, right)
@@ -61,7 +63,7 @@ class CategoryMismatch(ValueError):
     mismatched category arrays.
     """
 
-    def __init__(self, left, right):
+    def __init__(self, left: 'np.ndarray', right: 'np.ndarray') -> None:
         (mismatches,) = np.where(left != right)
         assert len(mismatches), "Not actually a mismatch!"
         super(CategoryMismatch, self).__init__(
@@ -141,7 +143,11 @@ class LabelArray(ndarray):
     #     categories=coerce((list, np.ndarray, set), list),
     # )
     def __new__(
-        cls, values: np.ndarray, missing_value: SUPPORTED_SCALAR_TYPES, categories: list | None = None, sort=True
+        cls,
+        values: np.ndarray,
+        missing_value: SUPPORTED_SCALAR_TYPES,
+        categories: list | None = None,
+        sort: bool = True,
     ):
 
         # Numpy's fixed-width string types aren't very efficient. Working with
@@ -183,7 +189,11 @@ class LabelArray(ndarray):
 
     @classmethod
     def from_codes_and_metadata(
-        cls, codes, categories, reverse_categories, missing_value
+        cls,
+        codes: 'np.ndarray',
+        categories: 'np.ndarray',
+        reverse_categories: 'dict[str | bytes | None, int]',
+        missing_value: 'str | bytes | None',
     ):
         """
         Rehydrate a LabelArray from the codes and metadata.
@@ -206,7 +216,11 @@ class LabelArray(ndarray):
         return ret
 
     @classmethod
-    def from_categorical(cls, categorical, missing_value=None):
+    def from_categorical(
+        cls,
+        categorical: 'pd.Categorical',
+        missing_value: 'str | bytes | None' = None,
+    ) -> 'LabelArray':
         """
         Create a LabelArray from a pandas categorical.
 
@@ -247,10 +261,10 @@ class LabelArray(ndarray):
     def missing_value_code(self):
         return self.reverse_categories[self.missing_value]
 
-    def has_label(self, value):
+    def has_label(self, value: 'str | bytes | None'):
         return value in self.reverse_categories
 
-    def __array_finalize__(self, obj):
+    def __array_finalize__(self, obj: 'np.ndarray | None') -> None:
         """
         Called by Numpy after array construction.
 
@@ -324,7 +338,7 @@ class LabelArray(ndarray):
                 ordered=False,
             )
 
-    def as_categorical_frame(self, index, columns, name=None):
+    def as_categorical_frame(self, index: 'pd.Index', columns: 'pd.Index', name: 'str | None' = None):
         """
         Coerce self into a pandas DataFrame of Categoricals.
         """
@@ -348,7 +362,7 @@ class LabelArray(ndarray):
             name=name,
         ).unstack()
 
-    def __setitem__(self, indexer, value):
+    def __setitem__(self, indexer, value: 'str | bytes | None | LabelArray'):
         self_categories = self.categories
 
         if isinstance(value, self.SUPPORTED_SCALAR_TYPES):
@@ -383,7 +397,7 @@ class LabelArray(ndarray):
                 ),
             )
 
-    def set_scalar(self, indexer, value):
+    def set_scalar(self, indexer, value: 'str | bytes | None') -> None:
         """
         Set scalar value into the array.
 
@@ -432,7 +446,7 @@ class LabelArray(ndarray):
         """
         return self.as_int_array() != self.reverse_categories[self.missing_value]
 
-    def _equality_check(op):
+    def _equality_check(op: 'Callable'):
         """
         Shared code for __eq__ and __ne__, parameterized on the actual
         comparison operator to use.
@@ -489,7 +503,14 @@ class LabelArray(ndarray):
             kwargs["type"] = type
         return super(LabelArray, self).view(**kwargs)
 
-    def astype(self, dtype, order="K", casting="unsafe", subok=True, copy=True):
+    def astype(
+        self,
+        dtype: 'DTypeLike',
+        order: str = "K",
+        casting: str = "unsafe",
+        subok: bool = True,
+        copy: bool = True,
+    ):
         dtype = np.dtype(dtype)
         if dtype == self.dtype:
             if not subok:
@@ -568,7 +589,7 @@ class LabelArray(ndarray):
         }
     )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         repr_lines = repr(self.as_string_array()).splitlines()
         repr_lines[0] = repr_lines[0].replace("array(", "LabelArray(", 1)
         repr_lines[-1] = repr_lines[-1].rsplit(",", 1)[0] + ")"
@@ -576,7 +597,7 @@ class LabelArray(ndarray):
         # 'array(' and 'LabelArray('.
         return "\n     ".join(repr_lines)
 
-    def empty_like(self, shape):
+    def empty_like(self, shape: 'tuple[int, ...]'):
         """
         Make an empty LabelArray with the same categories as ``self``, filled
         with ``self.missing_value``.
@@ -592,7 +613,7 @@ class LabelArray(ndarray):
             missing_value=self.missing_value,
         )
 
-    def map_predicate(self, f):
+    def map_predicate(self, f: 'Callable'):
         """
         Map a function from str -> bool element-wise over ``self``.
 
@@ -604,7 +625,7 @@ class LabelArray(ndarray):
         # categories.
         if self.missing_value is None:
 
-            def f_to_use(x):
+            def f_to_use(x: 'str | bytes | None'):
                 return False if x is None else f(x)
 
         else:
@@ -620,7 +641,7 @@ class LabelArray(ndarray):
         # locations in our indices.
         return results[self.as_int_array()]
 
-    def map(self, f):
+    def map(self, f: 'Callable'):
         """
         Map a function from str -> str element-wise over ``self``.
 
@@ -633,7 +654,11 @@ class LabelArray(ndarray):
         else:
             allowed_outtypes = self.SUPPORTED_NON_NONE_SCALAR_TYPES
 
-        def f_to_use(x, missing_value=self.missing_value, otypes=allowed_outtypes):
+        def f_to_use(
+            x: 'str | bytes | None',
+            missing_value: 'str | bytes | None' = self.missing_value,
+            otypes=allowed_outtypes,
+        ):
 
             # Don't call f on the missing value; those locations don't exist
             # semantically. We return _sortable_sentinel rather than None
@@ -694,7 +719,7 @@ class LabelArray(ndarray):
             missing_value=self.missing_value,
         )
 
-    def startswith(self, prefix):
+    def startswith(self, prefix: 'str | bytes'):
         """
         Element-wise startswith.
 
@@ -710,7 +735,7 @@ class LabelArray(ndarray):
         """
         return self.map_predicate(lambda elem: elem.startswith(prefix))
 
-    def endswith(self, suffix):
+    def endswith(self, suffix: 'str | bytes'):
         """
         Elementwise endswith.
 
@@ -726,7 +751,7 @@ class LabelArray(ndarray):
         """
         return self.map_predicate(lambda elem: elem.endswith(suffix))
 
-    def has_substring(self, substring):
+    def has_substring(self, substring: 'str | bytes'):
         """
         Elementwise contains.
 
@@ -789,11 +814,11 @@ class _sortable_sentinel:
     def __eq__(self, other):
         return self is other
 
-    def __lt__(self, other):
+    def __lt__(self, other) -> bool:
         return True
 
 
-def labelarray_where(cond, trues: LabelArray, falses: LabelArray):
+def labelarray_where(cond: 'np.ndarray', trues: LabelArray, falses: LabelArray) -> 'LabelArray':
     """LabelArray-aware implementation of np.where."""
     if trues.missing_value != falses.missing_value:
         raise ValueError("Can't compute where on arrays with different missing values.")

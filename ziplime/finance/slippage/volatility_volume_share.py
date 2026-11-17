@@ -5,6 +5,7 @@ from ziplime.finance.constants import ROOT_SYMBOL_TO_ETA, DEFAULT_ETA
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.finance.slippage.market_impact_base import MarketImpactBase
 from ziplime.utils.dummy import DummyMapping
+from ziplime.finance.domain.order import Order
 
 
 class VolatilityVolumeShare(MarketImpactBase):
@@ -34,7 +35,7 @@ class VolatilityVolumeShare(MarketImpactBase):
     NO_DATA_VOLATILITY_SLIPPAGE_IMPACT = 7.5 / 10000
     allowed_asset_types = (FuturesContract,)
 
-    def __init__(self, volume_limit, eta=ROOT_SYMBOL_TO_ETA):
+    def __init__(self, volume_limit: float, eta: float | dict[str, float] = ROOT_SYMBOL_TO_ETA) -> None:
         super(VolatilityVolumeShare, self).__init__()
         self.volume_limit = volume_limit
 
@@ -50,7 +51,7 @@ class VolatilityVolumeShare(MarketImpactBase):
             # values per root symbol.
             self._eta = {**ROOT_SYMBOL_TO_ETA, **eta}
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if isinstance(self._eta, DummyMapping):
             # Eta is a constant, so extract it.
             eta = self._eta["dummy key"]
@@ -64,12 +65,12 @@ class VolatilityVolumeShare(MarketImpactBase):
 
     def get_simulated_impact(
             self,
-            order,
-            current_price,
-            current_volume,
-            txn_volume,
-            mean_volume,
-            volatility,
+            order: 'Order',
+            current_price: float,
+            current_volume: float,
+            txn_volume: int,
+            mean_volume: float,
+            volatility: float,
     ):
         try:
             eta = self._eta[order.asset.asset.root_symbol]
@@ -85,5 +86,5 @@ class VolatilityVolumeShare(MarketImpactBase):
         # convert from % to fraction.
         return (current_price * market_impact) / 10000
 
-    def get_txn_volume(self, volume: float, order):
+    def get_txn_volume(self, volume: float, order: 'Order'):
         return volume * self.volume_limit

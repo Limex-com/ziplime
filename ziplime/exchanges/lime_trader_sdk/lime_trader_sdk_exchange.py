@@ -124,7 +124,7 @@ class LimeTraderSdkExchange(Exchange):
         client: AsyncLimeClient | None = None,
         logger: Any = None,
         capital_limit: float | None = None,
-    ):
+    ) -> None:
         super().__init__(
             name=name,
             canonical_name=canonical_name,

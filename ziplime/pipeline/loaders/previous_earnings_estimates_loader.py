@@ -1,5 +1,8 @@
+import pandas as pd
+
 from ziplime.pipeline.common import SID_FIELD_NAME, EVENT_DATE_FIELD_NAME, SIMULATION_DATES
 from ziplime.pipeline.loaders.earnings_estimates_loader import EarningsEstimatesLoader
+from ziplime.pipeline.terms.bound_column import BoundColumn
 
 
 class PreviousEarningsEstimatesLoader(EarningsEstimatesLoader):
@@ -7,15 +10,15 @@ class PreviousEarningsEstimatesLoader(EarningsEstimatesLoader):
 
     def create_overwrite_for_estimate(
         self,
-        column,
-        column_name,
-        dates,
-        next_qtr_start_idx,
-        requested_quarter,
-        sid,
-        sid_idx,
+        column: 'BoundColumn',
+        column_name: str,
+        dates: 'pd.DatetimeIndex',
+        next_qtr_start_idx: int,
+        requested_quarter: float,
+        sid: int,
+        sid_idx: int,
         col_to_split_adjustments=None,
-        split_adjusted_asof_idx=None,
+        split_adjusted_asof_idx: 'int | None' = None,
         split_dict=None,
     ):
         return [
@@ -26,10 +29,10 @@ class PreviousEarningsEstimatesLoader(EarningsEstimatesLoader):
             )
         ]
 
-    def get_shifted_qtrs(self, zero_qtrs, num_announcements):
+    def get_shifted_qtrs(self, zero_qtrs: 'pd.Index', num_announcements: int):
         return zero_qtrs - (num_announcements - 1)
 
-    def get_zeroth_quarter_idx(self, stacked_last_per_qtr):
+    def get_zeroth_quarter_idx(self, stacked_last_per_qtr: 'pd.DataFrame'):
         """Filters for releases that are on or after each simulation date and
         determines the previous quarter by picking out the most recent
         release relative to each date in the index.

@@ -30,12 +30,14 @@ always twenty sessions. Columns: ``date``, ``sid`` (the instrument's position in
 the price fields (``open``, ``high``, ``low``, ``close``, ``volume``, ``price`` where the bundle has
 them).
 """
+
 import numpy as np
 import pandas as pd
 import polars as pl
+from ziplime.vectorized.signals import PricePanel
 
 
-def long_frame(panel) -> pl.DataFrame:
+def long_frame(panel: 'PricePanel') -> pl.DataFrame:
     """A :class:`PricePanel` as one long frame: row per (instrument, bar), instrument-major."""
     names = panel.columns
     n_bars = len(panel.index)
@@ -64,13 +66,13 @@ def per_instrument(expression: pl.Expr) -> pl.Expr:
     return expression.over("sid")
 
 
-def to_wide(values: pl.Series, panel) -> pd.DataFrame:
+def to_wide(values: pl.Series, panel: 'PricePanel') -> pd.DataFrame:
     """One computed column of :func:`long_frame` back to (bars × instruments)."""
     array = values.cast(pl.Float64).to_numpy().reshape(len(panel.columns), len(panel.index)).T
     return pd.DataFrame(array, index=panel.index, columns=panel.columns)
 
 
-def compute_indicators(expressions: dict[str, pl.Expr], panel) -> dict[str, pd.DataFrame]:
+def compute_indicators(expressions: dict[str, pl.Expr], panel: 'PricePanel') -> dict[str, pd.DataFrame]:
     """Every declared indicator over the whole panel, as the frames ``compute_signals`` returns."""
     if not expressions:
         raise ValueError("context.indicators() was called without any indicators.")

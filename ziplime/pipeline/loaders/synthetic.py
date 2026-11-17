@@ -3,11 +3,13 @@
 import numpy as np
 
 from pandas import DataFrame, Timestamp
+import pandas as pd
 from sqlite3 import connect as sqlite3_connect
+from collections.abc import Sequence
+import datetime as datetime
 
 from ziplime.pipeline.loaders.pipeline_loader import PipelineLoader  # noqa: F401 - compatibility re-export
 from ziplime.pipeline.loaders.data_frame_loader import DataFrameLoader  # noqa: F401 - compatibility re-export
-
 
 from ziplime.assets.repositories.sqlalchemy_adjustments_repository import SqlAlchemyAdjustmentRepository
 
@@ -24,7 +26,7 @@ US_EQUITY_PRICING_BCOLZ_COLUMNS = (
 UINT_32_MAX = np.iinfo(np.uint32).max
 
 
-def nanos_to_seconds(nanos):
+def nanos_to_seconds(nanos: 'np.ndarray'):
     return nanos / (1000 * 1000 * 1000)
 
 
@@ -37,7 +39,7 @@ PSEUDO_EPOCH_NAIVE = Timestamp("2000-01-01")
 # TODO FIX TZ MESS
 
 
-def asset_start(asset_info, asset, tz=None):
+def asset_start(asset_info: 'pd.DataFrame', asset: int, tz: 'datetime.tzinfo | str | None' = None):
     ret = asset_info.loc[asset]["start_date"]
     if tz is not None:
         ret = ret.tz_localize(tz)
@@ -45,7 +47,7 @@ def asset_start(asset_info, asset, tz=None):
     return ret
 
 
-def asset_end(asset_info, asset, tz=None):
+def asset_end(asset_info: 'pd.DataFrame', asset: int, tz: 'datetime.tzinfo | str | None' = None):
     ret = asset_info.loc[asset]["end_date"]
     if tz is not None:
         ret = ret.tz_localize(tz)
@@ -55,7 +57,11 @@ def asset_end(asset_info, asset, tz=None):
     return ret
 
 
-def make_bar_data(asset_info, calendar, holes=None):
+def make_bar_data(
+    asset_info: 'pd.DataFrame',
+    calendar: 'pd.DatetimeIndex',
+    holes: 'dict[int, Sequence[pd.Timestamp]] | None' = None,
+):
     """For a given asset/date/column combination, we generate a corresponding raw
     value using the following formula for OHLCV columns:
 
@@ -101,7 +107,7 @@ def make_bar_data(asset_info, calendar, holes=None):
 
     assert (asset_info["start_date"] < asset_info["end_date"]).all()
 
-    def _raw_data_for_asset(asset_id):
+    def _raw_data_for_asset(asset_id: int):
         """Generate 'raw' data that encodes information about the asset.
 
         See docstring for a description of the data format.
@@ -155,7 +161,7 @@ def make_bar_data(asset_info, calendar, holes=None):
         yield asset, _raw_data_for_asset(asset)
 
 
-def expected_bar_value(asset_id, date, colname):
+def expected_bar_value(asset_id: int, date: 'pd.Timestamp', colname: str):
     """Check that the raw value for an asset/date/column triple is as
     expected.
 
@@ -167,7 +173,13 @@ def expected_bar_value(asset_id, date, colname):
     return from_asset + from_colname + from_date
 
 
-def expected_bar_value_with_holes(asset_id, date, colname, holes, missing_value):
+def expected_bar_value_with_holes(
+    asset_id: int,
+    date: 'pd.Timestamp',
+    colname: str,
+    holes: 'dict[int, Sequence[pd.Timestamp]] | None',
+    missing_value,
+):
     # Explicit holes are filled with the missing value.
     if asset_id in holes and date in holes[asset_id]:
         return missing_value
@@ -175,7 +187,13 @@ def expected_bar_value_with_holes(asset_id, date, colname, holes, missing_value)
     return expected_bar_value(asset_id, date, colname)
 
 
-def expected_bar_values_2d(dates, assets, asset_info, colname, holes=None):
+def expected_bar_values_2d(
+    dates: 'pd.DatetimeIndex',
+    assets: 'pd.Index | np.ndarray',
+    asset_info: 'pd.DataFrame',
+    colname: str,
+    holes: 'dict[int, Sequence[pd.Timestamp]] | None' = None,
+):
     """Return an 2D array containing cls.expected_value(asset_id, date,
     colname) for each date/asset pair in the inputs.
 
@@ -229,7 +247,7 @@ class NullAdjustmentReader(SqlAlchemyAdjustmentRepository):
     SQLite.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         conn = sqlite3_connect(":memory:")
         writer = SqlAlchemyAdjustmentRepository(conn, None, None)
         empty = DataFrame(

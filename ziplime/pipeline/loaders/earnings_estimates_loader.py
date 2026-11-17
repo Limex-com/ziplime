@@ -2,6 +2,7 @@ from abc import abstractmethod
 
 import pandas as pd
 from toolz import groupby
+import numpy as np
 
 from ziplime.lib.adjusted_array import AdjustedArray
 from ziplime.lib.adjustment import (
@@ -23,6 +24,9 @@ from ziplime.pipeline.loaders.utils import (
     ffill_across_cols,
     last_in_date_group, normalize_quarters, validate_column_specs, split_normalized_quarters, add_new_adjustments,
 )
+from ziplime.lib.adjustment import Adjustment
+from ziplime.pipeline.domain import Domain
+from ziplime.pipeline.terms.bound_column import BoundColumn
 
 
 class EarningsEstimatesLoader(PipelineLoader):
@@ -57,7 +61,7 @@ class EarningsEstimatesLoader(PipelineLoader):
         names of the corresponding columns in `events`.
     """
 
-    def __init__(self, estimates, name_map):
+    def __init__(self, estimates: 'pd.DataFrame', name_map: 'dict[str, str]') -> None:
         validate_column_specs(estimates, name_map)
 
         self.estimates = estimates[
@@ -82,25 +86,25 @@ class EarningsEstimatesLoader(PipelineLoader):
         self.name_map = name_map
 
     @abstractmethod
-    def get_zeroth_quarter_idx(self, stacked_last_per_qtr):
+    def get_zeroth_quarter_idx(self, stacked_last_per_qtr: 'pd.DataFrame'):
         raise NotImplementedError("get_zeroth_quarter_idx")
 
     @abstractmethod
-    def get_shifted_qtrs(self, zero_qtrs, num_announcements):
+    def get_shifted_qtrs(self, zero_qtrs: 'pd.Index', num_announcements: int):
         raise NotImplementedError("get_shifted_qtrs")
 
     @abstractmethod
     def create_overwrite_for_estimate(
         self,
-        column,
-        column_name,
-        last_per_qtr,
-        next_qtr_start_idx,
-        requested_quarter,
-        sid,
-        sid_idx,
+        column: 'BoundColumn',
+        column_name: str,
+        last_per_qtr: 'pd.DataFrame',
+        next_qtr_start_idx: int,
+        requested_quarter: float,
+        sid: int,
+        sid_idx: int,
         col_to_split_adjustments,
-        split_adjusted_asof_idx,
+        split_adjusted_asof_idx: 'int | None',
     ):
         raise NotImplementedError("create_overwrite_for_estimate")
 
@@ -111,11 +115,11 @@ class EarningsEstimatesLoader(PipelineLoader):
 
     def get_requested_quarter_data(
         self,
-        zero_qtr_data,
-        zeroth_quarter_idx,
-        stacked_last_per_qtr,
-        num_announcements,
-        dates,
+        zero_qtr_data: 'pd.DataFrame',
+        zeroth_quarter_idx: 'pd.Index',
+        stacked_last_per_qtr: 'pd.DataFrame',
+        num_announcements: int,
+        dates: 'pd.DatetimeIndex',
     ):
         """Selects the requested data for each date.
 
@@ -175,7 +179,7 @@ class EarningsEstimatesLoader(PipelineLoader):
         # dates so that we have a value for each calendar date.
         return requested_qtr_data.unstack(SID_FIELD_NAME).reindex(dates)
 
-    def get_split_adjusted_asof_idx(self, dates):
+    def get_split_adjusted_asof_idx(self, dates: 'pd.DatetimeIndex'):
         """Compute the index in `dates` where the split-adjusted-asof-date
         falls. This is the date up to which, and including which, we will
         need to unapply all adjustments for and then re-apply them as they
@@ -206,15 +210,15 @@ class EarningsEstimatesLoader(PipelineLoader):
 
     def collect_overwrites_for_sid(
         self,
-        group,
-        dates,
-        requested_qtr_data,
-        last_per_qtr,
-        sid_idx,
-        columns,
-        all_adjustments_for_sid,
-        sid,
-    ):
+        group: 'pd.DataFrame',
+        dates: 'pd.DatetimeIndex',
+        requested_qtr_data: 'pd.DataFrame',
+        last_per_qtr: 'pd.DataFrame',
+        sid_idx: int,
+        columns: 'list[BoundColumn]',
+        all_adjustments_for_sid: 'dict[str, dict[int, list[Adjustment]]]',
+        sid: int,
+    ) -> None:
         """Given a sid, collect all overwrites that should be applied for this
         sid at each quarter boundary.
 
@@ -279,15 +283,15 @@ class EarningsEstimatesLoader(PipelineLoader):
 
     def get_adjustments_for_sid(
         self,
-        group,
-        dates,
-        requested_qtr_data,
-        last_per_qtr,
-        sid_to_idx,
-        columns,
-        col_to_all_adjustments,
+        group: 'pd.DataFrame',
+        dates: 'pd.DatetimeIndex',
+        requested_qtr_data: 'pd.DataFrame',
+        last_per_qtr: 'pd.DataFrame',
+        sid_to_idx: 'dict[int, int]',
+        columns: 'list[BoundColumn]',
+        col_to_all_adjustments: 'dict[str, dict[int, list[Adjustment]]]',
         **kwargs,
-    ):
+    ) -> None:
         """
 
         Parameters
@@ -333,8 +337,10 @@ class EarningsEstimatesLoader(PipelineLoader):
         )
 
     def merge_into_adjustments_for_all_sids(
-        self, all_adjustments_for_sid, col_to_all_adjustments
-    ):
+        self,
+        all_adjustments_for_sid: 'dict[str, dict[int, list[Adjustment]]]',
+        col_to_all_adjustments: 'dict[str, dict[int, list[Adjustment]]]',
+    ) -> None:
         """Merge adjustments for a particular sid into a dictionary containing
         adjustments for all sids.
 
@@ -355,12 +361,12 @@ class EarningsEstimatesLoader(PipelineLoader):
 
     def get_adjustments(
         self,
-        zero_qtr_data,
-        requested_qtr_data,
-        last_per_qtr,
-        dates,
-        assets,
-        columns,
+        zero_qtr_data: 'pd.DataFrame',
+        requested_qtr_data: 'pd.DataFrame',
+        last_per_qtr: 'pd.DataFrame',
+        dates: 'pd.DatetimeIndex',
+        assets: 'pd.Index',
+        columns: 'list[BoundColumn]',
         **kwargs,
     ):
         """Creates an AdjustedArray from the given estimates data for the given
@@ -417,15 +423,15 @@ class EarningsEstimatesLoader(PipelineLoader):
 
     def create_overwrites_for_quarter(
         self,
-        col_to_overwrites,
-        next_qtr_start_idx,
-        last_per_qtr,
-        quarters_with_estimates_for_sid,
-        requested_quarter,
-        sid,
-        sid_idx,
-        columns,
-    ):
+        col_to_overwrites: 'dict[str, dict[int, list[Adjustment]]]',
+        next_qtr_start_idx: int,
+        last_per_qtr: 'pd.DataFrame',
+        quarters_with_estimates_for_sid: 'np.ndarray',
+        requested_quarter: float,
+        sid: int,
+        sid_idx: int,
+        columns: 'list[BoundColumn]',
+    ) -> None:
         """Add entries to the dictionary of columns to adjustments for the given
         sid and the given quarter.
 
@@ -484,12 +490,19 @@ class EarningsEstimatesLoader(PipelineLoader):
                     col_to_overwrites, adjs, column_name, next_qtr_start_idx
                 )
 
-    def overwrite_with_null(self, column, next_qtr_start_idx, sid_idx):
+    def overwrite_with_null(self, column: 'BoundColumn', next_qtr_start_idx: int, sid_idx: int):
         return self.scalar_overwrites_dict[column.dtype](
             0, next_qtr_start_idx - 1, sid_idx, sid_idx, column.missing_value
         )
 
-    async def load_adjusted_array(self, domain, columns, dates, sids, mask):
+    async def load_adjusted_array(
+        self,
+        domain: 'Domain',
+        columns: 'list[BoundColumn]',
+        dates: 'pd.DatetimeIndex',
+        sids: 'pd.Index',
+        mask: 'np.ndarray',
+    ):
         # Separate out getting the columns' datasets and the datasets'
         # num_announcements attributes to ensure that we're catching the right
         # AttributeError.
@@ -588,7 +601,11 @@ class EarningsEstimatesLoader(PipelineLoader):
         return out
 
     def get_last_data_per_qtr(
-        self, assets_with_data, columns, dates, data_query_cutoff_times
+        self,
+        assets_with_data: 'pd.Index',
+        columns: 'list[BoundColumn]',
+        dates: 'pd.DatetimeIndex',
+        data_query_cutoff_times: 'pd.DatetimeIndex',
     ):
         """Determine the last piece of information we know for each column on each
         date in the index for each sid and quarter.

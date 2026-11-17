@@ -12,8 +12,8 @@ from ziplime.utils.numpy_utils import (
     int64_dtype,
     uint8_dtype,
 )
+from ziplime.lib.adjustment import Adjustment
 # These class names are all the same because of our bootleg templating system.
-
 
 BOOL_DTYPES = frozenset(
     map(np.dtype, [np.bool_, np.uint8]),
@@ -38,12 +38,12 @@ REPRESENTABLE_DTYPES = BOOL_DTYPES.union(
 )
 
 
-def can_represent_dtype(dtype):
+def can_represent_dtype(dtype: 'np.dtype'):
     """Can we build an AdjustedArray for a baseline of `dtype``?"""
     return dtype in REPRESENTABLE_DTYPES or dtype.kind in STRING_KINDS
 
 
-def is_categorical(dtype):
+def is_categorical(dtype: 'np.dtype'):
     """Do we represent this dtype with LabelArrays rather than ndarrays?"""
     return dtype in OBJECT_DTYPES or dtype.kind in STRING_KINDS
 
@@ -55,7 +55,7 @@ CONCRETE_WINDOW_TYPES = {
 }
 
 
-def _normalize_array(data, missing_value):
+def _normalize_array(data: 'np.ndarray', missing_value):
     """
     Coerce buffer data for an AdjustedArray into a standard scalar
     representation, returning the coerced array and a dict of argument to pass
@@ -138,7 +138,7 @@ class AdjustedArray:
         "__weakref__",
     )
 
-    def __init__(self, data, adjustments, missing_value):
+    def __init__(self, data: 'np.ndarray', adjustments: 'dict[int, list[Adjustment]]', missing_value) -> None:
         self._data, self._view_kwargs = _normalize_array(data, missing_value)
 
         self.adjustments = adjustments
@@ -181,7 +181,7 @@ class AdjustedArray:
             return AdjustedArrayWindow
         return CONCRETE_WINDOW_TYPES[self._data.dtype]
 
-    def traverse(self, window_length, offset=0, perspective_offset=0, copy=True):
+    def traverse(self, window_length: int, offset: int = 0, perspective_offset: int = 0, copy: bool = True):
         """
         Produce an iterator rolling windows rows over our data.
         Each emitted window will have `window_length` rows.
@@ -220,7 +220,7 @@ class AdjustedArray:
         )
 
 
-def ensure_adjusted_array(ndarray_or_adjusted_array, missing_value):
+def ensure_adjusted_array(ndarray_or_adjusted_array: 'np.ndarray | AdjustedArray', missing_value):
     if isinstance(ndarray_or_adjusted_array, AdjustedArray):
         return ndarray_or_adjusted_array
     elif isinstance(ndarray_or_adjusted_array, np.ndarray):
@@ -236,7 +236,7 @@ def ensure_adjusted_array(ndarray_or_adjusted_array, missing_value):
         )
 
 
-def ensure_ndarray(ndarray_or_adjusted_array):
+def ensure_ndarray(ndarray_or_adjusted_array: 'np.ndarray | AdjustedArray'):
     """
     Return the input as a numpy ndarray.
 
@@ -261,7 +261,7 @@ def ensure_ndarray(ndarray_or_adjusted_array):
         )
 
 
-def _check_window_params(data, window_length):
+def _check_window_params(data: 'np.ndarray', window_length: int):
     """
     Check that a window of length `window_length` is well-defined on `data`.
 

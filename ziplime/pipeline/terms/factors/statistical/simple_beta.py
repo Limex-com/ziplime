@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.terms.asset_exists import AssetExists
 from ziplime.pipeline.terms.factors import CustomFactor, Returns
 from ziplime.pipeline.terms.factors.statistical.vectorized_beta import vectorized_beta
@@ -49,8 +52,14 @@ class SimpleBeta(CustomFactor, StandardOutputs):
         )
 
     def compute(
-            self, today, assets, out, all_returns, target_returns, allowed_missing_count
-    ):
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        all_returns: 'np.ndarray',
+        target_returns: 'np.ndarray',
+        allowed_missing_count: int,
+    ) -> None:
         vectorized_beta(
             dependents=all_returns,
             independent=target_returns,
@@ -58,7 +67,7 @@ class SimpleBeta(CustomFactor, StandardOutputs):
             out=out,
         )
 
-    def graph_repr(self):
+    def graph_repr(self) -> str:
         return "{}({!r}, {}, {})".format(
             type(self).__name__,
             str(self.target.symbol),  # coerce from unicode to str in py2.
@@ -71,7 +80,7 @@ class SimpleBeta(CustomFactor, StandardOutputs):
         """Get the target of the beta calculation."""
         return self.inputs[1].asset
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "{}({}, length={}, allowed_missing={})".format(
             type(self).__name__,
             self.target,

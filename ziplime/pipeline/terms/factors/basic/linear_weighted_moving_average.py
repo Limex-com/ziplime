@@ -1,4 +1,6 @@
 from numpy import arange
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.mixins import SingleInputMixin
 from ziplime.pipeline.terms.factors.custom_factor import CustomFactor
@@ -20,7 +22,7 @@ class LinearWeightedMovingAverage(SingleInputMixin, CustomFactor):
     # warning.
     # ctx = ignore_nanwarnings()
 
-    def compute(self, today, assets, out, data):
+    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', data: 'np.ndarray') -> None:
         ndays = data.shape[0]
 
         # Initialize weights array

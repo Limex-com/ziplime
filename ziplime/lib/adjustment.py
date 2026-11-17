@@ -77,7 +77,7 @@ class Adjustment:
                  first_row: int,
                  last_row: int,
                  first_col: int,
-                 last_col: int):
+                 last_col: int) -> None:
         if not (0 <= first_row <= last_row):
             raise ValueError(
                 'first_row must be in the range [0, last_row], got:'
@@ -140,23 +140,23 @@ ADJUSTMENT_KIND_NAMES = {
 }
 
 
-def _is_float(value):
+def _is_float(value) -> bool:
     return isinstance(value, (float, float64))
 
 
-def _is_datetime(value):
+def _is_datetime(value) -> bool:
     return isinstance(value, (datetime64, Timestamp))
 
 
-def _is_int(value):
+def _is_int(value) -> bool:
     return isinstance(value, (int, int64))
 
 
-def _is_obj(value):
+def _is_obj(value) -> bool:
     return isinstance(value, (bytes, unicode, type(None)))
 
 
-def _is_bool(value):
+def _is_bool(value) -> bool:
     return isinstance(value, (bool, bool_, uint8))
 
 
@@ -346,7 +346,7 @@ class Float64Adjustment(Adjustment):
                  last_row: int,
                  first_col: int,
                  last_col: int,
-                 value: float):
+                 value: float) -> None:
         super(Float64Adjustment, self).__init__(
             first_row=first_row,
             last_row=last_row,
@@ -399,7 +399,7 @@ class Float64Multiply(Float64Adjustment):
            [  6.,  28.,  32.]])
     """
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         value = self.value
 
         # last_col + 1 because last_col should also be affected.
@@ -437,7 +437,7 @@ class Float64Overwrite(Float64Adjustment):
            [ 6.,  0.,  0.]])
     """
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         value = self.value
 
         # last_col + 1 because last_col should also be affected.
@@ -505,7 +505,7 @@ class Float641DArrayOverwrite(ArrayAdjustment):
                  last_row: int,
                  first_col: int,
                  last_col: int,
-                 values: np.ndarray):
+                 values: np.ndarray) -> None:
         super(Float641DArrayOverwrite, self).__init__(
             first_row=first_row,
             last_row=last_row,
@@ -519,7 +519,7 @@ class Float641DArrayOverwrite(ArrayAdjustment):
             )
         self.values = values
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         values = self.values
         for col in range(self.first_col, self.last_col + 1):
             for i, row in enumerate(range(self.first_row, self.last_row + 1)):
@@ -566,7 +566,7 @@ class Datetime641DArrayOverwrite(ArrayAdjustment):
                  last_row: int,
                  first_col: int,
                  last_col: int,
-                 values):
+                 values: 'np.ndarray') -> None:
         super(Datetime641DArrayOverwrite, self).__init__(
             first_row=first_row,
             last_row=last_row,
@@ -580,7 +580,7 @@ class Datetime641DArrayOverwrite(ArrayAdjustment):
                              )
         self.values = asarray([datetime_to_int(value) for value in values])
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         values = self.values
         for col in range(self.first_col, self.last_col + 1):
             for i, row in enumerate(range(self.first_row, self.last_row + 1)):
@@ -602,7 +602,7 @@ class Object1DArrayOverwrite(ArrayAdjustment):
                  last_row: int,
                  first_col: int,
                  last_col: int,
-                 values):
+                 values: 'np.ndarray') -> None:
         super(Object1DArrayOverwrite, self).__init__(
             first_row=first_row,
             last_row=last_row,
@@ -616,7 +616,7 @@ class Object1DArrayOverwrite(ArrayAdjustment):
             )
         self.values = values[:, None]
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         # data is an object here because this is intended to be used with a
         # `ziplime.lib.LabelArray`.
 
@@ -632,7 +632,7 @@ class Boolean1DArrayOverwrite(ArrayAdjustment):
                  last_row: int,
                  first_col: int,
                  last_col: int,
-                 values):
+                 values: 'np.ndarray') -> None:
         if values.dtype.kind != 'b':
             raise TypeError('dtype is not bool, got: %r' % values.dtype)
 
@@ -650,7 +650,7 @@ class Boolean1DArrayOverwrite(ArrayAdjustment):
             )
         self.values = values.view('uint8')
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         values = self.values
         for col in range(self.first_col, self.last_col + 1):
             for i, row in enumerate(range(self.first_row, self.last_row + 1)):
@@ -707,7 +707,7 @@ class Float64Add(Float64Adjustment):
            [ 6.,  8.,  9.]])
     """
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         value = self.value
 
         # last_col + 1 because last_col should also be affected.
@@ -730,7 +730,7 @@ class _Int64Adjustment(Adjustment):
                  last_row: int,
                  first_col: int,
                  last_col: int,
-                 value: int):
+                 value: int) -> None:
         super(_Int64Adjustment, self).__init__(
             first_row=first_row,
             last_row=last_row,
@@ -781,7 +781,7 @@ class Int64Overwrite(_Int64Adjustment):
            [ 6,  0,  0]])
     """
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         value = self.value
 
         # last_col + 1 because last_col should also be affected.
@@ -791,7 +791,7 @@ class Int64Overwrite(_Int64Adjustment):
                 data[row, col] = value
 
 
-def datetime_to_int(datetimelike):
+def datetime_to_int(datetimelike: 'datetime64 | Timestamp'):
     """
     Coerce a datetime-like object to the int format used by AdjustedArrays of
     Datetime64 type.
@@ -828,7 +828,7 @@ class Datetime64Adjustment(_Int64Adjustment):
                  last_row: int,
                  first_col: int,
                  last_col: int,
-                 value):
+                 value: 'datetime64 | Timestamp') -> None:
         super(Datetime64Adjustment, self).__init__(
             first_row=first_row,
             last_row=last_row,
@@ -891,7 +891,7 @@ class Datetime64Overwrite(Datetime64Adjustment):
            [False,  True,  True]], dtype=bool)
     """
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         value = self.value
 
         # last_col + 1 because last_col should also be affected.
@@ -914,7 +914,7 @@ class _ObjectAdjustment(Adjustment):
                  last_row: int,
                  first_col: int,
                  last_col: int,
-                 value):
+                 value: 'str | bytes | None') -> None:
         super(_ObjectAdjustment, self).__init__(
             first_row=first_row,
             last_row=last_row,
@@ -939,7 +939,7 @@ class _ObjectAdjustment(Adjustment):
 
 class ObjectOverwrite(_ObjectAdjustment):
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         # data is an object here because this is intended to be used with a
         # `ziplime.lib.LabelArray`.
 
@@ -971,7 +971,7 @@ class BooleanAdjustment(Adjustment):
                  last_row: int,
                  first_col: int,
                  last_col: int,
-                 value: int):  # bint -> boolean int
+                 value: int) -> None:  # bint -> boolean int
 
         super(BooleanAdjustment, self).__init__(
             first_row=first_row,
@@ -1011,7 +1011,7 @@ class BooleanOverwrite(BooleanAdjustment):
     This operates on uint8 data.
     """
 
-    def mutate(self, data):
+    def mutate(self, data: 'np.ndarray') -> None:
         value = self.value
 
         # last_col + 1 because last_col should also be affected.

@@ -50,7 +50,7 @@ def get_asset_service(db_path: str = str(Path(Path.home(), ".ziplime", "assets.s
     return asset_service
 
 
-async def ingest_assets(asset_service: AssetService, asset_data_source: AssetDataSource):
+async def ingest_assets(asset_service: AssetService, asset_data_source: AssetDataSource) -> None:
     """
     Ingests and saves assets into the given asset service using data from the specified
     asset data source.
@@ -154,7 +154,7 @@ async def ingest_assets(asset_service: AssetService, asset_data_source: AssetDat
 #     await asset_service.save_equities(equities)
 
 async def ingest_symbol_universe(asset_service: AssetService, asset_data_source: AssetDataSource,
-                                 symbol_universe_name: str):
+                                 symbol_universe_name: str) -> None:
     """
     Ingests a symbol universe by retrieving the constituents of a specified index and persisting it.
 
@@ -267,7 +267,7 @@ async def ingest_custom_data(
         merge: bool = False,
         merge_columns: Sequence[str] = ("sid", "date"),
         bundle_storage_path: str = str(Path(Path.home(), ".ziplime", "data")),
-):
+) -> None:
     """
     Ingests a custom data bundle into the specified storage.
 

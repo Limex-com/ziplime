@@ -31,7 +31,7 @@ class MonetaryValuationService:
         Bond monetary-value conventions shared with execution accounting.
     """
 
-    def __init__(self, conversion: CurrencyConversionService, bond_book: BondBook | None = None):
+    def __init__(self, conversion: CurrencyConversionService, bond_book: BondBook | None = None) -> None:
         """Bind FX conversion and the optional shared bond schedule book."""
         self.conversion = conversion
         self.bond_book = bond_book if bond_book is not None else BondBook()

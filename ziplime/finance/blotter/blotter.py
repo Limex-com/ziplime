@@ -1,13 +1,16 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.finance.cancel_policy import NeverCancel
 
 from ziplime.finance.domain.order import Order
+from ziplime.finance.cancel_policy import CancelPolicy
+from ziplime.trading.enums.simulation_event import SimulationEvent
 
 
 class Blotter(ABC):
-    def __init__(self, cancel_policy=None):
+    def __init__(self, cancel_policy: 'CancelPolicy | None' = None) -> None:
         self.cancel_policy = cancel_policy if cancel_policy else NeverCancel()
 
     @abstractmethod
@@ -61,7 +64,7 @@ class Blotter(ABC):
         return [self.order(*order_args) for order_args in order_arg_lists]
 
     @abstractmethod
-    def execute_cancel_policy(self, event):
+    def execute_cancel_policy(self, event: 'SimulationEvent'):
         raise NotImplementedError("execute_cancel_policy")
 
     @abstractmethod
@@ -82,7 +85,7 @@ class Blotter(ABC):
         raise NotImplementedError("process_splits")
 
     @abstractmethod
-    def prune_orders(self, closed_orders) -> None:
+    def prune_orders(self, closed_orders: 'Iterable[Order]') -> None:
         """
         Removes all given orders from the blotter's open_orders list.
 

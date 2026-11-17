@@ -13,7 +13,7 @@ class SimulationClock(TradingClock):
                  start_date: datetime.datetime,
                  end_date: datetime.datetime,
                  trading_calendar: ExchangeCalendar,
-                 emission_rate: datetime.timedelta):
+                 emission_rate: datetime.timedelta) -> None:
         super().__init__(trading_calendar=trading_calendar, emission_rate=emission_rate)
         start_date = normalize_datetime(start_date, trading_calendar.tz)
         end_date = normalize_datetime(end_date, trading_calendar.tz)

@@ -21,7 +21,7 @@ class Returns:
     #     ] = ledger.portfolio.returns
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                   exchanges: dict[str, Exchange]):
+                   exchanges: dict[str, Exchange]) -> None:
         packet["minute_perf"]["returns"] = ledger.todays_returns
         packet["cumulative_perf"]["returns"] = ledger.portfolio.returns
         packet["cumulative_risk_metrics"][
@@ -29,7 +29,7 @@ class Returns:
         ] = ledger.portfolio.returns
 
     def end_of_session(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                       exchanges: dict[str, Exchange]):
+                       exchanges: dict[str, Exchange]) -> None:
         packet["daily_perf"]["returns"] = ledger.todays_returns
         packet["cumulative_perf"]["returns"] = ledger.portfolio.returns
         packet["cumulative_risk_metrics"][

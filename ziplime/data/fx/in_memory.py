@@ -1,6 +1,7 @@
 """Interface and definitions for foreign exchange rate readers."""
 
 import numpy as np
+import pandas as pd
 
 from ziplime.data.fx.base import FXRateReader, DEFAULT_FX_RATE
 from ziplime.data.fx.utils import check_dts
@@ -20,11 +21,11 @@ class InMemoryFXRateReader(FXRateReader):
         Rate to use when ``get_rates`` is called with a rate of 'default'.
     """
 
-    def __init__(self, data, default_rate):
+    def __init__(self, data: 'dict[str, dict[str, pd.DataFrame]]', default_rate: str) -> None:
         self._data = data
         self._default_rate = default_rate
 
-    def get_rates(self, rate, quote, bases, dts):
+    def get_rates(self, rate: str, quote: str, bases: 'np.ndarray', dts: 'pd.DatetimeIndex'):
         """Get rates to convert ``bases`` into ``quote``.
 
         See :class:`ziplime.data.fx.base.FXRateReader` for details.

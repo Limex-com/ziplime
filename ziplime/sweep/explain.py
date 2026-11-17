@@ -7,10 +7,14 @@ and it says those too: a computation on history that is NaN at every bar (a bran
 runs -- ``talib.RSI(p[-30:], timeperiod=30)`` has no value on 30 rows), and a parameter that changes
 nothing (:func:`influence`).
 """
+
 import operator
 import os
+from collections.abc import Iterable
 
 import pandas as pd
+from ziplime.sweep.engine import Hooks
+from ziplime.sweep.windows import Windows
 
 _OPERATORS = {operator.add: "+", operator.sub: "-", operator.mul: "*", operator.truediv: "/",
               operator.floordiv: "//", operator.mod: "%", operator.pow: "**",
@@ -74,7 +78,15 @@ def _describe(key, columns) -> str:
     return f"{prefix}{name}({', '.join(shown)})"
 
 
-def conversion(*, hooks, windows, backend: str, compiled: bool, reasons, columns) -> list[str]:
+def conversion(
+    *,
+    hooks: 'Hooks',
+    windows: 'Windows',
+    backend: str,
+    compiled: bool,
+    reasons: 'Iterable[str] | None',
+    columns: 'list[str]',
+) -> list[str]:
     """How the strategy ran: lines for the sweep's output."""
     lines = ["How the strategy runs in the sweep:"]
     names = [hook.name for hook in hooks.all()]
@@ -110,7 +122,7 @@ def conversion(*, hooks, windows, backend: str, compiled: bool, reasons, columns
     return lines
 
 
-def warnings(windows, columns) -> list[str]:
+def warnings(windows: 'Windows', columns: 'list[str]') -> list[str]:
     """Computations on history that are NaN at every bar."""
     registry, found = windows.lazy, []
     for key, (name, _, _) in registry.records.items():
@@ -144,7 +156,7 @@ def influence(table: pd.DataFrame, parameters: list[str]) -> list[str]:
     return found
 
 
-def _where(location) -> str:
+def _where(location: 'str | None') -> str:
     if not location or location == "the strategy":
         return ""
     filename, _, line = location.rpartition(", line ")

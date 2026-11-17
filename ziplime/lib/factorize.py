@@ -37,37 +37,37 @@ class _NoneFirstSortKey:
     """Box to sort ``None`` to the front of the categories list.
     """
 
-    def __init__(self, value):
+    def __init__(self, value: 'str | bytes | None') -> None:
         self.value = value
 
-    def __eq__(self, other):
+    def __eq__(self, other: '_NoneFirstSortKey'):
         return self.value == other.value
 
-    def __lt__(self, other):
+    def __lt__(self, other: '_NoneFirstSortKey'):
         if self.value is None:
             return True
         if other.value is None:
             return False
         return self.value < other.value
 
-    def __gt__(self, other):
+    def __gt__(self, other: '_NoneFirstSortKey'):
         if self.value is None:
             return False
         if other.value is None:
             return True
         return self.value > other.value
 
-    def __le__(self, other):
+    def __le__(self, other: '_NoneFirstSortKey'):
         return self < other or self == other
 
-    def __ge__(self, other):
+    def __ge__(self, other: '_NoneFirstSortKey'):
         return self > other or self == other
 
 
 def factorize_strings_known_impl(values: np.ndarray,
                                  nvalues: int,
                                  categories: list,
-                                 missing_value,
+                                 missing_value: 'str | bytes | None',
                                  sort: int,
                                  codes: np.ndarray):
     if sort:
@@ -84,7 +84,7 @@ def factorize_strings_known_impl(values: np.ndarray,
 
 def factorize_strings_known_categories(values: np.ndarray,
                                        categories: list,
-                                       missing_value,
+                                       missing_value: 'str | bytes | None',
                                        sort: int):
     """
     Factorize an array whose categories are already known.
@@ -139,7 +139,7 @@ def factorize_strings_known_categories(values: np.ndarray,
 
 
 def factorize_strings_impl(values: np.ndarray,
-                           missing_value,
+                           missing_value: 'str | bytes | None',
                            sort: int,
                            codes: np.ndarray):
     categories = [missing_value]
@@ -190,7 +190,7 @@ _int_sizes = [1, 1, 2, 4, 4, 8, 8, 8, 8]
 
 
 def factorize_strings(values: np.ndarray,
-                      missing_value,
+                      missing_value: 'str | bytes | None',
                       sort: int):
     """
     Factorize an array of (possibly duplicated) labels into an array of indices

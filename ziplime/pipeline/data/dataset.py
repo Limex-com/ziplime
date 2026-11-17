@@ -1,5 +1,5 @@
-from collections import namedtuple
 from ziplime.pipeline.data.bound_column_descr import BoundColumnDescr
+from ziplime.pipeline.data.currency_conversion import CurrencyConversion  # noqa: F401 - public compatibility export
 from ziplime.pipeline.data.dataset_meta import DataSetMeta
 
 from ziplime.pipeline.domain import GENERIC
@@ -88,7 +88,7 @@ class DataSet(object, metaclass=DataSetMeta):
     ndim = 2
 
     @classmethod
-    def get_column(cls, name):
+    def get_column(cls, name: str):
         """Look up a column by name.
 
         Parameters
@@ -134,8 +134,3 @@ class DataSet(object, metaclass=DataSetMeta):
 # base DataSet class, and we also don't want to accidentally use a shared
 # version of this attribute if we fail to set this in a subclass somewhere.
 del DataSet._domain_specializations
-
-CurrencyConversion = namedtuple(
-    "CurrencyConversion",
-    ["currency", "field"],
-)

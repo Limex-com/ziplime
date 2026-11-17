@@ -80,8 +80,8 @@ def rankdata_2d_ordinal(array: np.ndarray):
 
 
 def grouped_masked_is_maximal(data: np.ndarray,  # 2 dim
-                              groupby,
-                              mask):
+                              groupby: 'np.ndarray',
+                              mask: 'np.ndarray'):
     """Build a mask of the top value for each row in ``data``, grouped by
     ``groupby`` and masked by ``mask``.
     Parameters

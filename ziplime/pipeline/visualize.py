@@ -7,11 +7,16 @@ import errno
 from functools import partial
 from io import BytesIO
 from subprocess import Popen, PIPE
+from collections.abc import Iterable
+from collections.abc import Mapping
+from typing import BinaryIO
 
 from networkx import topological_sort
+import networkx as nx
 
 from ziplime.pipeline.data import BoundColumn
 from ziplime.pipeline import Filter, Factor, Classifier, Term
+from ziplime.pipeline.graph import TermGraph
 from ziplime.pipeline.terms.asset_exists import AssetExists
 
 
@@ -19,7 +24,7 @@ class NoIPython(Exception):
     pass
 
 
-def delimit(delimiters, content):
+def delimit(delimiters: str, content: str) -> str:
     """
     Surround `content` with the first and last characters of `delimiters`.
 
@@ -37,47 +42,47 @@ quote = partial(delimit, '""')
 bracket = partial(delimit, "[]")
 
 
-def begin_graph(f, name, **attrs):
+def begin_graph(f: 'BinaryIO', name: str, **attrs: str) -> None:
     writeln(f, "strict digraph %s {" % name)
     writeln(f, "graph {}".format(format_attrs(attrs)))
 
 
-def begin_cluster(f, name, **attrs):
+def begin_cluster(f: 'BinaryIO', name: str, **attrs: str) -> None:
     attrs.setdefault("label", quote(name))
     writeln(f, "subgraph cluster_%s {" % name)
     writeln(f, "graph {}".format(format_attrs(attrs)))
 
 
-def end_graph(f):
+def end_graph(f: 'BinaryIO') -> None:
     writeln(f, "}")
 
 
 @contextmanager
-def graph(f, name, **attrs):
+def graph(f: 'BinaryIO', name: str, **attrs: str):
     begin_graph(f, name, **attrs)
     yield
     end_graph(f)
 
 
 @contextmanager
-def cluster(f, name, **attrs):
+def cluster(f: 'BinaryIO', name: str, **attrs: str):
     begin_cluster(f, name, **attrs)
     yield
     end_graph(f)
 
 
-def roots(g):
+def roots(g: 'nx.DiGraph'):
     "Get nodes from graph G with indegree 0"
     return set(n for n, d in g.in_degree().items() if d == 0)
 
 
-def filter_nodes(include_asset_exists, nodes):
+def filter_nodes(include_asset_exists: bool, nodes: 'Iterable[Term]'):
     if include_asset_exists:
         return nodes
     return filter(lambda n: n is not AssetExists(), nodes)
 
 
-def _render(g, out, format_, include_asset_exists=False):
+def _render(g: 'TermGraph', out: 'BinaryIO', format_: str, include_asset_exists: bool = False) -> None:
     """
     Draw `g` as a graph to `out`, in format `format`.
 
@@ -144,7 +149,7 @@ def _render(g, out, format_, include_asset_exists=False):
     out.write(proc_stdout)
 
 
-def display_graph(g, format="svg", include_asset_exists=False):
+def display_graph(g: 'TermGraph', format: str = "svg", include_asset_exists: bool = False):
     """
     Display a TermGraph interactively from within IPython.
     """
@@ -163,11 +168,11 @@ def display_graph(g, format="svg", include_asset_exists=False):
     return display_cls(data=out.getvalue())
 
 
-def writeln(f, s):
+def writeln(f: 'BinaryIO', s: str) -> None:
     f.write((s + "\n").encode("utf-8"))
 
 
-def fmt(obj):
+def fmt(obj: 'Term | str'):
     if isinstance(obj, Term):
         r = obj.graph_repr()
     else:
@@ -175,19 +180,19 @@ def fmt(obj):
     return '"%s"' % r
 
 
-def add_term_node(f, term):
+def add_term_node(f: 'BinaryIO', term: 'Term') -> None:
     declare_node(f, id(term), attrs_for_node(term))
 
 
-def declare_node(f, name, attributes):
+def declare_node(f: 'BinaryIO', name: 'str | int', attributes: 'Mapping[str, str]') -> None:
     writeln(f, "{0} {1};".format(name, format_attrs(attributes)))
 
 
-def add_edge(f, source, dest):
+def add_edge(f: 'BinaryIO', source: int, dest: int) -> None:
     writeln(f, "{0} -> {1};".format(source, dest))
 
 
-def attrs_for_node(term, **overrides):
+def attrs_for_node(term: 'Term', **overrides: str):
     attrs = {
         "shape": "box",
         "colorscheme": "pastel19",
@@ -207,7 +212,7 @@ def attrs_for_node(term, **overrides):
     return attrs
 
 
-def format_attrs(attrs):
+def format_attrs(attrs: 'Mapping[str, str]'):
     """
     Format key, value pairs from attrs into graphviz attrs format
 

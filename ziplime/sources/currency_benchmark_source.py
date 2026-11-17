@@ -1,4 +1,5 @@
 import datetime
+from collections.abc import Iterable
 
 import polars as pl
 
@@ -54,7 +55,7 @@ class CurrencyBenchmarkSource(BenchmarkSource):
     def __init__(
             self, source: BenchmarkSource, reporting: CurrencyReporting,
             currency: str, initial_dt: datetime.datetime,
-    ):
+    ) -> None:
         """Bind the native benchmark and validate its currency/initial FX rate."""
         super().__init__(
             asset_service=source.asset_service, trading_calendar=source.exchange.trading_calendar,
@@ -83,7 +84,7 @@ class CurrencyBenchmarkSource(BenchmarkSource):
         )
         self._initial_rate = reporting.conversion.rate(base=self.base_currency, quote=currency, dt=initial_dt)
 
-    def daily_returns_by_session(self, sessions) -> pl.DataFrame:
+    def daily_returns_by_session(self, sessions: 'Iterable[datetime.date]') -> pl.DataFrame:
         """Return translated daily returns in the requested session order.
 
         Parameters

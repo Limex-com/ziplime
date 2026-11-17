@@ -1,3 +1,7 @@
+from collections.abc import Callable
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.terms.term import Term
 from ziplime.pipeline.mixins import SingleInputMixin
 from ziplime.pipeline.terms.filters.filter import Filter
@@ -20,7 +24,7 @@ class ArrayPredicate(SingleInputMixin, Filter):
     params = ("op", "opargs")
     window_length = 0
 
-    def __new__(cls, term: Term, op, opargs: tuple):
+    def __new__(cls, term: Term, op: 'Callable', opargs: tuple):
         hash(opargs)  # fail fast if opargs isn't hashable.
         return super(ArrayPredicate, cls).__new__(
             ArrayPredicate,
@@ -30,12 +34,12 @@ class ArrayPredicate(SingleInputMixin, Filter):
             mask=term.mask,
         )
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         params = self.params
         data = arrays[0]
         return params["op"](data, *params["opargs"]) & mask
 
-    def graph_repr(self):
+    def graph_repr(self) -> str:
         # Graphviz interprets `\l` as "divide label into lines, left-justified"
         return "{}:\\l  op: {}.{}()".format(
             type(self).__name__,

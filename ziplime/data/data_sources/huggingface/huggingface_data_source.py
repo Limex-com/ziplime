@@ -35,6 +35,7 @@ parts -- and partitioned by ``knowledge_year``. Passing the simulation's own win
 partitions be skipped without being downloaded, so a 2012 backtest never fetches 2015. Without a
 window everything is fetched, which is correct and slow.
 """
+
 import datetime
 import enum
 import re
@@ -58,6 +59,7 @@ from ziplime.data.data_sources.huggingface.manifest import (
 from ziplime.data.services.data_source import DataSource
 from ziplime.utils.date_utils import normalize_datetime
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.services.asset_service import AssetService
 
 _logger = structlog.get_logger(__name__)
 
@@ -180,7 +182,7 @@ class HuggingFaceDataSource(DataSource):
 
     def __init__(self, name: str, revision: hub.RepoRevision, manifest: DatasetManifest,
                  config: str, repo_files: tuple[str, ...], knowledge_column: str,
-                 entity_column: str, event_column: str | None, asset_service,
+                 entity_column: str, event_column: str | None, asset_service: 'AssetService',
                  start_date: datetime.date,
                  end_date: datetime.date, trading_calendar: ExchangeCalendar,
                  fields: frozenset[str] | None = None,
@@ -218,7 +220,7 @@ class HuggingFaceDataSource(DataSource):
 
     @classmethod
     def from_frame(cls, frame: pl.DataFrame, name: str, knowledge_column: str,
-                   entity_column: str, asset_service, start_date: datetime.date,
+                   entity_column: str, asset_service: 'AssetService', start_date: datetime.date,
                    end_date: datetime.date, trading_calendar: ExchangeCalendar,
                    event_column: str | None = None,
                    fields: list[str] | frozenset[str] | None = None,
@@ -257,7 +259,7 @@ class HuggingFaceDataSource(DataSource):
     @classmethod
     async def mount(cls, address: str, trading_calendar: ExchangeCalendar,
                     config: str | None = None, revision: str | None = None,
-                    asset_service=None, start_date: datetime.date | None = None,
+                    asset_service: 'AssetService | None' = None, start_date: datetime.date | None = None,
                     end_date: datetime.date | None = None,
                     fields: list[str] | frozenset[str] | None = None,
                     name: str | None = None,
@@ -501,8 +503,14 @@ class HuggingFaceDataSource(DataSource):
             fields=fields, since=since, end_date=end_date, frequency=frequency, assets=assets,
             include_end_date=include_end_date)
 
-    async def get_spot_value(self, assets: frozenset[ExchangeAsset], fields: frozenset[str] | None,
-                             dt: datetime.datetime, frequency=None, **kwargs) -> pl.DataFrame:
+    async def get_spot_value(
+        self,
+        assets: frozenset[ExchangeAsset],
+        fields: frozenset[str] | None,
+        dt: datetime.datetime,
+        frequency: 'datetime.timedelta | Period | None' = None,
+        **kwargs,
+    ) -> pl.DataFrame:
         """The current state per instrument, resolved the way this source's data requires.
 
         This is what ``data.current`` calls. The base class takes the newest row, which is right

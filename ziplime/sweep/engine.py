@@ -18,18 +18,29 @@ fill with the order's own minimum. Like the blotter, the sweep keeps every order
 ORDER_SLOTS open orders per instrument, walked oldest first against the bar's volume allowance; a
 combination that needs more is flagged ``unsupported`` instead of silently diverging.
 """
+
 import dataclasses
 import os
+from collections.abc import Sequence
+from types import ModuleType
 
 import numpy as np
 import pandas as pd
 
 from ziplime.sweep import api
 from ziplime.sweep.backends import Backend
-from ziplime.sweep.convert import Converted, NotConvertible, is_array
-from ziplime.sweep.market import WINDOW_OPS, Market, daily_window_values, window_values
+from ziplime.sweep.convert import Converted
+from ziplime.sweep.array_utils import is_array
+from ziplime.sweep.costs import Costs
+from ziplime.sweep.errors import NotConvertible, Rediscover
+from ziplime.sweep.market import Market
+from ziplime.sweep.windows import Windows
 from ziplime.sweep.params import SweepError
 from ziplime.vectorized.kernel.models import ExecutionTiming, VectorFill, VectorSimulationResult
+from ziplime.config.base_algorithm_config import BaseAlgorithmConfig
+from ziplime.finance.commission.commission_model import CommissionModel
+from ziplime.finance.slippage.slippage_model import SlippageModel
+from ziplime.sweep.params import SweepParams
 
 #: How many bars MLX may queue before the host waits for them.
 EVALUATE_EVERY = 32
@@ -47,77 +58,15 @@ class RunPlain(Exception):
     changed during the run): the batch is run again without compiling."""
 
 
-class Rediscover(Exception):
-    """A history window was asked for that the run had not prepared."""
-
-
 # -- costs ----------------------------------------------------------------------------------------
 
-@dataclasses.dataclass
-class Costs:
-    """Commission and slippage per instrument, as the engine's models compute them."""
-
-    #: Per-unit models (PerShare, PerContract): cost per unit, minimum per order, exchange fee
-    per_unit: np.ndarray
-    min_trade: np.ndarray
-    initial: np.ndarray
-    unit_model: np.ndarray
-    per_dollar: np.ndarray
-    per_trade: np.ndarray
-    #: FixedBasisPointsSlippage: share of price and of volume; FixedSlippage: spread
-    percentage: np.ndarray
-    spread: np.ndarray
-    volume_limit: np.ndarray
-    #: 0 none, 1 fixed basis points, 2 fixed spread
-    slippage_kind: np.ndarray
-
-    def on(self, backend: Backend) -> "Costs":
-        return dataclasses.replace(self, **{
-            field.name: backend.array(getattr(self, field.name)[None, :])
-            for field in dataclasses.fields(self)})
-
-    @property
-    def order_state(self) -> bool:
-        """Whether a fill's commission depends on earlier fills of its order."""
-        return bool(np.any(np.asarray(self.min_trade) > 0) or np.any(np.asarray(self.initial) > 0)
-                    or np.any(np.asarray(self.per_trade) > 0))
-
-    host = None
-
-    @property
-    def capped_limit(self):
-        """The volume share where a model caps by volume, 0 elsewhere (no inf × 0)."""
-        return self.volume_limit * (self.slippage_kind == 1)
-
-    def require_percent_sizing(self):
-        kind = (self.host or self).slippage_kind
-        if np.any(np.asarray(kind) == 2):
-            raise SweepError("order_percent / order_target_percent with fixed_spread slippage fail "
-                             "in the engine (FixedSlippage has no order_target_percentage_maximum_"
-                             "quantity); use fixed_bps or none.")
-
-    def projected(self, xp, quantity, value):
-        """commission.calculate_for_asset: what sizing expects to pay."""
-        unit = xp.maximum(self.min_trade, abs(quantity * self.per_unit) + self.initial)
-        return xp.where(self.unit_model, unit, 0.0) + value * self.per_dollar + self.per_trade
-
-    def maximum_quantity(self, xp, cash, now):
-        """slippage.order_target_percentage_maximum_quantity: shares the cash buys at the close,
-        priced as a buy, capped by what the bar's volume still allows."""
-        close = now["spot_close"]
-        price = close * (1 + self.percentage)
-        capacity = xp.maximum(0.0, xp.floor(self.capped_limit * now["volume"]) - now["filled"])
-        bps = xp.minimum(abs(cash / price), capacity)
-        return xp.where(self.slippage_kind == 1, bps, abs(cash / close))
-
-
-def resolve_costs(params, market: Market) -> Costs:
+def resolve_costs(params: 'SweepParams', market: Market) -> Costs:
     columns = len(market.listings)
 
-    def per(field, equity, future):
+    def per(field: str, equity, future):
         return np.where(market.is_future, future, equity).astype(float)
 
-    def commission_parts(model):
+    def commission_parts(model: 'CommissionModel'):
         kind = model.type
         return {
             "per_unit": model.cost if kind in ("per_share", "per_contract") else 0.0,
@@ -128,7 +77,7 @@ def resolve_costs(params, market: Market) -> Costs:
             "per_trade": model.cost if kind == "per_trade" else 0.0,
         }
 
-    def slippage_parts(model):
+    def slippage_parts(model: 'SlippageModel'):
         return {
             "percentage": model.basis_points / 10_000 if model.type == "fixed_bps" else 0.0,
             "spread": model.spread if model.type == "fixed_spread" else 0.0,
@@ -140,73 +89,6 @@ def resolve_costs(params, market: Market) -> Costs:
     future = {**commission_parts(params.future_commission), **slippage_parts(params.future_slippage)}
     return Costs(**{name: per(name, np.full(columns, equity[name]), np.full(columns, future[name]))
                     for name in equity})
-
-
-# -- history windows --------------------------------------------------------------------------------
-
-class Windows:
-    """data.history statistics: computed on the host per distinct bar_count, read per bar."""
-
-    def __init__(self, market: Market, backend: Backend):
-        self.market, self.backend = market, backend
-        #: (field, op, before) -> sorted distinct lengths
-        self.lengths = {}
-        self.stacks = {}
-        self.discovering = False
-        self.now = {}
-        from ziplime.sweep.lazy import LazyRegistry
-        #: The strategy's own computations on history rows, replayed on the host (see lazy.py)
-        self.lazy = LazyRegistry(self)
-        #: What happened to a compiled run, for the report (explain.py)
-        self.notes = set()
-
-    def request(self, field, op, before, lengths, daily=False):
-        key = (field, op, before, daily)
-        known = set(self.lengths.get(key, ()))
-        if not set(lengths) <= known:
-            self.lengths[key] = sorted(known | set(lengths))
-            return True
-        return False
-
-    def prepare(self):
-        """Host arrays (bars, lengths, instruments) on the device."""
-        cache = self.__dict__.setdefault("_host", {})
-        for key, lengths in self.lengths.items():
-            field, op, before, daily = key
-            compute = daily_window_values if daily else window_values
-            for length in lengths:
-                if (key, length) not in cache:
-                    cache[(key, length)] = compute(self.market, field, op, length, before)
-            self.stacks[key] = self.backend.array(
-                np.stack([cache[(key, length)] for length in lengths], axis=1))
-        self.lazy.prepare()
-
-    def at(self, bar: int) -> dict:
-        return {key: stack[bar] for key, stack in self.stacks.items()}
-
-    def value(self, field, op, length, before, daily=False):
-        if op not in WINDOW_OPS:
-            raise NotConvertible(f"history(...).{op}() is not supported in a sweep.")
-        key, xp = (field, op, before, daily), self.backend.xp
-        if self.discovering:
-            values = (np.unique(self.backend.numpy(length)) if is_array(length)
-                      else [length])
-            self.request(field, op, before, [int(v) for v in values], daily)
-            return xp.zeros((1, len(self.market.columns))) + np.nan
-        lengths = self.lengths.get(key)
-        if lengths is None:
-            self.request(field, op, before, [length] if not is_array(length) else [], daily)
-            raise Rediscover()
-        rows = self.now[key]  # (lengths, instruments)
-        if not is_array(length):
-            if length not in lengths:
-                self.request(field, op, before, [length], daily)
-                raise Rediscover()
-            k = lengths.index(int(length))
-            return rows[k:k + 1]
-        known = self.backend.array(np.array(lengths, dtype=float))
-        index = xp.sum(length > known[None, :], axis=1).astype(xp.int32)  # (combinations,)
-        return xp.take(rows, index, axis=0)
 
 
 # -- the strategy's hooks ---------------------------------------------------------------------------
@@ -244,12 +126,27 @@ class Result:
     held_log: list = None
 
 
-def run(*, market: Market, hooks: Hooks, configs: list, states: list, signals: dict,
-        signal_index, timing: str, initial_cash: float, costs: Costs, backend: str,
-        cancel_at_session_end=False, compile: bool | None = None,
-        record: bool = False, windows: Windows | None = None,
-        periods_per_year: int = 252, schedule: list = (), order_slots: int = SLOT_STEPS[0],
-        rerun: bool = True) -> Result:
+def run(
+    *,
+    market: Market,
+    hooks: Hooks,
+    configs: list,
+    states: list,
+    signals: dict,
+    signal_index: 'np.ndarray | dict[str, np.ndarray] | None',
+    timing: str,
+    initial_cash: float,
+    costs: Costs,
+    backend: str,
+    cancel_at_session_end: 'bool | np.ndarray' = False,
+    compile: bool | None = None,
+    record: bool = False,
+    windows: Windows | None = None,
+    periods_per_year: int = 252,
+    schedule: list = (),
+    order_slots: int = SLOT_STEPS[0],
+    rerun: bool = True,
+) -> Result:
     """Every combination of ``configs`` over the market's bars.
 
     ``schedule``: per scheduled function, the bars it runs at -- (bars,) when every combination
@@ -306,14 +203,31 @@ def _merge(result: Result, again: Result, rows: np.ndarray) -> Result:
     return result
 
 
-def _run(*, market, hooks, configs, states, signals, signal_index, timing, initial_cash, costs,
-         backend, cancel_at_session_end, compile, record, windows, periods_per_year, schedule,
-         order_slots) -> Result:
+def _run(
+    *,
+    market: 'Market',
+    hooks: 'Hooks',
+    configs: 'list[BaseAlgorithmConfig]',
+    states,
+    signals: 'dict[str, np.ndarray]',
+    signal_index: 'np.ndarray | dict[str, np.ndarray] | None',
+    timing: str,
+    initial_cash: float,
+    costs: 'Costs',
+    backend: str,
+    cancel_at_session_end: 'bool | np.ndarray',
+    compile: 'bool | None',
+    record: bool,
+    windows: 'Windows | None',
+    periods_per_year: int,
+    schedule: 'Sequence[np.ndarray]',
+    order_slots: int,
+) -> Result:
     b = Backend(backend)
     windows = windows or Windows(market, b)
     windows.backend = b
 
-    def simulation(on=None):
+    def simulation(on: 'Backend | None' = None):
         on = on or b
         windows.backend = on
         made = _Simulation(market, hooks, configs, states, signals, signal_index, timing,
@@ -359,8 +273,22 @@ def _run(*, market, hooks, configs, states, signals, signal_index, timing, initi
 
 
 class _Simulation:
-    def __init__(self, market, hooks, configs, states, signals, signal_index, timing, initial_cash,
-                 costs, backend, cancel_at_session_end, record, windows):
+    def __init__(
+        self,
+        market: 'Market',
+        hooks: 'Hooks',
+        configs: 'list[BaseAlgorithmConfig]',
+        states,
+        signals: 'dict[str, np.ndarray]',
+        signal_index: 'np.ndarray | dict[str, np.ndarray] | None',
+        timing: str,
+        initial_cash: float,
+        costs: 'Costs',
+        backend: 'Backend',
+        cancel_at_session_end: 'bool | np.ndarray',
+        record: bool,
+        windows: 'Windows',
+    ) -> None:
         self.m, self.hooks, self.b, self.xp = market, hooks, backend, backend.xp
         self.timing, self.record, self.windows = timing, record, windows
         self.initial_cash, self._states = initial_cash, states
@@ -444,7 +372,7 @@ class _Simulation:
             call.namespace.update(api.STYLES)
         self.log, self.cash_log, self.held_log = [], [], []
 
-    def set_schedule(self, schedule):
+    def set_schedule(self, schedule: 'Sequence[np.ndarray]') -> None:
         self.schedule = [np.asarray(flags[:, 0] if flags.ndim == 2 and (flags == flags[:, :1]).all()
                                     else flags) for flags in schedule]
         self.schedule_device = [self.b.array(flags[:, :, None]) if flags.ndim == 2 else None
@@ -533,7 +461,7 @@ class _Simulation:
         return sorted(set().union(*(hook.in_place for hook in self.hooks.all())))
 
     # -- discovering which history windows the strategy reads
-    def discover(self):
+    def discover(self) -> None:
         self.windows.discovering = True
         self.windows.lazy.begin_discovery()
         try:
@@ -628,11 +556,11 @@ class _Simulation:
                 state["lazy_miss"] = xp.logical_or(state["lazy_miss"], miss)
         return state, value
 
-    def _snapshot(self, state, marks):
+    def _snapshot(self, state, marks) -> None:
         self.context.portfolio.update(self.xp, state["cash"], state["held"], marks,
                                       self.multiplier, self.is_future)
 
-    def _hook(self, hook, now, before, mask=True):
+    def _hook(self, hook: 'Converted', now, before: bool, mask=True) -> None:
         ctx, data = self.context, self.context._data
         data.before = before
         data.now = {"spot": now["spot"], "spot_before": now["spot_before"],
@@ -661,7 +589,7 @@ class _Simulation:
             result = xp.logical_or(result, slot["amount"] != 0)
         return result
 
-    def _clear(self, slot, where):
+    def _clear(self, slot, where) -> None:
         """Empty a slot where ``where`` holds (a filled, cancelled or closed order)."""
         xp = self.xp
         for name, value in slot.items():
@@ -669,7 +597,7 @@ class _Simulation:
             slot[name] = xp.where(where, empty, value) if where is not True else \
                 xp.zeros_like(value) + empty
 
-    def _compact(self, state):
+    def _compact(self, state) -> None:
         """Open orders to the front, in the order they were placed: the blotter walks an
         instrument's orders oldest first."""
         xp, slots = self.xp, state["slots"]
@@ -681,7 +609,7 @@ class _Simulation:
                     slots[k][name] = xp.where(move, there, here)
                     slots[k + 1][name] = xp.where(move, here, there)
 
-    def _queue(self, state):
+    def _queue(self, state) -> None:
         """This bar's orders behind the instrument's open ones, each in its own slot."""
         xp, ctx = self.xp, self.context
         if not ctx.new_orders:
@@ -738,7 +666,7 @@ class _Simulation:
             self._clear(slot, slot["amount"] == 0)
         return total
 
-    def _book(self, state, slot, amount, price, direction, now):
+    def _book(self, state, slot, amount, price, direction, now) -> None:
         """One transaction per instrument: cash, position, commission, cost basis, marks."""
         xp, c = self.xp, self.costs
         fill_price = price + price * c.percentage * direction + c.spread / 2.0 * direction
@@ -785,7 +713,7 @@ class _Simulation:
             self.log.append((self.bar, self.b.numpy(amount)[0], self.b.numpy(fill_price)[0],
                              self.b.numpy(fee)[0], self.b.numpy(before)[0]))
 
-    def _settle(self, state, marks):
+    def _settle(self, state, marks) -> None:
         """Futures variation margin in update_portfolio: held × (mark − reference) × multiplier."""
         xp = self.xp
         held, reference = state["held"], state["reference"]
@@ -794,7 +722,7 @@ class _Simulation:
         state["cash"] = state["cash"] + xp.sum(payout, axis=1, keepdims=True)
         state["reference"] = xp.where(live, marks, reference)
 
-    def _split(self, state, ratio):
+    def _split(self, state, ratio) -> None:
         """position_tracker.handle_splits and Order.handle_split."""
         xp = self.xp
         held = state["held"]
@@ -948,7 +876,7 @@ def _running_max(b: Backend, curves):
     return peak
 
 
-def _round_cents(xp, value):
+def _round_cents(xp: 'ModuleType', value):
     """Python's round(value, 2): the nearer of the two cents around the exact value. numpy's round
     scales by 100 first, and that product can land on the other side of a half cent."""
     low = xp.floor(value * 100.0) / 100.0
@@ -956,7 +884,7 @@ def _round_cents(xp, value):
     return xp.where(value - low < high - value, low, high)
 
 
-def _cost_basis(xp, basis, held, amount, price, traded, fee, multiplier):
+def _cost_basis(xp: 'ModuleType', basis, held, amount, price, traded, fee, multiplier):
     """Position._update_position and adjust_commission_cost_basis."""
     total = held + amount
     same = (xp.sign(held) == xp.sign(amount)) | (held == 0)
@@ -975,10 +903,10 @@ class _Config:
     field is a (combinations × 1) array, a nested model the same object, a list a list of them, a
     string shared by all combinations the string."""
 
-    def __init__(self, fields: dict):
+    def __init__(self, fields: dict) -> None:
         self._fields = fields
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         try:
             return self.__dict__["_fields"][name]
         except KeyError:
@@ -1008,7 +936,7 @@ class _Config:
 class _Varying:
     """A non-numeric config field that differs between combinations: no array can hold it."""
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         raise SweepError("This config field is not numeric and differs between combinations; a "
                          "sweep cannot vary it.")
 

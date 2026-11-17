@@ -1,6 +1,10 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.expression import NumericalExpression
 from ziplime.pipeline.terms.filters.filter import Filter
 from ziplime.utils.numpy_utils import bool_dtype
+from ziplime.pipeline.terms.term import Term
 
 
 class NumExprFilter(NumericalExpression, Filter):
@@ -9,7 +13,7 @@ class NumExprFilter(NumericalExpression, Filter):
     """
 
     @classmethod
-    def create(cls, expr, binds):
+    def create(cls, expr: str, binds: 'tuple[Term, ...]'):
         """
         Helper for creating new NumExprFactors.
 
@@ -19,7 +23,7 @@ class NumExprFilter(NumericalExpression, Filter):
         """
         return cls(expr=expr, binds=binds, dtype=bool_dtype)
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         """
         Compute our result with numexpr, then re-apply `mask`.
         """

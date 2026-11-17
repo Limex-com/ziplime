@@ -35,6 +35,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import structlog
+from numpy.typing import DTypeLike
 
 from ziplime.finance.commission.commission_model import CommissionModel
 from ziplime.finance.slippage.slippage_model import SlippageModel
@@ -99,7 +100,7 @@ def _reject_detail(code: int, intent: str, wanted: float) -> str:
 
 
 def _as_frame(value, index: pd.DatetimeIndex, columns: list[str], name: str,
-              dtype=None) -> pd.DataFrame:
+              dtype: 'DTypeLike | None' = None) -> pd.DataFrame:
     """Broadcast a scalar, a per-instrument Series or a full frame to T x N. Simple cases only.
 
     The spec's §7.4 is explicit that this must not grow into vectorbt's broadcasting engine, so
@@ -145,14 +146,14 @@ def _as_frame(value, index: pd.DatetimeIndex, columns: list[str], name: str,
     return frame.astype(dtype) if dtype is not None else frame
 
 
-def _bool_frame(value, index, columns, name) -> pd.DataFrame:
+def _bool_frame(value, index: 'pd.DatetimeIndex', columns: 'list[str]', name: str) -> pd.DataFrame:
     if value is None:
         return pd.DataFrame(False, index=index, columns=columns)
     frame = _as_frame(value, index, columns, name)
     return frame.fillna(False).astype(bool)
 
 
-def _normalise_prices(prices, name: str) -> pd.DataFrame:
+def _normalise_prices(prices: 'pd.DataFrame | pd.Series', name: str) -> pd.DataFrame:
     if isinstance(prices, pd.Series):
         prices = prices.to_frame(name=prices.name or "asset")
     if not isinstance(prices, pd.DataFrame):
@@ -166,7 +167,7 @@ def _normalise_prices(prices, name: str) -> pd.DataFrame:
     return prices
 
 
-def _execution_prices(timing: ExecutionTiming, prices: pd.DataFrame, opens,
+def _execution_prices(timing: ExecutionTiming, prices: pd.DataFrame, opens: 'pd.DataFrame | pd.Series | None',
                       index: pd.DatetimeIndex, columns: list[str]) -> pd.DataFrame:
     """The frame fills are priced from: the closes, or the opens when the timing says so."""
     opens = _normalise_prices(opens, "opens") if opens is not None else None
@@ -185,7 +186,7 @@ def _execution_prices(timing: ExecutionTiming, prices: pd.DataFrame, opens,
 
 
 def simulate_signals(
-    prices,
+    prices: 'pd.DataFrame | pd.Series',
     entries=None,
     exits=None,
     *,
@@ -195,7 +196,7 @@ def simulate_signals(
     size_type: str = "amount",
     initial_cash: float = 100_000.0,
     execution: ExecutionTiming | None = None,
-    opens=None,
+    opens: 'pd.DataFrame | pd.Series | None' = None,
     volumes=None,
     commission: CommissionModel | None = None,
     slippage: SlippageModel | None = None,

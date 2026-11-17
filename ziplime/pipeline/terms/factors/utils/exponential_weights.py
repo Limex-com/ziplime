@@ -3,7 +3,7 @@ from numpy import arange, full
 from ziplime.utils.numpy_utils import float64_dtype
 
 
-def exponential_weights(length, decay_rate):
+def exponential_weights(length: int, decay_rate: float):
     """
     Build a weight vector for an exponentially-weighted statistic.
 

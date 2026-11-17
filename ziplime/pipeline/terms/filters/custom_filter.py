@@ -55,7 +55,7 @@ class CustomFilter(PositiveWindowLengthMixin, CustomTermMixin, Filter):
     ziplime.pipeline.CustomFactor
     """
 
-    def _validate(self):
+    def _validate(self) -> None:
         try:
             super(CustomFilter, self)._validate()
         except UnsupportedDataType as exc:

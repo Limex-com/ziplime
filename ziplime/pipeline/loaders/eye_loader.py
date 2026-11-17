@@ -1,6 +1,7 @@
 import numpy as np
 
 from ziplime.pipeline.loaders.precomputed_loader import PrecomputedLoader
+from ziplime.pipeline.terms.bound_column import BoundColumn
 
 
 class EyeLoader(PrecomputedLoader):
@@ -17,7 +18,7 @@ class EyeLoader(PrecomputedLoader):
         Same as PrecomputedLoader
     """
 
-    def __init__(self, columns, dates, sids):
+    def __init__(self, columns: 'list[BoundColumn]', dates, sids) -> None:
         shape = (len(dates), len(sids))
         super(EyeLoader, self).__init__(
             {column: np.eye(shape, dtype=column.dtype) for column in columns},

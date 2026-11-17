@@ -13,7 +13,7 @@ from ziplime.trading.currency_results import currency_performance
 
 class TradingAlgorithmExecutor:
 
-    def __init__(self, logger: Logger = structlog.get_logger(__name__)):
+    def __init__(self, logger: Logger = structlog.get_logger(__name__)) -> None:
         self._logger = logger
 
     def _create_daily_stats(self, perfs):
@@ -112,7 +112,7 @@ class TradingAlgorithmExecutor:
         )
         yield status
 
-    def analyze(self, trading_algorithm: TradingAlgorithm, perf):
+    def analyze(self, trading_algorithm: TradingAlgorithm, perf: 'pd.DataFrame') -> None:
         if trading_algorithm._analyze is None:
             return
 

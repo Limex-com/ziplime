@@ -1,4 +1,6 @@
 from numpy import average
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.data import EquityPricing
 from ziplime.pipeline.terms.factors import CustomFactor
@@ -40,7 +42,7 @@ class MovingAverageConvergenceDivergenceSignal(CustomFactor):
     # __new__.
     params = ("fast_period", "slow_period", "signal_period")
 
-    def __new__(cls, fast_period=12, slow_period=26, signal_period=9, *args, **kwargs):
+    def __new__(cls, fast_period: int = 12, slow_period: int = 26, signal_period: int = 9, *args, **kwargs):
         if fast_period < 1:
             raise ValueError("`fast_period` must be >= 1")
         if slow_period < 1:
@@ -67,13 +69,20 @@ class MovingAverageConvergenceDivergenceSignal(CustomFactor):
             **kwargs,
         )
 
-    def _ewma(self, data, length):
+    def _ewma(self, data: 'np.ndarray', length: int):
         decay_rate = 1.0 - (2.0 / (1.0 + length))
         return average(data, axis=1, weights=exponential_weights(length, decay_rate))
 
     def compute(
-            self, today, assets, out, close, fast_period, slow_period, signal_period
-    ):
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        close: 'np.ndarray',
+        fast_period: int,
+        slow_period: int,
+        signal_period: int,
+    ) -> None:
         slow_EWMA = self._ewma(rolling_window(close, slow_period), slow_period)
         fast_EWMA = self._ewma(
             rolling_window(close, fast_period)[-signal_period:], fast_period

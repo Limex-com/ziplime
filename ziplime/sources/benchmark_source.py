@@ -1,4 +1,5 @@
 import datetime
+from collections.abc import Iterable
 
 import pandas as pd
 from exchange_calendars import ExchangeCalendar
@@ -27,7 +28,7 @@ class BenchmarkSource:
             precalculated_series: pl.Series,
             benchmark_asset: ExchangeAsset | None = None,
             benchmark_returns: pl.Series | None = None,
-    ):
+    ) -> None:
         self.asset_service = asset_service
         self.benchmark_asset = benchmark_asset
         self.sessions = sessions
@@ -136,7 +137,7 @@ class BenchmarkSource:
 
         return daily_returns.filter(pl.col("date").is_between(start, end))
 
-    def daily_returns_by_session(self, sessions) -> pl.DataFrame:
+    def daily_returns_by_session(self, sessions: 'Iterable[datetime.date]') -> pl.DataFrame:
         """One benchmark return per **session**, in session order.
 
         :meth:`daily_returns` answers with the days the benchmark has bars for, which is not the
@@ -198,7 +199,7 @@ class BenchmarkSource:
                 .join(returns.select(["date", "pct_change"]), on="date", how="left")
                 .with_columns(pl.col("pct_change").fill_null(0.0).fill_nan(0.0)))
 
-    async def validate_benchmark(self, benchmark_asset: ExchangeAsset):
+    async def validate_benchmark(self, benchmark_asset: ExchangeAsset) -> None:
         # check if this security has a stock dividend.  if so, raise an
         # error suggesting that the user pick a different asset to use
         # as benchmark.

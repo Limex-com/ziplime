@@ -5,6 +5,8 @@ from ziplime.pipeline.terms.filters.filter import Filter
 from numpy import (
     any as np_any,
 )
+import numpy as np
+import pandas as pd
 from ziplime.utils.numpy_utils import is_missing
 
 
@@ -18,7 +20,7 @@ class AllPresent(CustomFilter, SingleInputMixin, StandardOutputs):
 
         return super(AllPresent, self)._validate()
 
-    def compute(self, today, assets, out, value):
+    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', value: 'np.ndarray') -> None:
         if isinstance(value, LabelArray):
             out[:] = ~np_any(value.is_missing(), axis=0)
         else:

@@ -1,5 +1,8 @@
+
 from collections import defaultdict
 
+from ziplime.finance.domain.order import Order
+from ziplime.finance.domain.transaction import Transaction
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.finance.commission import DEFAULT_PER_CONTRACT_COST, calculate_per_unit_commission
 from ziplime.finance.commission.future_commission_model import FutureCommissionModel
@@ -34,10 +37,10 @@ class PerContract(FutureCommissionModel):
 
     def __init__(
         self,
-        cost,
-        exchange_fee,
-        min_trade_cost,
-    ):
+        cost: float | dict[str, float],
+        exchange_fee: float | dict[str, float],
+        min_trade_cost: float | None,
+    ) -> None:
         # If 'cost' or 'exchange fee' are constants, use a dummy mapping to
         # treat them as a dictionary that always returns the same value.
         # NOTE: These dictionary does not handle unknown root symbols, so it
@@ -67,7 +70,7 @@ class PerContract(FutureCommissionModel):
 
         self.min_trade_cost = min_trade_cost or 0
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if isinstance(self._cost_per_contract, DummyMapping):
             # Cost per contract is a constant, so extract it.
             cost_per_contract = self._cost_per_contract["dummy key"]
@@ -90,7 +93,7 @@ class PerContract(FutureCommissionModel):
             )
         )
 
-    def calculate(self, order, transaction):
+    def calculate(self, order: Order, transaction: Transaction) -> float:
         root_symbol = order.asset.asset.root_symbol
         cost_per_contract = self._cost_per_contract[root_symbol]
         exchange_fee = self._exchange_fee[root_symbol]

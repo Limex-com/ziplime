@@ -8,6 +8,8 @@ from ziplime.exchanges.exchange import Exchange
 from ziplime.finance.slippage.slippage_model import SlippageModel, SQRT_252
 from ziplime.finance.utils import fill_price_worse_than_limit_price
 from ziplime.utils.cache import ExpiringCache
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.finance.domain.order import Order
 
 
 class MarketImpactBase(SlippageModel):
@@ -17,12 +19,12 @@ class MarketImpactBase(SlippageModel):
 
     NO_DATA_VOLATILITY_SLIPPAGE_IMPACT = 10.0 / 10000
 
-    def __init__(self):
+    def __init__(self) -> None:
         super(MarketImpactBase, self).__init__()
         self._window_data_cache = ExpiringCache()
 
     @abstractmethod
-    def get_txn_volume(self, volume: float, order):
+    def get_txn_volume(self, volume: float, order: 'Order'):
         """Return the number of shares/contracts we would like to fill in this bar.
 
         Parameters
@@ -40,12 +42,12 @@ class MarketImpactBase(SlippageModel):
     @abstractmethod
     def get_simulated_impact(
             self,
-            order,
-            current_price,
-            current_volume,
-            txn_volume,
-            mean_volume,
-            volatility,
+            order: 'Order',
+            current_price: float,
+            current_volume: float,
+            txn_volume: int,
+            mean_volume: float,
+            volatility: float,
     ):
         """Calculate simulated price impact.
 
@@ -64,7 +66,7 @@ class MarketImpactBase(SlippageModel):
         """
         raise NotImplementedError("get_simulated_impact")
 
-    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order,
+    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: 'Order',
                             price: float = None):
         """Fill an order at a price moved by this model's simulated market impact.
 
@@ -126,7 +128,7 @@ class MarketImpactBase(SlippageModel):
 
         return impacted_price, math.copysign(txn_volume, order.direction)
 
-    async def _get_window_data(self, exchange: Exchange, asset, dt: datetime.datetime,
+    async def _get_window_data(self, exchange: Exchange, asset: 'ExchangeAsset', dt: datetime.datetime,
                                window_length: int):
         """Return the trailing mean volume and annualised close-price volatility of ``asset``.
 

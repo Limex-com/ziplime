@@ -2,6 +2,8 @@ from numpy import broadcast_arrays
 from scipy.stats import (
     spearmanr,
 )
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.terms.factors.statistical.rolling_correlation import RollingCorrelation
 
@@ -43,7 +45,14 @@ class RollingSpearman(RollingCorrelation):
 
     window_safe = True
 
-    def compute(self, today, assets, out, base_data, target_data):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        base_data: 'np.ndarray',
+        target_data: 'np.ndarray',
+    ) -> None:
         # If `target_data` is a Slice or single column of data, broadcast it
         # out to the same shape as `base_data`, then compute column-wise. This
         # is efficient because each column of the broadcasted array only refers

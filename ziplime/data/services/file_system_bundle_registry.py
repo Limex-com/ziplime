@@ -14,7 +14,7 @@ from ziplime.data.services.bundle_storage import BundleStorage
 
 class FileSystemBundleRegistry(BundleRegistry):
 
-    def __init__(self, base_data_path: str):
+    def __init__(self, base_data_path: str) -> None:
         super().__init__()
         self._base_data_path = base_data_path
         self._logger = structlog.get_logger(__name__)
@@ -77,7 +77,7 @@ class FileSystemBundleRegistry(BundleRegistry):
     def get_bundle_registry_path(self) -> Path:
         return Path(self._base_data_path, "bundle_registry")
 
-    async def persist_metadata(self, data_bundle: DataBundle, metadata: dict[str, Any]):
+    async def persist_metadata(self, data_bundle: DataBundle, metadata: dict[str, Any]) -> None:
         bundle_metadata_path = Path(self.get_bundle_registry_path(), f"{data_bundle.name}_{data_bundle.version}.json")
         await aiofiles.os.makedirs(bundle_metadata_path.parent, exist_ok=True)
         async with aiofiles.open(bundle_metadata_path, mode="wb") as f:

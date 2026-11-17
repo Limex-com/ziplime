@@ -26,6 +26,7 @@ from ziplime.trading.trading_algorithm_execution_status import TradingAlgorithmE
 from ziplime.trading.trading_algorithm_executor import TradingAlgorithmExecutor
 import polars as pl
 from typing import Literal
+from collections.abc import Mapping
 
 try:
     from pygments import highlight
@@ -43,6 +44,8 @@ from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmE
 from exchange_calendars import ExchangeCalendar
 from ziplime.exchanges.repositories.exchange_repository import ExchangeRepository
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.pipeline.loaders.pipeline_loader import PipelineLoader
+from ziplime.pipeline.terms.loadable_term import LoadableTerm
 
 logger = structlog.get_logger(__name__)
 
@@ -68,7 +71,7 @@ async def run_algorithm(
         asset_service: AssetService,
         print_algo: bool,
         metrics_set: str,
-        custom_loader,
+        custom_loader: 'Mapping[LoadableTerm, PipelineLoader] | None',
         clock: TradingClock,
         custom_data_sources: list[DataSource],
         exchange_repository: ExchangeRepository,
@@ -137,7 +140,7 @@ async def run_algorithm_iter(
         asset_service: AssetService,
         print_algo: bool,
         metrics_set: str,
-        custom_loader,
+        custom_loader: 'Mapping[LoadableTerm, PipelineLoader] | None',
         clock: TradingClock,
         custom_data_sources: list[DataSource],
         exchange_repository: ExchangeRepository,
@@ -204,7 +207,7 @@ async def _prepare_algorithm(
         asset_service: AssetService,
         print_algo: bool,
         metrics_set: str,
-        custom_loader,
+        custom_loader: 'Mapping[LoadableTerm, PipelineLoader] | None',
         clock: TradingClock,
         custom_data_sources: list[DataSource],
         exchange_repository: ExchangeRepository,
@@ -261,7 +264,7 @@ async def _prepare_algorithm(
                                                      asset_service=asset_service
                                                      )  # TODO: fix pipeline
 
-    def choose_loader(column):
+    def choose_loader(column: 'LoadableTerm'):
         if column in EquityPricing.columns:
             return pipeline_loader
         try:

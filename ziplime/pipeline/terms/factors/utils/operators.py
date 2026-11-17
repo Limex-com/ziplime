@@ -1,7 +1,8 @@
 from operator import attrgetter
 from numbers import Number
 from textwrap import dedent
-
+from collections.abc import Callable
+import numpy as np
 
 from ziplime.pipeline.errors.bad_binary_operator import BadBinaryOperator
 from ziplime.pipeline.terms.term import Term
@@ -24,7 +25,7 @@ from ziplime.utils.numpy_utils import (
 )
 
 
-def coerce_numbers_to_my_dtype(f):
+def coerce_numbers_to_my_dtype(f: 'Callable'):
     """
     A decorator for methods whose signature is f(self, other) that coerces
     ``other`` to ``self.dtype``.
@@ -42,7 +43,7 @@ def coerce_numbers_to_my_dtype(f):
     """
 
     @wraps(f)
-    def method(self, other):
+    def method(self, other: 'Term | Number'):
         if isinstance(other, Number):
             other = coerce_to_dtype(self.dtype, other)
         return f(self, other)
@@ -50,7 +51,7 @@ def coerce_numbers_to_my_dtype(f):
     return method
 
 
-def binop_return_dtype(op, left, right):
+def binop_return_dtype(op: str, left: 'np.dtype', right: 'np.dtype'):
     """
     Compute the expected return dtype for the given binary operator.
 
@@ -116,7 +117,7 @@ factor : ziplime.pipeline.Factor
 """
 
 
-def binary_operator(op):
+def binary_operator(op: str):
     """
     Factory function for making binary operator methods on a Factor subclass.
 
@@ -146,7 +147,7 @@ def binary_operator(op):
     @with_doc(docstring)
     @with_name(method_name_for_op(op))
     @coerce_numbers_to_my_dtype
-    def binary_operator(self, other):
+    def binary_operator(self, other: 'Term | Number'):
         from ziplime.pipeline.terms.factors.num_expr_factor import NumExprFactor
 
         # This can't be hoisted up a scope because the types returned by
@@ -198,7 +199,7 @@ def binary_operator(op):
     return binary_operator
 
 
-def reflected_binary_operator(op):
+def reflected_binary_operator(op: str):
     """
     Factory function for making binary operator methods on a Factor.
 
@@ -210,7 +211,7 @@ def reflected_binary_operator(op):
 
     @with_name(method_name_for_op(op, commute=True))
     @coerce_numbers_to_my_dtype
-    def reflected_binary_operator(self, other):
+    def reflected_binary_operator(self, other: 'Term | Number'):
         from ziplime.pipeline.terms.factors.num_expr_factor import NumExprFactor
 
         if isinstance(self, NumericalExpression):
@@ -238,7 +239,7 @@ def reflected_binary_operator(op):
     return reflected_binary_operator
 
 
-def unary_operator(op):
+def unary_operator(op: str):
     """
     Factory function for making unary operator methods for Factors.
     """
@@ -284,7 +285,7 @@ def unary_operator(op):
     return unary_operator
 
 
-def function_application(func):
+def function_application(func: str):
     """
     Factory function for producing function application methods for Factor
     subclasses.

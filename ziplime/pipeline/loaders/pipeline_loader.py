@@ -1,12 +1,23 @@
 """
 Base class for Pipeline API data loaders.
 """
+import numpy as np
+import pandas as pd
+from ziplime.pipeline.domain import Domain
+from ziplime.pipeline.terms.bound_column import BoundColumn
 
 
 class PipelineLoader:
     """Interface for PipelineLoaders."""
 
-    async def load_adjusted_array(self, domain, columns, dates, sids, mask):
+    async def load_adjusted_array(
+        self,
+        domain: 'Domain',
+        columns: 'list[BoundColumn]',
+        dates: 'pd.DatetimeIndex',
+        sids: 'pd.Index',
+        mask: 'np.ndarray',
+    ):
         """
         Load data for ``columns`` as AdjustedArrays.
 
@@ -34,7 +45,7 @@ class PipelineLoader:
         """
 
     @property
-    def currency_aware(self):
+    def currency_aware(self) -> bool:
         """Whether or not this loader supports currency-conversions.
 
         By default, assume that loaders to not support currency conversions.

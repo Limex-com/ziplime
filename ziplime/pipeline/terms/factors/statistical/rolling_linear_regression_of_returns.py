@@ -3,6 +3,9 @@ from ziplime.pipeline.terms.filters import SingleAsset
 
 from ziplime.pipeline.terms.factors.basic.returns import Returns
 from ziplime.pipeline.terms.factors.statistical.rolling_linear_regression import RollingLinearRegression
+from ziplime.assets.domain.continuous_future import ContinuousFuture
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.pipeline.terms.filters.filter import Filter
 
 
 class RollingLinearRegressionOfReturns(RollingLinearRegression):
@@ -104,7 +107,13 @@ class RollingLinearRegressionOfReturns(RollingLinearRegression):
 
     window_safe = True
 
-    def __new__(cls, target, returns_length, regression_length, mask=None):
+    def __new__(
+        cls,
+        target: 'ExchangeAsset | ContinuousFuture',
+        returns_length: int,
+        regression_length: int,
+        mask: 'Filter | None' = None,
+    ):
         # Use the `SingleAsset` filter here because it protects against
         # inputting a non-existent target asset.
         returns = Returns(

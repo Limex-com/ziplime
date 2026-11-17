@@ -12,6 +12,9 @@ from numpy import (
     full,
     inf,
 )
+from numpy.typing import DTypeLike
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.errors.bad_binary_operator import BadBinaryOperator
 from ziplime.pipeline.terms.term import Term
@@ -96,7 +99,7 @@ NUMEXPR_MATH_FUNCS = {
 NPY_MAXARGS = 32
 
 
-def _ensure_element(tup, elem):
+def _ensure_element(tup: 'tuple[Term, ...]', elem: 'Term'):
     """
     Create a tuple containing all elements of tup, plus elem.
 
@@ -108,7 +111,7 @@ def _ensure_element(tup, elem):
         return tuple(chain(tup, (elem,))), len(tup)
 
 
-def method_name_for_op(op, commute=False):
+def method_name_for_op(op: str, commute: bool = False):
     """
     Get the name of the Python magic method corresponding to `op`.
 
@@ -142,11 +145,11 @@ def method_name_for_op(op, commute=False):
     return ops_to_methods[op]
 
 
-def unary_op_name(op):
+def unary_op_name(op: str):
     return unary_ops_to_methods[op]
 
 
-def is_comparison(op):
+def is_comparison(op: str):
     return op in COMPARISONS
 
 
@@ -168,7 +171,7 @@ class NumericalExpression(ComputableTerm):
 
     window_length = 0
 
-    def __new__(cls, expr, binds, dtype):
+    def __new__(cls, expr: str, binds: 'tuple[Term, ...]', dtype: 'DTypeLike | None'):
         # We always allow filters to be used in windowed computations.
         # Otherwise, an expression is window_safe if all its constituents are
         # window_safe.
@@ -182,18 +185,18 @@ class NumericalExpression(ComputableTerm):
             window_safe=window_safe,
         )
 
-    def _init(self, expr, *args, **kwargs):
+    def _init(self, expr: str, *args, **kwargs):
         self._expr = expr
         return super(NumericalExpression, self)._init(*args, **kwargs)
 
     @classmethod
-    def _static_identity(cls, expr, *args, **kwargs):
+    def _static_identity(cls, expr: str, *args, **kwargs):
         return (
             super(NumericalExpression, cls)._static_identity(*args, **kwargs),
             expr,
         )
 
-    def _validate(self):
+    def _validate(self) -> None:
         """
         Ensure that our expression string has variables of the form x_0, x_1,
         ... x_(N - 1), where N is the length of our inputs.
@@ -220,7 +223,7 @@ class NumericalExpression(ComputableTerm):
             )
         super(NumericalExpression, self)._validate()
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         """
         Compute our stored expression string with numexpr.
         """
@@ -234,7 +237,7 @@ class NumericalExpression(ComputableTerm):
         )
         return out
 
-    def _rebind_variables(self, new_inputs):
+    def _rebind_variables(self, new_inputs: 'tuple[Term, ...]'):
         """
         Return self._expr with all variables rebound to the indices implied by
         new_inputs.
@@ -260,7 +263,7 @@ class NumericalExpression(ComputableTerm):
         # Clear out the temp variables now that we've finished iteration.
         return expr.replace("_temp_", "_")
 
-    def _merge_expressions(self, other):
+    def _merge_expressions(self, other: 'NumericalExpression'):
         """
         Merge the inputs of two NumericalExpressions into a single input tuple,
         rewriting their respective string expressions to make input names
@@ -273,7 +276,7 @@ class NumericalExpression(ComputableTerm):
         new_other_expr = other._rebind_variables(new_inputs)
         return new_self_expr, new_other_expr, new_inputs
 
-    def build_binary_op(self, op, other):
+    def build_binary_op(self, op: str, other: 'Term | Number'):
         """
         Compute new expression strings and a new inputs tuple for combining
         self and other with a binary operator.
@@ -304,14 +307,14 @@ class NumericalExpression(ComputableTerm):
     def bindings(self):
         return {"x_%d" % i: input_ for i, input_ in enumerate(self.inputs)}
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "{typename}(expr='{expr}', bindings={bindings})".format(
             typename=type(self).__name__,
             expr=self._expr,
             bindings=self.bindings,
         )
 
-    def graph_repr(self):
+    def graph_repr(self) -> str:
         """Short repr to use when rendering Pipeline graphs."""
 
         # Replace any floating point numbers in the expression

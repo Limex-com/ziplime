@@ -1,10 +1,14 @@
 from abc import abstractmethod
 from bisect import insort
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from numpy import (
     record,
     ndarray,
 )
+import numpy as np
+import pandas as pd
 from ziplime.errors import (
     InvalidOutputName,
     NonWindowSafeInput,
@@ -15,7 +19,7 @@ from ziplime.errors import (
 )
 from ziplime.pipeline.terms.term import Term
 from ziplime.pipeline.domain import Domain
-from ziplime.pipeline.domain import infer_domain
+from ziplime.pipeline.domain_inference import infer_domain
 from ziplime.pipeline.downsample_helpers import SUPPORTED_DOWNSAMPLE_FREQUENCIES
 from ziplime.pipeline.terms.asset_exists import AssetExists
 from ziplime.pipeline.terms.loadable_term import LoadableTerm
@@ -24,6 +28,12 @@ from ziplime.utils.numpy_utils import (
     bool_dtype,
     float64_dtype,
 )
+from ziplime.lib.windowtemplate import AdjustedArrayWindow
+
+# Term classes and their mixins import one another during initialization.
+if TYPE_CHECKING:
+    from ziplime.pipeline.mixins import UniversalMixin
+    from ziplime.pipeline.terms.filters.filter import Filter
 
 
 class ComputableTerm(Term):
@@ -42,11 +52,11 @@ class ComputableTerm(Term):
 
     def __new__(
             cls,
-            inputs=inputs,
-            outputs=outputs,
-            window_length=window_length,
-            mask=mask,
-            domain=domain,
+            inputs: 'Iterable[Term] | None' = inputs,
+            outputs: 'Iterable[str] | None' = outputs,
+            window_length: 'int | None' = window_length,
+            mask: 'Filter | None' = mask,
+            domain: 'Domain | None' = domain,
             *args,
             **kwargs,
     ):
@@ -94,7 +104,15 @@ class ComputableTerm(Term):
             **kwargs,
         )
 
-    def _init(self, inputs, outputs, window_length, mask, *args, **kwargs):
+    def _init(
+        self,
+        inputs: 'tuple[Term, ...] | None',
+        outputs: 'tuple[str, ...] | None',
+        window_length: 'int | None',
+        mask: 'Filter',
+        *args,
+        **kwargs,
+    ):
         self.inputs = inputs
         self.outputs = outputs
         self.window_length = window_length
@@ -102,7 +120,15 @@ class ComputableTerm(Term):
         return super(ComputableTerm, self)._init(*args, **kwargs)
 
     @classmethod
-    def _static_identity(cls, inputs, outputs, window_length, mask, *args, **kwargs):
+    def _static_identity(
+        cls,
+        inputs: 'tuple[Term, ...] | None',
+        outputs: 'tuple[str, ...] | None',
+        window_length: 'int | None',
+        mask: 'Filter',
+        *args,
+        **kwargs,
+    ):
         return (
             super(ComputableTerm, cls)._static_identity(*args, **kwargs),
             inputs,
@@ -111,7 +137,7 @@ class ComputableTerm(Term):
             mask,
         )
 
-    def _validate(self):
+    def _validate(self) -> None:
         super(ComputableTerm, self)._validate()
 
         # Check inputs.
@@ -160,7 +186,13 @@ class ComputableTerm(Term):
                 if not child.window_safe:
                     raise NonWindowSafeInput(parent=self, child=child)
 
-    def _compute(self, inputs, dates, assets, mask):
+    def _compute(
+        self,
+        inputs: 'list[np.ndarray | AdjustedArrayWindow]',
+        dates: 'pd.DatetimeIndex',
+        assets: 'pd.Index',
+        mask: 'np.ndarray',
+    ):
         """
         Subclasses should implement this to perform actual computation.
 
@@ -233,7 +265,7 @@ class ComputableTerm(Term):
             return [tuple(r) for r in data]
         return data
 
-    def to_workspace_value(self, result, assets):
+    def to_workspace_value(self, result: 'pd.Series', assets: 'pd.Index'):
         """
         Called with a column of the result of a pipeline. This needs to put
         the data into a format that can be used in a workspace to continue
@@ -260,7 +292,7 @@ class ComputableTerm(Term):
             .values
         )
 
-    def downsample(self, frequency):
+    def downsample(self, frequency: str):
         """
         Make a term that computes from ``self`` at lower-than-daily frequency.
 
@@ -282,7 +314,7 @@ class ComputableTerm(Term):
         downsampled_type = type(self)._with_mixin(DownsampledMixin)
         return downsampled_type(term=self, frequency=frequency)
 
-    def alias(self, name):
+    def alias(self, name: str):
         """
         Make a term from ``self`` that names the expression.
 
@@ -448,7 +480,7 @@ class ComputableTerm(Term):
 
         return cls._with_mixin(IfElseMixin)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return ("{type}([{inputs}], {window_length})").format(
             type=type(self).__name__,
             inputs=", ".join(i.recursive_repr() for i in self.inputs),
@@ -459,7 +491,7 @@ class ComputableTerm(Term):
         return type(self).__name__ + "(...)"
 
     @classmethod
-    def _with_mixin(cls, mixin_type):
+    def _with_mixin(cls, mixin_type: 'type[UniversalMixin]'):
         return mixin_type.universal_mixin_specialization(
             cls._principal_computable_term_type(),
         )

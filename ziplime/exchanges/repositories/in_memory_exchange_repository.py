@@ -9,7 +9,7 @@ from ziplime.exchanges.repositories.exchange_repository import ExchangeRepositor
 
 
 class InMemoryExchangeRepository(ExchangeRepository):
-    def __init__(self, logger: logging.Logger = structlog.getLogger(__name__)):
+    def __init__(self, logger: logging.Logger = structlog.getLogger(__name__)) -> None:
         super().__init__()
         self._logger = logger
         self._exchanges = {}
@@ -27,5 +27,5 @@ class InMemoryExchangeRepository(ExchangeRepository):
     async def get_exchange_by_mic(self, mic: str) -> Exchange:
         return self._exchanges[mic]
 
-    async def add_exchange(self, exchange: Exchange):
+    async def add_exchange(self, exchange: Exchange) -> None:
         self._exchanges[exchange.name] = exchange

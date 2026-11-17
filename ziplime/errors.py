@@ -1,16 +1,17 @@
 import dataclasses
 import datetime
 from textwrap import dedent
+import pandas as pd
 
 
 class ZiplineError(Exception):
     msg = None
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs) -> None:
         self.kwargs = kwargs
 
     @property
-    def message(self):
+    def message(self) -> str:
         return str(self)
 
     def __str__(self):
@@ -419,7 +420,7 @@ class SidsNotFound(ZiplineError):
         return self.kwargs["sids"]
 
     @property
-    def msg(self):
+    def msg(self) -> str:
         if self.plural:
             return "No assets found for sids: {sids}."
         return "No asset found for sid: {sids[0]}."
@@ -429,7 +430,7 @@ class EquitiesNotFound(SidsNotFound):
     """Raised when a call to `retrieve_equities` fails to find an asset."""
 
     @property
-    def msg(self):
+    def msg(self) -> str:
         if self.plural:
             return "No equities found for sids: {sids}."
         return "No equity found for sid: {sids[0]}."
@@ -439,7 +440,7 @@ class FutureContractsNotFound(SidsNotFound):
     """Raised when a call to `retrieve_futures_contracts` fails to find an asset."""
 
     @property
-    def msg(self):
+    def msg(self) -> str:
         if self.plural:
             return "No future contracts found for sids: {sids}."
         return "No future contract found for sid: {sids[0]}."
@@ -524,11 +525,11 @@ class TermInputsNotSpecified(ZiplineError):
 class NonPipelineInputs(ZiplineError):
     """Raised when a non-pipeline object is passed as input to a ComputableTerm"""
 
-    def __init__(self, term, inputs):
+    def __init__(self, term: str, inputs) -> None:
         self.term = term
         self.inputs = inputs
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             "Unexpected input types in {}. "
             "Inputs to Pipeline expressions must be Filters, Factors, "
@@ -669,7 +670,7 @@ class UnsupportedDataType(ZiplineError):
     Raised by CustomFactors with unsupported dtypes.
     """
 
-    def __init__(self, hint="", **kwargs):
+    def __init__(self, hint: str = "", **kwargs) -> None:
         if hint:
             hint = " " + hint
         kwargs["hint"] = hint
@@ -689,7 +690,11 @@ class NoFurtherDataError(ZiplineError):
 
     @classmethod
     def from_lookback_window(
-            cls, initial_message, first_date, lookback_start, lookback_length
+        cls,
+        initial_message: str,
+        first_date: 'pd.Timestamp',
+        lookback_start: 'datetime.datetime',
+        lookback_length: int,
     ):
         return cls(
             msg=dedent(

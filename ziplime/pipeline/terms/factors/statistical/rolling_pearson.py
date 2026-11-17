@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.terms.factors.statistical.rolling_correlation import RollingCorrelation
 from ziplime.pipeline.terms.factors.statistical import vectorized_pearson_r
 
@@ -39,7 +42,14 @@ class RollingPearson(RollingCorrelation):
 
     window_safe = True
 
-    def compute(self, today, assets, out, base_data, target_data):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        base_data: 'np.ndarray',
+        target_data: 'np.ndarray',
+    ) -> None:
         vectorized_pearson_r(
             base_data,
             target_data,

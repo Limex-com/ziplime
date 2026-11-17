@@ -1,14 +1,14 @@
 import numpy as np
 
-
 from ziplime.errors import IncompatibleTerms
 from ziplime.pipeline.terms.factors import CustomFactor
+from ziplime.pipeline.terms.filters.filter import Filter
 
 
 class RollingCorrelation(CustomFactor):
 
-    def __new__(cls, base_factor: np.float64 | np.float32, target: np.float64 | np.float32, correlation_length,
-                mask=None):
+    def __new__(cls, base_factor: np.float64 | np.float32, target: np.float64 | np.float32, correlation_length: int,
+                mask: 'Filter | None' = None):
         if target.ndim == 2 and base_factor.mask is not target.mask:
             raise IncompatibleTerms(term_1=base_factor, term_2=target)
         if correlation_length < 2:

@@ -12,7 +12,7 @@ class BadBinaryOperator(TypeError):
         The right hand side of the operation.
     """
 
-    def __init__(self, op, left, right):
+    def __init__(self, op: str, left, right) -> None:
         super(BadBinaryOperator, self).__init__(
             "Can't compute {left} {op} {right}".format(
                 op=op,

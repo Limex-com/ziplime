@@ -1,8 +1,12 @@
 
 
+from ziplime.finance.domain.order import Order
+from ziplime.finance.domain.transaction import Transaction
+
+
 def calculate_per_unit_commission(
-    order, transaction, cost_per_unit, initial_commission, min_trade_cost
-):
+    order: Order, transaction: Transaction, cost_per_unit: float, initial_commission: float, min_trade_cost: float
+) -> float:
     """
     If there is a minimum commission:
         If the order hasn't had a commission paid yet, pay the minimum

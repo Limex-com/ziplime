@@ -1,5 +1,9 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.loaders.previous_earnings_estimates_loader import PreviousEarningsEstimatesLoader
 from ziplime.pipeline.loaders.split_adjusted_estimates_loader import SplitAdjustedEstimatesLoader
+from ziplime.lib.adjustment import Adjustment
 
 
 class PreviousSplitAdjustedEarningsEstimatesLoader(
@@ -7,17 +11,17 @@ class PreviousSplitAdjustedEarningsEstimatesLoader(
 ):
     def collect_split_adjustments(
         self,
-        adjustments_for_sid,
-        requested_qtr_data,
-        dates,
-        sid,
-        sid_idx,
-        sid_estimates,
-        split_adjusted_asof_idx,
-        pre_adjustments,
-        post_adjustments,
-        requested_split_adjusted_columns,
-    ):
+        adjustments_for_sid: 'dict[str, dict[int, list[Adjustment]]]',
+        requested_qtr_data: 'pd.DataFrame',
+        dates: 'pd.DatetimeIndex',
+        sid: int,
+        sid_idx: int,
+        sid_estimates: 'pd.DataFrame',
+        split_adjusted_asof_idx: int,
+        pre_adjustments: 'tuple[np.ndarray, np.ndarray]',
+        post_adjustments: 'tuple[np.ndarray, np.ndarray, pd.DatetimeIndex]',
+        requested_split_adjusted_columns: 'list[str]',
+    ) -> None:
         """Collect split adjustments for previous quarters and apply them to the
         given dictionary of splits for the given sid. Since overwrites just
         replace all estimates before the new quarter with NaN, we don't need to

@@ -1,6 +1,9 @@
 from ziplime.pipeline.terms.asset_exists import AssetExists
 from ziplime.pipeline.terms.factors import RollingSpearman, Returns
 from ziplime.pipeline.terms.filters import SingleAsset
+from ziplime.assets.domain.continuous_future import ContinuousFuture
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.pipeline.terms.filters.filter import Filter
 
 
 class RollingSpearmanOfReturns(RollingSpearman):
@@ -34,7 +37,13 @@ class RollingSpearmanOfReturns(RollingSpearman):
     :class:`ziplime.pipeline.factors.RollingLinearRegressionOfReturns`
     """
 
-    def __new__(cls, target, returns_length, correlation_length, mask=None):
+    def __new__(
+        cls,
+        target: 'ExchangeAsset | ContinuousFuture',
+        returns_length: int,
+        correlation_length: int,
+        mask: 'Filter | None' = None,
+    ):
         # Use the `SingleAsset` filter here because it protects against
         # inputting a non-existent target asset.
         returns = Returns(

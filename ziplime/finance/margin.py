@@ -36,7 +36,7 @@ DEFAULT_MARGIN_CURRENCY = "EUR"
 class MissingFxRate(ValueError):
     """Raised when margin would have to cross currencies without a rate to do it with."""
 
-    def __init__(self, quote_currency: str, margin_currency: str, root_symbol: str | None = None):
+    def __init__(self, quote_currency: str, margin_currency: str, root_symbol: str | None = None) -> None:
         super().__init__(
             f"Margin for {root_symbol or 'this contract'} is posted in {margin_currency} but the "
             f"contract is quoted in {quote_currency}. A rate-of-notional model cannot convert "
@@ -95,7 +95,7 @@ class NoFuturesMarginModel(FuturesMarginModel):
 
     models_margin = False
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._warned = False
 
     def warn_once(self) -> None:
@@ -138,7 +138,7 @@ class FixedRateFuturesMarginModel(FuturesMarginModel):
     fx_rates: dict[tuple[str, str], float] = dataclasses.field(default_factory=dict)
     models_margin = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.initial_rate <= 0:
             raise ValueError("initial_rate must be positive")
         if self.maintenance_rate is None:

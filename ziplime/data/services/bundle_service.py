@@ -43,7 +43,7 @@ class BundleService:
     store bundles, as well as perform necessary backfilling for incomplete data.
     """
 
-    def __init__(self, bundle_registry: BundleRegistry):
+    def __init__(self, bundle_registry: BundleRegistry) -> None:
         """
         Args:
             bundle_registry (BundleRegistry): Registry for managing bundles.

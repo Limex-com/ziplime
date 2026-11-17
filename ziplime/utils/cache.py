@@ -1,4 +1,5 @@
 """Caching utilities for ziplime"""
+from collections.abc import Callable
 
 
 class Expired(Exception):
@@ -36,7 +37,7 @@ class CachedObject:
     Expired: 2014-01-01 00:00:00+00:00
     """
 
-    def __init__(self, value, expires):
+    def __init__(self, value, expires) -> None:
         self._value = value
         self._expires = expires
 
@@ -100,7 +101,7 @@ class ExpiringCache:
     KeyError: 'foo'
     """
 
-    def __init__(self, cache=None, cleanup=lambda value_to_clean: None):
+    def __init__(self, cache=None, cleanup: 'Callable' = lambda value_to_clean: None) -> None:
         if cache is not None:
             self._cache = cache
         else:
@@ -136,7 +137,7 @@ class ExpiringCache:
             del self._cache[key]
             raise KeyError(key) from exc
 
-    def set(self, key, value, expiration_dt):
+    def set(self, key, value, expiration_dt) -> None:
         """Adds a new key value pair to the cache.
 
         Parameters

@@ -15,6 +15,7 @@ That is deliberate: the previous version of this file called four internal const
 and every one of them had moved on without it, so ``run`` and ``ingest`` had been raising
 ``TypeError`` on their first line for some time while ``--help`` kept working.
 """
+
 import asyncio
 
 import importlib.metadata
@@ -22,6 +23,8 @@ import importlib.util
 import logging
 import sys
 from pathlib import Path
+from collections.abc import Callable
+import datetime
 
 import asyncclick as click
 
@@ -40,6 +43,8 @@ from ziplime.utils.bundle_utils import (
 )
 from ziplime.utils.calendar_utils import get_calendar
 from ziplime.utils.date_utils import normalize_datetime
+from ziplime.assets.services.asset_service import AssetService
+from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 
 #: Where bundles and the asset database live unless told otherwise.
 DEFAULT_STORAGE = Path(Path.home(), ".ziplime", "data")
@@ -51,20 +56,20 @@ DATE_FORMATS = ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S")
 FREQUENCIES = [frequency.value for frequency in DataFrequency]
 
 
-def storage_option(function):
+def storage_option(function: 'Callable'):
     return click.option(
         "--bundle-storage-path", default=str(DEFAULT_STORAGE), show_default=True,
         help="Where bundles are stored.")(function)
 
 
-def asset_db_option(function):
+def asset_db_option(function: 'Callable'):
     return click.option(
         "--asset-db", default=str(DEFAULT_ASSET_DB), show_default=True,
         help="Asset database. Instruments have to be ingested into it before any bundle can "
              "reference them.")(function)
 
 
-async def _resolve(asset_service, symbols: str, asset_type: AssetType) -> list:
+async def _resolve(asset_service: 'AssetService', symbols: str, asset_type: AssetType) -> list:
     """Turn ``TICKER`` or ``TICKER@MIC`` into stored listings, or fail saying which one is missing.
 
     Resolving up front matters for more than error messages. A ticker is unique only within an
@@ -108,7 +113,7 @@ def _fail(message: str, hint: str | None = None) -> None:
                       prog_name="ziplime")
 @click.option("-v", "--verbose", is_flag=True, help="Log at DEBUG rather than INFO.")
 @click.pass_context
-async def main(ctx, verbose):
+async def main(ctx: 'click.Context', verbose: bool) -> None:
     """Ingest market data and run backtests.
 
     Start with `ziplime providers` to see what this install can read, then `ziplime ingest-assets`
@@ -127,7 +132,7 @@ async def main(ctx, verbose):
 @main.command()
 @click.option("--configured-only", is_flag=True,
               help="Show only connectors whose credentials are set.")
-async def providers(configured_only):
+async def providers(configured_only: bool) -> None:
     """List the data connectors this install can use.
 
     A connector is skipped rather than reported broken when its package is absent, so this is also
@@ -162,7 +167,7 @@ async def providers(configured_only):
 @click.option("--clear", is_flag=True,
               help="Delete the asset database first. Every stored sid is lost, so any bundle "
                    "already keyed by one becomes unreadable.")
-async def ingest_assets_command(provider, asset_db, clear):
+async def ingest_assets_command(provider: str, asset_db: str, clear: bool) -> None:
     """Load instrument definitions into the asset database.
 
     This is the prerequisite for everything else. A bundle stores bars against a ``sid``, and a
@@ -209,8 +214,20 @@ async def ingest_assets_command(provider, asset_db, clear):
 @click.option("--merge", is_flag=True, help="Merge into an existing bundle of this name.")
 @storage_option
 @asset_db_option
-async def ingest(bundle, symbols, trading_calendar, start_date, end_date, frequency, provider,
-                 asset_type, forward_fill, merge, bundle_storage_path, asset_db):
+async def ingest(
+    bundle: str,
+    symbols: str,
+    trading_calendar: str,
+    start_date: 'datetime.datetime',
+    end_date: 'datetime.datetime',
+    frequency: str,
+    provider: str,
+    asset_type: str,
+    forward_fill: bool,
+    merge: bool,
+    bundle_storage_path: str,
+    asset_db: str,
+) -> None:
     """Download bars for SYMBOLS and store them as a named bundle.
 
     Market data only. Fundamentals and other non-bar datasets go through
@@ -266,7 +283,7 @@ async def ingest(bundle, symbols, trading_calendar, start_date, end_date, freque
 
 @main.command()
 @storage_option
-async def bundles(bundle_storage_path):
+async def bundles(bundle_storage_path: str) -> None:
     """List stored bundles, newest version of each first."""
     registry = get_bundle_service(bundle_storage_path=bundle_storage_path)._bundle_registry
     stored = await registry.list_bundles()
@@ -295,7 +312,13 @@ async def bundles(bundle_storage_path):
 @click.option("-k", "--keep-last", type=int, metavar="N",
               help="Keep the newest N versions and delete the rest. Not with --before/--after.")
 @storage_option
-async def clean(bundle, before, after, keep_last, bundle_storage_path):
+async def clean(
+    bundle: str,
+    before: 'datetime.datetime | None',
+    after: 'datetime.datetime | None',
+    keep_last: 'int | None',
+    bundle_storage_path: str,
+) -> None:
     """Delete stored versions of a bundle.
 
     The three selectors are mutually exclusive, and this refuses rather than picking one. The help
@@ -372,10 +395,30 @@ async def clean(bundle, before, after, keep_last, bundle_storage_path):
                    "Without it, a summary is printed.")
 @storage_option
 @asset_db_option
-async def run(algofile, config_file, bundle, bundle_version, symbols, start_date, end_date,
-              trading_calendar, emission_rate, capital_base, asset_type, benchmark_symbol,
-              max_leverage, same_bar_execution, fill_price, commission_per_share, slippage_bps,
-              stop_on_error, print_algo, output, bundle_storage_path, asset_db):
+async def run(
+    algofile: str,
+    config_file: 'str | None',
+    bundle: str,
+    bundle_version: 'str | None',
+    symbols: str,
+    start_date: 'datetime.datetime',
+    end_date: 'datetime.datetime',
+    trading_calendar: str,
+    emission_rate: str,
+    capital_base: float,
+    asset_type: str,
+    benchmark_symbol: 'str | None',
+    max_leverage: float,
+    same_bar_execution: bool,
+    fill_price: str,
+    commission_per_share: float,
+    slippage_bps: float,
+    stop_on_error: bool,
+    print_algo: bool,
+    output: 'str | None',
+    bundle_storage_path: str,
+    asset_db: str,
+):
     """Run a backtest over an ingested bundle.
 
     The symbols are named explicitly rather than taken from the bundle: loading a bundle checks
@@ -431,7 +474,7 @@ async def run(algofile, config_file, bundle, bundle_version, symbols, start_date
 class _SweepCommands(click.Group):
     """``ziplime sweep FILE`` runs FILE, as it did before ``sweep`` had subcommands."""
 
-    def resolve_command(self, ctx, args):
+    def resolve_command(self, ctx: 'click.Context', args: 'list[str]'):
         if args and args[0] not in self.commands and not args[0].startswith("-"):
             args = ["run", *args]
         return super().resolve_command(ctx, args)
@@ -476,8 +519,20 @@ async def sweep():
 @click.option("--family", "families", multiple=True, metavar="METHOD[:BLOCK]",
               help="A family of synthetic paths: stationary:20, block:10, circular:10, meboot, "
                    "garch, gbm, student_t, iid, shuffle. Repeatable; replaces the file's families.")
-async def sweep_run(sweep_file, backend, grid, assignments, compile_, batch_size, workers,
-                    output_dir, refuse, no_verify, paths, families):
+async def sweep_run(
+    sweep_file: 'Path',
+    backend: 'str | None',
+    grid: 'tuple[str, ...]',
+    assignments: 'tuple[str, ...]',
+    compile_: 'bool | None',
+    batch_size: 'int | None',
+    workers: 'int | None',
+    output_dir: 'str | None',
+    refuse: bool,
+    no_verify: bool,
+    paths: 'int | None',
+    families: 'tuple[str, ...]',
+) -> None:
     """Run the sweep SWEEP_FILE describes.
 
     Every combination of the grid goes through the strategy at once; the best are recomputed
@@ -505,7 +560,7 @@ async def sweep_run(sweep_file, backend, grid, assignments, compile_, batch_size
               show_default=True, help="Where to run the few combinations.")
 @click.option("--set", "assignments", multiple=True, metavar="FIELD=VALUE",
               help="Override a field of the sweep file, as for run.")
-async def sweep_check(sweep_file, backend, assignments):
+async def sweep_check(sweep_file: 'Path', backend: str, assignments: 'tuple[str, ...]') -> None:
     """How the strategy converts: a few combinations, the grid's corners, in seconds.
 
     Says whether every combination can run at once and how each part of the strategy is computed,
@@ -543,7 +598,15 @@ async def sweep_check(sweep_file, backend, assignments):
 @click.option("--end-date", type=click.DateTime(formats=DATE_FORMATS))
 @click.option("-c", "--trading-calendar", default="XNYS", show_default=True)
 @click.option("--force", is_flag=True, help="Overwrite the output file.")
-async def sweep_init(algorithm_file, output, bundle, start_date, end_date, trading_calendar, force):
+async def sweep_init(
+    algorithm_file: 'Path',
+    output: 'Path',
+    bundle: 'str | None',
+    start_date: 'datetime.datetime | None',
+    end_date: 'datetime.datetime | None',
+    trading_calendar: str,
+    force: bool,
+) -> None:
     """Write a sweep file for ALGORITHM_FILE.
 
     Its grid varies every number of the strategy's AlgorithmConfig around its default (half, the
@@ -571,7 +634,7 @@ async def sweep_init(algorithm_file, output, bundle, start_date, end_date, tradi
 
 
 @sweep.command("doctor")
-async def sweep_doctor():
+async def sweep_doctor() -> None:
     """Which sweep backends and libraries this machine has."""
     from ziplime.sweep.tools import doctor
 
@@ -581,7 +644,14 @@ async def sweep_doctor():
         click.echo(f"{name:<{width}}  {state}")
 
 
-def _sweep_params(sweep_file: Path, grid, assignments, paths=None, families=(), **overrides):
+def _sweep_params(
+    sweep_file: Path,
+    grid: 'tuple[str, ...]',
+    assignments: 'tuple[str, ...]',
+    paths: 'int | None' = None,
+    families: 'tuple[str, ...]' = (),
+    **overrides,
+):
     """The sweep file, with the command line's --grid, --set and options over it."""
     import json
 
@@ -616,7 +686,7 @@ def _sweep_params(sweep_file: Path, grid, assignments, paths=None, families=(), 
 
 
 @main.command()
-async def mcp():
+async def mcp() -> None:
     """Run the local MCP server, speaking MCP over stdin and stdout.
 
     For a client that launches a server as a subprocess -- Claude Code, Claude Desktop, Cursor.
@@ -636,7 +706,7 @@ async def mcp():
     await serve_stdio()
 
 
-def _report(result, output: str | None) -> None:
+def _report(result: 'TradingAlgorithmExecutionResult', output: str | None) -> None:
     """Print what the run did, and write the table if asked.
 
     ``str(result)`` used to be the whole output, which is a dataclass repr -- several screens of

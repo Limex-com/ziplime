@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.terms.factors.factor import Factor
 from ziplime.pipeline.mixins import SingleInputMixin
 
@@ -7,7 +10,7 @@ class RecarrayField(SingleInputMixin, Factor):
     A single field from a multi-output factor.
     """
 
-    def __new__(cls, factor, attribute):
+    def __new__(cls, factor: 'Factor', attribute: str):
         return super(RecarrayField, cls).__new__(
             cls,
             attribute=attribute,
@@ -19,19 +22,19 @@ class RecarrayField(SingleInputMixin, Factor):
             window_safe=factor.window_safe,
         )
 
-    def _init(self, attribute, *args, **kwargs):
+    def _init(self, attribute: str, *args, **kwargs):
         self._attribute = attribute
         return super(RecarrayField, self)._init(*args, **kwargs)
 
     @classmethod
-    def _static_identity(cls, attribute, *args, **kwargs):
+    def _static_identity(cls, attribute: str, *args, **kwargs):
         return (
             super(RecarrayField, cls)._static_identity(*args, **kwargs),
             attribute,
         )
 
-    def _compute(self, windows, dates, assets, mask):
+    def _compute(self, windows: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         return windows[0][self._attribute]
 
-    def graph_repr(self):
+    def graph_repr(self) -> str:
         return "{}.{}".format(self.inputs[0].recursive_repr(), self._attribute)

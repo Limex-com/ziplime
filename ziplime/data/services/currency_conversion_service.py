@@ -57,7 +57,7 @@ class CurrencyConversionService:
             max_rate_age: datetime.timedelta = datetime.timedelta(days=7),
             price_column: str = "close",
             timestamp_column: str = "date",
-    ):
+    ) -> None:
         """Validate selected listings and index their timestamped FX observations."""
         if max_rate_age <= datetime.timedelta(0):
             raise ValueError("max_rate_age must be positive.")

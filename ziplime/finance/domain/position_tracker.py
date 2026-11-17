@@ -28,6 +28,8 @@ from ziplime.finance.finance_ext import (
     PositionStats,
     calculate_position_tracker_stats
 )
+from ziplime.assets.entities.split import Split
+from ziplime.assets.entities.stock_dividend_payout import StockDividendPayout
 
 
 class PositionTracker:
@@ -39,7 +41,7 @@ class PositionTracker:
         The data frequency of the simulation.
     """
 
-    def __init__(self, data_frequency: datetime.timedelta, bond_book: BondBook | None = None):
+    def __init__(self, data_frequency: datetime.timedelta, bond_book: BondBook | None = None) -> None:
 
         # (exchange_name, trading_account_id, asset)
         self.positions = OrderedDict()
@@ -105,8 +107,8 @@ class PositionTracker:
             trading_account_id: str,
             amount: int | None = None,
             last_sale_price: float | None = None,
-            last_sale_date=None,
-            cost_basis=None,
+            last_sale_date: 'datetime.datetime | None' = None,
+            cost_basis: 'float | None' = None,
     ) -> Position:
         self._dirty_stats = True
 
@@ -145,7 +147,7 @@ class PositionTracker:
             position.cost_basis = cost_basis
         return position
 
-    def execute_transaction(self, txn):
+    def execute_transaction(self, txn: 'Transaction') -> None:
         self._dirty_stats = True
 
         # asset = txn.asset
@@ -179,7 +181,7 @@ class PositionTracker:
         if position.amount == 0:
             self._unregister_position(position)
 
-    def _update_position(self, position: Position, txn: Transaction):
+    def _update_position(self, position: Position, txn: Transaction) -> None:
         if position.asset != txn.asset:
             raise Exception("updating position with txn for a " "different asset")
 
@@ -220,7 +222,7 @@ class PositionTracker:
         for position in positions:
             self.adjust_commission_cost_basis(position=position, cost=cost)
 
-    def adjust_commission_cost_basis(self, position: Position, cost: float):
+    def adjust_commission_cost_basis(self, position: Position, cost: float) -> None:
         """
         A note about cost-basis in ziplime: all positions are considered
         to share a cost basis, even if they were executed in different
@@ -268,7 +270,7 @@ class PositionTracker:
         new_cost = prev_cost + cost_to_use
         position.cost_basis = new_cost / position.amount
 
-    def handle_splits(self, splits):
+    def handle_splits(self, splits: 'Iterable[Split]'):
         """Processes a list of splits by modifying any positions as needed.
 
         Parameters
@@ -303,7 +305,7 @@ class PositionTracker:
         return total_leftover_cash
 
 
-    def earn_stock_dividend(self, position: Position, stock_dividend):
+    def earn_stock_dividend(self, position: Position, stock_dividend: 'StockDividendPayout'):
         """
         Register the number of shares we held at this dividend's ex date so
         that we can pay out the correct amount on the dividend's pay date.
@@ -390,7 +392,12 @@ class PositionTracker:
         self._unpaid_income = pending
         self._income_identities = identities
 
-    def earn_dividends(self, cash_dividends, stock_dividends, earned_at: datetime.datetime | None = None):
+    def earn_dividends(
+        self,
+        cash_dividends: 'Iterable[DividendPayout]',
+        stock_dividends: 'Iterable[StockDividendPayout]',
+        earned_at: datetime.datetime | None = None,
+    ) -> None:
         """Capture each account's entitlement on the ex-date, retaining payout currency."""
         for dividend in cash_dividends:
             if dividend.currency is None:
@@ -567,7 +574,7 @@ class PositionTracker:
                               prices: dict[tuple[Asset, Exchange], float],
                               # exchange_name: str,
                               # handle_non_market_minutes: bool = False
-                              ):
+                              ) -> None:
         if not self.positions:
             return
         self._dirty_stats = True

@@ -1,3 +1,5 @@
+import pandas as pd
+
 import datetime
 
 from toolz import partition_all
@@ -5,7 +7,12 @@ from toolz import partition_all
 from ziplime.constants.period import Period
 
 
-def compute_date_range_chunks(sessions, start_date, end_date, chunksize):
+def compute_date_range_chunks(
+    sessions: pd.DatetimeIndex,
+    start_date: 'datetime.datetime',
+    end_date: 'datetime.datetime',
+    chunksize: int | None,
+):
     """Compute the start and end dates to run a pipeline for.
 
     Parameters
@@ -46,7 +53,7 @@ def compute_date_range_chunks(sessions, start_date, end_date, chunksize):
     return ((r[0], r[-1]) for r in partition_all(chunksize, sessions[start_ix:end_ix]))
 
 
-def make_utc_aware(dti):
+def make_utc_aware(dti: pd.DatetimeIndex) -> pd.DatetimeIndex:
     """Normalizes a pd.DateTimeIndex. Assumes UTC if tz-naive."""
     try:
         # ensure tz-aware Timestamp has tz UTC

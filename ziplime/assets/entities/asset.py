@@ -16,8 +16,8 @@ class Asset:
     # @abstractmethod
     # def get_symbol_by_exchange(self, exchange_name: str | None) -> str | None: ...
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.id)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.asset_name}-{self.isin}-({self.id})"

@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.utils.math_utils import nanmean
 
 from ziplime.pipeline.mixins import SingleInputMixin
@@ -18,5 +21,5 @@ class SimpleMovingAverage(SingleInputMixin, CustomFactor):
     # warning.
     # ctx = ignore_nanwarnings()
 
-    def compute(self, today, assets, out, data):
+    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', data: 'np.ndarray') -> None:
         out[:] = nanmean(data, axis=0)

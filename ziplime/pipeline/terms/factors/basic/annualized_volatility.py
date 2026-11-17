@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.terms.factors.basic.returns import Returns
 from ziplime.pipeline.terms.factors.custom_factor import CustomFactor
 from ziplime.utils.math_utils import nanstd
@@ -22,5 +25,12 @@ class AnnualizedVolatility(CustomFactor):
     params = {"annualization_factor": 252.0}
     window_length = 252
 
-    def compute(self, today, assets, out, returns, annualization_factor):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        returns: 'np.ndarray',
+        annualization_factor: float,
+    ) -> None:
         out[:] = nanstd(returns, axis=0) * (annualization_factor**0.5)

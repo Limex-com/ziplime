@@ -1,3 +1,6 @@
+import numpy as np
+import pandas as pd
+
 from ziplime.pipeline.data import EquityPricing
 from ziplime.pipeline.terms.factors import CustomFactor
 from ziplime.utils.math_utils import nanmean, nanstd
@@ -26,7 +29,14 @@ class BollingerBands(CustomFactor):
     inputs = (EquityPricing.close,)
     outputs = "lower", "middle", "upper"
 
-    def compute(self, today, assets, out, close, k):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        close: 'np.ndarray',
+        k: float,
+    ) -> None:
         difference = k * nanstd(close, axis=0)
         out.middle = middle = nanmean(close, axis=0)
         out.upper = middle + difference

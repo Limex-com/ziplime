@@ -1,4 +1,6 @@
 from numpy import average
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.terms.factors.basic.exponential_weighted_factor import ExponentialWeightedFactor
 from ziplime.pipeline.terms.factors.utils.exponential_weights import exponential_weights
@@ -35,7 +37,14 @@ class ExponentialWeightedMovingAverage(ExponentialWeightedFactor):
     :meth:`pandas.DataFrame.ewm`
     """
 
-    def compute(self, today, assets, out, data, decay_rate):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        data: 'np.ndarray',
+        decay_rate: float,
+    ) -> None:
         out[:] = average(
             data,
             axis=0,

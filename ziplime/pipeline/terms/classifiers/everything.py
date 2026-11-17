@@ -1,4 +1,6 @@
 from numpy import where, zeros
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.terms.classifiers.classifier import Classifier
 from ziplime.utils.numpy_utils import (
@@ -16,7 +18,7 @@ class Everything(Classifier):
     inputs = ()
     missing_value = -1
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         return where(
             mask,
             zeros(shape=mask.shape, dtype=int64_dtype),

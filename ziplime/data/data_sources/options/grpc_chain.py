@@ -93,7 +93,7 @@ class GrpcOptionChainSource(OptionChainSource):
     def __init__(self, data_source, venue: str = "OPRA", underlying_mic: str = "ARCX",
                  strike_window: float | None = 0.15,
                  expiries: list[datetime.date] | None = None,
-                 max_concurrency: int = 8):
+                 max_concurrency: int = 8) -> None:
         if venue not in VENUES:
             raise GrpcChainError(
                 f"Unknown venue {venue!r}. Known: {', '.join(sorted(VENUES))}.")
@@ -389,12 +389,12 @@ class ExpiredAwareFeed:
     source's own per-symbol cache, which is the same slot its own lookup would have filled.
     """
 
-    def __init__(self, data_source):
+    def __init__(self, data_source) -> None:
         self._source = data_source
         #: Resolved ids, so a chain of several hundred contracts costs one lookup each.
         self._resolved: dict[str, int] = {}
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         """Everything this does not override belongs to the wrapped source."""
         return getattr(self._source, name)
 
@@ -457,7 +457,14 @@ class ExpiredAwareFeed:
             settled.set_result(security_id)
             self._source._security_id_tasks[symbol] = settled
 
-    async def get_data(self, symbols, frequency, date_from, date_to, **kwargs):
+    async def get_data(
+        self,
+        symbols: 'list[str]',
+        frequency: 'datetime.timedelta',
+        date_from: 'datetime.datetime',
+        date_to: 'datetime.datetime',
+        **kwargs,
+    ):
         """The wrapped source's `get_data`, with expired contracts resolved first."""
         await self._prime(list(symbols))
         return await self._source.get_data(symbols=symbols, frequency=frequency,

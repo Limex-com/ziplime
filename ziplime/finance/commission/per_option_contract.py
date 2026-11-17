@@ -1,3 +1,6 @@
+
+from ziplime.finance.domain.order import Order
+from ziplime.finance.domain.transaction import Transaction
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.finance.commission.option_commission_model import OptionCommissionModel
 
@@ -34,16 +37,16 @@ class PerOptionContract(OptionCommissionModel):
 
     def __init__(self, cost: float = DEFAULT_PER_OPTION_CONTRACT_COST,
                  exchange_fee: float = DEFAULT_OPTION_EXCHANGE_FEE,
-                 min_trade_cost: float = 0.0):
+                 min_trade_cost: float = 0.0) -> None:
         self.cost_per_contract = float(cost)
         self.exchange_fee = float(exchange_fee)
         self.min_trade_cost = min_trade_cost or 0.0
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (f"{self.__class__.__name__}(cost_per_contract={self.cost_per_contract}, "
                 f"exchange_fee={self.exchange_fee}, min_trade_cost={self.min_trade_cost})")
 
-    def calculate(self, order, transaction) -> float:
+    def calculate(self, order: Order, transaction: Transaction) -> float:
         contracts = abs(transaction.amount)
         commission = contracts * (self.cost_per_contract + self.exchange_fee)
         if order.commission == 0:

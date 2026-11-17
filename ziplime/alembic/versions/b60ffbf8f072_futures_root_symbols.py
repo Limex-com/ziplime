@@ -23,7 +23,7 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade():
+def upgrade() -> None:
     op.create_table(
         'futures_root_symbols',
         sa.Column('root_symbol', sa.String(), nullable=False),
@@ -53,7 +53,7 @@ def upgrade():
                                     'futures_root_symbols', ['root_symbol'], ['root_symbol'])
 
 
-def downgrade():
+def downgrade() -> None:
     with op.batch_alter_table('futures_contracts') as batch_op:
         batch_op.drop_constraint('fk_futures_contracts_root_symbol_futures_root_symbols',
                                  type_='foreignkey')

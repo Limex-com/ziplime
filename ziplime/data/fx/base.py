@@ -54,7 +54,7 @@ class FXRateReader:
             return np.array(out)
     """
 
-    def get_rates(self, rate, quote, bases, dts):
+    def get_rates(self, rate: str, quote: str, bases: 'np.ndarray', dts: 'pd.DatetimeIndex'):
         """
         Load a 2D array of fx rates.
 
@@ -81,7 +81,7 @@ class FXRateReader:
             The column at index j corresponds to the base currency in bases[j].
         """
 
-    def get_rate_scalar(self, rate, quote, base, dt):
+    def get_rate_scalar(self, rate: str, quote: str, base: str, dt: 'np.datetime64 | pd.Timestamp'):
         """
         Load a scalar FX rate value.
 
@@ -109,7 +109,7 @@ class FXRateReader:
         )
         return rates_2d[0, 0]
 
-    def get_rates_columnar(self, rate, quote, bases, dts):
+    def get_rates_columnar(self, rate: str, quote: str, bases: 'np.ndarray', dts: 'pd.DatetimeIndex'):
         """
         Load a 1D array of FX rates.
 

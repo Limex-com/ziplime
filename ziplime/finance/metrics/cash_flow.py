@@ -25,17 +25,17 @@ class CashFlow:
     def start_of_simulation(
             self, ledger: Ledger, emission_rate: datetime.timedelta, trading_calendar: ExchangeCalendar,
             sessions: pd.DatetimeIndex, benchmark_source: BenchmarkSource
-    ):
+    ) -> None:
         self._previous_cash_flow = 0.0
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                   exchanges: dict[str, Exchange]):
+                   exchanges: dict[str, Exchange]) -> None:
         cash_flow = ledger.portfolio.cash_flow
         packet["minute_perf"]["capital_used"] = cash_flow - self._previous_cash_flow
         packet["cumulative_perf"]["capital_used"] = cash_flow
 
     def end_of_session(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                       exchanges: dict[str, Exchange]):
+                       exchanges: dict[str, Exchange]) -> None:
         cash_flow = ledger.portfolio.cash_flow
         packet["daily_perf"]["capital_used"] = cash_flow - self._previous_cash_flow
         packet["cumulative_perf"]["capital_used"] = cash_flow

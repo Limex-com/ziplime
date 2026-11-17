@@ -3,6 +3,7 @@ Helpers for downsampling code.
 """
 
 from toolz import compose
+import pandas as pd
 from operator import attrgetter, methodcaller
 
 from ziplime.utils.numpy_utils import changed_locations
@@ -17,7 +18,7 @@ _dt_to_period = {
 SUPPORTED_DOWNSAMPLE_FREQUENCIES = frozenset(_dt_to_period)
 
 
-def select_sampling_indices(dates, frequency):
+def select_sampling_indices(dates: 'pd.DatetimeIndex', frequency: str):
     """
     Choose entries from ``dates`` to use for downsampling at ``frequency``.
 

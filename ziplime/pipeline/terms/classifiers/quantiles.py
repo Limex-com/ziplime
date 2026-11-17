@@ -1,4 +1,6 @@
 from numpy import where, isnan, nan
+import numpy as np
+import pandas as pd
 from ziplime.lib.quantiles import quantiles
 from ziplime.pipeline.terms.classifiers.classifier import Classifier
 from ziplime.utils.numpy_utils import (
@@ -20,7 +22,7 @@ class Quantiles(SingleInputMixin, Classifier):
     window_length = 0
     missing_value = -1
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         data = arrays[0]
         bins = self.params["bins"]
         to_bin = where(mask, data, nan)

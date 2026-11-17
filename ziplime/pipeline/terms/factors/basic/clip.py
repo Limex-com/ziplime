@@ -1,4 +1,6 @@
 from numpy import clip
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.terms.factors.custom_factor import CustomFactor
 
@@ -37,5 +39,13 @@ class Clip(CustomFactor):
     window_length = 1
     params = ("min_bound", "max_bound")
 
-    def compute(self, today, assets, out, values, min_bound, max_bound):
+    def compute(
+        self,
+        today: 'pd.Timestamp',
+        assets: 'pd.Index',
+        out: 'np.ndarray',
+        values: 'np.ndarray',
+        min_bound: float,
+        max_bound: float,
+    ) -> None:
         clip(values[-1], min_bound, max_bound, out=out)

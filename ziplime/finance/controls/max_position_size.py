@@ -1,4 +1,9 @@
+import datetime
+
+from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.domain.portfolio import Portfolio
 from ziplime.finance.controls.trading_control import TradingControl
+from ziplime.domain.bar_data import BarData
 
 
 class MaxPositionSize(TradingControl):
@@ -6,7 +11,8 @@ class MaxPositionSize(TradingControl):
     be held by an algo for a given asset.
     """
 
-    def __init__(self, on_error, asset=None, max_shares=None, max_notional=None):
+    def __init__(self, on_error: str, asset: ExchangeAsset | None = None,
+                 max_shares: int | None = None, max_notional: float | None = None) -> None:
         super(MaxPositionSize, self).__init__(
             on_error, asset=asset, max_shares=max_shares, max_notional=max_notional
         )
@@ -23,7 +29,8 @@ class MaxPositionSize(TradingControl):
         if max_notional and max_notional < 0:
             raise ValueError("max_notional must be positive.")
 
-    async def validate(self, asset, amount, portfolio, algo_datetime, algo_current_data):
+    async def validate(self, asset: ExchangeAsset, amount: int, portfolio: Portfolio,
+                       algo_datetime: 'datetime.datetime', algo_current_data: 'BarData') -> None:
         """Fail if the given order would cause the magnitude of our position to be
         greater in shares than self.max_shares or greater in dollar value than
         self.max_notional.

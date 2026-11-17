@@ -18,7 +18,7 @@ import math
 from numpy import isnan
 
 
-def tolerant_equals(a, b, atol=10e-7, rtol=10e-7, equal_nan=False):
+def tolerant_equals(a: float, b: float, atol: float = 10e-7, rtol: float = 10e-7, equal_nan: bool = False) -> bool:
     """Check if a and b are equal with some tolerance.
 
     Parameters
@@ -74,7 +74,7 @@ except ImportError:
     nanmedian = np.nanmedian
 
 
-def round_if_near_integer(a, epsilon=1e-4):
+def round_if_near_integer(a, epsilon: float = 1e-4):
     """
     Round a to the nearest integer if that integer is within an epsilon
     of a.
@@ -85,7 +85,7 @@ def round_if_near_integer(a, epsilon=1e-4):
         return a
 
 
-def number_of_decimal_places(n):
+def number_of_decimal_places(n) -> int:
     """
     Compute the number of decimal places in a number.
 

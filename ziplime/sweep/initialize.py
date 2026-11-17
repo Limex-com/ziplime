@@ -5,20 +5,29 @@ with :class:`SweepContext` standing in for TradingAlgorithm: it can look instrum
 indicators and set attributes on the context, which is everything ``initialize`` does before the
 first bar.
 """
+
 import ast
 import inspect
 import json
 import tempfile
 import textwrap
 from pathlib import Path
+from collections.abc import Callable
+from collections.abc import Iterable
 
 from pydantic import ValidationError
+import polars as pl
 
 from ziplime.assets.domain.asset_type import AssetType
 from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.config.base_algorithm_config import BaseAlgorithmConfig
 from ziplime.core.algorithm_file import AlgorithmFile
 from ziplime.sweep.params import SweepError, SweepParams, config_for, config_paths
+from ziplime.assets.services.asset_service import AssetService
+from ziplime.finance.cancel_policy import CancelPolicy
+from ziplime.finance.commission.commission_model import CommissionModel
+from ziplime.finance.slippage.slippage_model import SlippageModel
+from ziplime.utils.event_rule import EventRule
 
 
 class SweepContext:
@@ -28,7 +37,7 @@ class SweepContext:
     OWN = {"algorithm", "_asset_service", "_found", "requested", "_indicators", "_scheduled",
            "_commission", "_slippage", "_cancel_policy", "universe", "datasets"}
 
-    def __init__(self, algorithm: AlgorithmFile, asset_service, found: dict | None = None):
+    def __init__(self, algorithm: AlgorithmFile, asset_service: 'AssetService', found: dict | None = None) -> None:
         self.algorithm = algorithm
         self._asset_service = asset_service
         #: Instruments already looked up: initialize runs once per distinct config
@@ -56,30 +65,46 @@ class SweepContext:
             self.requested.append(asset)
         return asset
 
-    async def symbols(self, *symbols, **kwargs):
+    async def symbols(self, *symbols: str, **kwargs):
         return [await self.symbol(symbol, **kwargs) for symbol in symbols]
 
-    def indicators(self, **expressions):
+    def indicators(self, **expressions: 'pl.Expr') -> None:
         """As TradingAlgorithm.indicators: the expressions are kept, not computed."""
         self._indicators.update(expressions)
 
-    def schedule_function(self, func, date_rule=None, time_rule=None, half_days=True,
-                          calendar=None):
+    def schedule_function(
+        self,
+        func: 'Callable',
+        date_rule: 'EventRule | None' = None,
+        time_rule: 'EventRule | None' = None,
+        half_days: bool = True,
+        calendar=None,
+    ) -> None:
         self._scheduled.append((func, date_rule, time_rule, half_days))
 
-    def set_commission(self, us_equities=None, us_futures=None, bonds=None):
+    def set_commission(
+        self,
+        us_equities: 'CommissionModel | None' = None,
+        us_futures: 'CommissionModel | None' = None,
+        bonds: 'CommissionModel | None' = None,
+    ) -> None:
         if bonds is not None:
             raise SweepError("Bonds are not supported in a sweep.")
         self._commission.update({k: v for k, v in (("equities", us_equities),
                                                     ("futures", us_futures)) if v is not None})
 
-    def set_slippage(self, us_equities=None, us_futures=None, bonds=None):
+    def set_slippage(
+        self,
+        us_equities: 'SlippageModel | None' = None,
+        us_futures: 'SlippageModel | None' = None,
+        bonds: 'SlippageModel | None' = None,
+    ) -> None:
         if bonds is not None:
             raise SweepError("Bonds are not supported in a sweep.")
         self._slippage.update({k: v for k, v in (("equities", us_equities),
                                                   ("futures", us_futures)) if v is not None})
 
-    def set_cancel_policy(self, cancel_policy):
+    def set_cancel_policy(self, cancel_policy: 'CancelPolicy') -> None:
         self._cancel_policy = cancel_policy
 
     def state(self) -> dict:
@@ -94,10 +119,16 @@ class Combinations:
     values that make it, and its config is built for the batch that needs it.
     """
 
-    def __init__(self, combos: list[dict], shared: dict, paths: dict[str, str], config_class):
+    def __init__(
+        self,
+        combos: list[dict],
+        shared: dict,
+        paths: dict[str, str],
+        config_class: 'type[BaseAlgorithmConfig]',
+    ) -> None:
         self.combos, self.shared, self.paths, self.config_class = combos, shared, paths, config_class
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.combos)
 
     def config(self, index: int):
@@ -108,7 +139,7 @@ class Combinations:
             raise SweepError(f"Grid values {self.combos[index]} do not fit "
                              f"{self.config_class.__name__}:\n{error}") from None
 
-    def configs(self, indices) -> list:
+    def configs(self, indices: 'Iterable[int]') -> list:
         return [self.config(index) for index in indices]
 
     def key(self, index: int, fields: set[str]) -> tuple:
@@ -150,11 +181,11 @@ def load_algorithm(params: SweepParams, base: Path, combos: list[dict]):
 class _ReadTracker:
     """A config that records which of its fields were read."""
 
-    def __init__(self, config):
+    def __init__(self, config: 'BaseAlgorithmConfig') -> None:
         object.__setattr__(self, "_config", config)
         object.__setattr__(self, "read", set())
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if name in type(self._config).model_fields:
             self.read.add(name)
         return getattr(self._config, name)
@@ -163,7 +194,7 @@ class _ReadTracker:
 class Initialized:
     """What one run of initialize declared."""
 
-    def __init__(self, context: SweepContext):
+    def __init__(self, context: SweepContext) -> None:
         self.indicators = dict(context._indicators)
         self.state = context.state()
         self.scheduled = list(context._scheduled)
@@ -177,7 +208,12 @@ class Initialized:
         self.datasets = getattr(context, "datasets", None)
 
 
-async def run_initialize(algorithm: AlgorithmFile, asset_service, config, found: dict) -> Initialized:
+async def run_initialize(
+    algorithm: AlgorithmFile,
+    asset_service: 'AssetService',
+    config: 'BaseAlgorithmConfig',
+    found: dict,
+) -> Initialized:
     algorithm.config = config
     context = SweepContext(algorithm, asset_service, found)
     try:
@@ -192,7 +228,7 @@ async def run_initialize(algorithm: AlgorithmFile, asset_service, config, found:
     return Initialized(context)
 
 
-def symbols_in(function) -> list[tuple[str, str | None]]:
+def symbols_in(function: 'Callable') -> list[tuple[str, str | None]]:
     """The tickers a hook passes to context.symbol / context.symbols: string constants, and the
     items of a list of them the call's argument loops over
     (``{s: await context.symbol(s) for s in ["SOXL", "TQQQ"]}``)."""
@@ -211,7 +247,7 @@ def symbols_in(function) -> list[tuple[str, str | None]]:
                 if isinstance(target, ast.Name):
                     lists[target.id] = [e.value for e in node.value.elts]
 
-    def items(node):
+    def items(node: 'ast.AST'):
         if isinstance(node, (ast.List, ast.Tuple)):
             return [e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
         if isinstance(node, ast.Name):
@@ -241,7 +277,7 @@ def symbols_in(function) -> list[tuple[str, str | None]]:
     return found
 
 
-async def initialize_each(algorithm: AlgorithmFile, asset_service, combinations: Combinations,
+async def initialize_each(algorithm: AlgorithmFile, asset_service: 'AssetService', combinations: Combinations,
                           found: dict) -> list[Initialized]:
     """initialize for every combination -- once per distinct value of the fields it reads.
 

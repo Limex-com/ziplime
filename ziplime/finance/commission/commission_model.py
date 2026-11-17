@@ -1,5 +1,8 @@
+
 from abc import abstractmethod
 
+from ziplime.finance.domain.order import Order
+from ziplime.finance.domain.transaction import Transaction
 from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.equity import Equity
@@ -25,7 +28,7 @@ class CommissionModel(metaclass=FinancialModelMeta):
     allowed_asset_types = (Equity, Bond, FuturesContract, Currency)
 
     @abstractmethod
-    def calculate(self, order, transaction):
+    def calculate(self, order: Order, transaction: Transaction) -> float:
         """
         Calculate the amount of commission to charge on ``order`` as a result
         of ``transaction``.

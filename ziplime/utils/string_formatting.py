@@ -1,4 +1,4 @@
-def bulleted_list(items, max_count=None, indent=2):
+def bulleted_list(items, max_count: int | None = None, indent: int = 2) -> str:
     """Format a bulleted list of values."""
     if max_count is not None and len(items) > max_count:
         item_list = list(items)

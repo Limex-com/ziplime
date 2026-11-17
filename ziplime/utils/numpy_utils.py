@@ -2,6 +2,7 @@
 
 from collections import OrderedDict
 from datetime import datetime
+from collections.abc import Container
 
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
@@ -41,7 +42,7 @@ NaTmap = {
 }
 
 
-def NaT_for_dtype(dtype):
+def NaT_for_dtype(dtype: 'np.dtype'):
     """Retrieve NaT with the same units as ``dtype``.
 
     Parameters
@@ -87,14 +88,14 @@ UNSIGNED_INT_DTYPES_BY_SIZE_BYTES = OrderedDict(
 )
 
 
-def int_dtype_with_size_in_bytes(size):
+def int_dtype_with_size_in_bytes(size: int):
     try:
         return INT_DTYPES_BY_SIZE_BYTES[size]
     except KeyError as exc:
         raise ValueError("No integral dtype whose size is %d bytes." % size) from exc
 
 
-def unsigned_int_dtype_with_size_in_bytes(size):
+def unsigned_int_dtype_with_size_in_bytes(size: int):
     try:
         return UNSIGNED_INT_DTYPES_BY_SIZE_BYTES[size]
     except KeyError as exc:
@@ -107,7 +108,7 @@ class NoDefaultMissingValue(Exception):
     pass
 
 
-def make_kind_check(python_types, numpy_kind):
+def make_kind_check(python_types: 'type | tuple[type, ...]', numpy_kind: str):
     """
     Make a function that checks whether a scalar or array is of a given kind
     (e.g. float, int, datetime, timedelta).
@@ -127,7 +128,7 @@ is_datetime = make_kind_check(datetime, "M")
 is_object = make_kind_check(object, "O")
 
 
-def coerce_to_dtype(dtype, value):
+def coerce_to_dtype(dtype: 'np.dtype', value):
     """
     Make a value with the specified numpy dtype.
 
@@ -142,7 +143,7 @@ def coerce_to_dtype(dtype, value):
     return dtype.type(value)
 
 
-def default_missing_value_for_dtype(dtype):
+def default_missing_value_for_dtype(dtype: 'np.dtype'):
     """
     Get the default fill value for `dtype`.
     """
@@ -154,7 +155,7 @@ def default_missing_value_for_dtype(dtype):
         ) from exc
 
 
-def repeat_first_axis(array, count):
+def repeat_first_axis(array: 'np.ndarray', count: int):
     """
     Restride `array` to repeat `count` times along the first axis.
 
@@ -197,7 +198,7 @@ def repeat_first_axis(array, count):
     return as_strided(array, (count,) + array.shape, (0,) + array.strides)
 
 
-def repeat_last_axis(array, count):
+def repeat_last_axis(array: 'np.ndarray', count: int):
     """
     Restride `array` to repeat `count` times along the last axis.
 
@@ -240,7 +241,7 @@ def repeat_last_axis(array, count):
     return as_strided(array, array.shape + (count,), array.strides + (0,))
 
 
-def rolling_window(array, length):
+def rolling_window(array: 'np.ndarray', length: int):
     """
     Restride an array of shape
 
@@ -324,7 +325,7 @@ def isnat(obj):
     return obj.view(int64_dtype) == iNaT
 
 
-def is_missing(data, missing_value):
+def is_missing(data: 'np.ndarray', missing_value):
     """
     Generic is_missing function that handles NaN and NaT.
     """
@@ -354,7 +355,7 @@ def same(x, y):
         return x == y
 
 
-def busday_count_mask_NaT(begindates, enddates, out=None):
+def busday_count_mask_NaT(begindates: 'np.ndarray', enddates: 'np.ndarray', out: 'np.ndarray | None' = None):
     """
     Simple of numpy.busday_count that returns `float` arrays rather than int
     arrays, and handles `NaT`s by returning `NaN`s where the inputs were `NaT`.
@@ -384,7 +385,7 @@ def busday_count_mask_NaT(begindates, enddates, out=None):
     return out
 
 
-def vectorized_is_element(array, choices):
+def vectorized_is_element(array: 'np.ndarray', choices: 'Container'):
     """
     Check if each element of ``array`` is in choices.
 
@@ -402,7 +403,7 @@ def vectorized_is_element(array, choices):
     return np.vectorize(choices.__contains__, otypes=[bool])(array)
 
 
-def as_column(a):
+def as_column(a: 'np.ndarray'):
     """
     Convert an array of shape (N,) into an array of shape (N, 1).
 
@@ -435,7 +436,7 @@ def as_column(a):
     return a[:, None]
 
 
-def changed_locations(a, include_first):
+def changed_locations(a: 'np.ndarray', include_first: bool):
     """
     Compute indices of values in ``a`` that differ from the previous value.
 
@@ -465,7 +466,7 @@ def changed_locations(a, include_first):
     return np.hstack([[0], indices])
 
 
-def bytes_array_to_native_str_object_array(a):
+def bytes_array_to_native_str_object_array(a: 'np.ndarray'):
     """Convert an array of dtype S to an object array containing `str`."""
 
     return a.astype(str).astype(object)

@@ -27,7 +27,7 @@ from ziplime.data.data_sources.yahoo.yahoo_futures import (
 
 
 class YahooFinanceAssetDataSource(AssetDataSource):
-    def __init__(self, maximum_threads: int | None = None):
+    def __init__(self, maximum_threads: int | None = None) -> None:
         super().__init__()
         self._logger = structlog.get_logger(__name__)
         if maximum_threads is not None:

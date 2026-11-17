@@ -17,6 +17,7 @@ Compilation is not free either -- the first call pays a few hundred milliseconds
 inside a parameter sweep's first combination and reporting that as the kernel's speed.
 """
 from __future__ import annotations
+from collections.abc import Callable
 
 import numpy as np
 
@@ -54,7 +55,7 @@ except ImportError:  # pragma: no cover
         if args and callable(args[0]):
             return args[0]
 
-        def wrap(function):
+        def wrap(function: 'Callable'):
             return function
 
         return wrap
@@ -62,12 +63,29 @@ except ImportError:  # pragma: no cover
 
 @njit(cache=True, nogil=True)
 def run_events(
-    event_bar, event_col, event_intent, event_signal_bar,
-    execution_values, close_values, size_values, volume_values, has_volume,
-    closing_long, closing_short,
-    slip_percentage, slip_spread, slip_volume_limit, has_volume_limit,
-    com_per_unit, com_per_dollar, com_fixed, com_min_trade,
-    initial_cash, accumulate, n_bars, n_columns,
+    event_bar: 'np.ndarray',
+    event_col: 'np.ndarray',
+    event_intent: 'np.ndarray',
+    event_signal_bar: 'np.ndarray',
+    execution_values: 'np.ndarray',
+    close_values: 'np.ndarray',
+    size_values: 'np.ndarray',
+    volume_values: 'np.ndarray',
+    has_volume: bool,
+    closing_long: 'np.ndarray',
+    closing_short: 'np.ndarray',
+    slip_percentage: float,
+    slip_spread: float,
+    slip_volume_limit: float,
+    has_volume_limit: bool,
+    com_per_unit: float,
+    com_per_dollar: float,
+    com_fixed: float,
+    com_min_trade: float,
+    initial_cash: float,
+    accumulate: int,
+    n_bars: int,
+    n_columns: int,
 ):
     """Walk the pre-sorted events, decide every fill, and report what happened.
 

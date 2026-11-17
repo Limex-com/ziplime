@@ -1,4 +1,8 @@
+from collections.abc import Callable
+
 from numpy import isnan, nan
+import numpy as np
+import pandas as pd
 
 from ziplime.pipeline.terms.factors.factor import Factor
 
@@ -10,6 +14,7 @@ from ziplime.utils.numpy_utils import (
     as_column,
     float64_dtype,
 )
+from ziplime.pipeline.terms.filters.filter import Filter
 
 _RANK_METHODS = frozenset(["average", "min", "max", "dense", "ordinal"])
 
@@ -21,7 +26,7 @@ class DailySummary(SingleInputMixin, Factor):
     window_length = 0
     params = ("func",)
 
-    def __new__(cls, func, input_, mask, dtype):
+    def __new__(cls, func: 'Callable', input_: 'Factor', mask: 'Filter | None', dtype: 'np.dtype'):
         # TODO: We should be able to support datetime64 as well, but that
         # requires extra care for handling NaT.
         if dtype != float64_dtype:
@@ -39,7 +44,7 @@ class DailySummary(SingleInputMixin, Factor):
             mask=mask,
         )
 
-    def _compute(self, arrays, dates, assets, mask):
+    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
         func = self.params["func"]
 
         data = arrays[0]
@@ -49,7 +54,7 @@ class DailySummary(SingleInputMixin, Factor):
 
         return as_column(func(data, self.inputs[0].missing_value))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "{}.{}()".format(
             self.inputs[0].recursive_repr(),
             self.params["func"].__name__,

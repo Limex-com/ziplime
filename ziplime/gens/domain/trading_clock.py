@@ -9,7 +9,7 @@ class TradingClock:
     trading_calendar: ExchangeCalendar
     emission_rate: datetime.timedelta
 
-    def __init__(self, trading_calendar: ExchangeCalendar, emission_rate: datetime.timedelta):
+    def __init__(self, trading_calendar: ExchangeCalendar, emission_rate: datetime.timedelta) -> None:
         self.trading_calendar = trading_calendar
         self.emission_rate = emission_rate
         self._logger = structlog.get_logger(__name__)

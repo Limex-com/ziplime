@@ -23,7 +23,7 @@ class DailyLedgerField:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-    def __init__(self, ledger_field, packet_field=None):
+    def __init__(self, ledger_field: str, packet_field: 'str | None' = None) -> None:
         self._get_ledger_field = op.attrgetter(ledger_field)
         if packet_field is None:
             self._packet_field = ledger_field.rsplit(".", 1)[-1]
@@ -31,14 +31,14 @@ class DailyLedgerField:
             self._packet_field = packet_field
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                   exchanges: dict[str, Exchange]):
+                   exchanges: dict[str, Exchange]) -> None:
         field = self._packet_field
         packet["cumulative_perf"][field] = packet["minute_perf"][field] = (
             self._get_ledger_field(ledger)
         )
 
     def end_of_session(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,
-                       exchanges: dict[str, Exchange]):
+                       exchanges: dict[str, Exchange]) -> None:
         field = self._packet_field
         packet["cumulative_perf"][field] = packet["daily_perf"][field] = (
             self._get_ledger_field(ledger)

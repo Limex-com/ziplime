@@ -70,7 +70,7 @@ class MetricsTracker:
             intraday_metrics: bool = False,
             currency_reporting: CurrencyReporting | None = None,
             currency: str | None = None,
-    ):
+    ) -> None:
         self.emission_rate = emission_rate
         self._benchmark_source = benchmark_source
         self._logger = structlog.getLogger(__name__)
@@ -140,7 +140,7 @@ class MetricsTracker:
 
         if emission_rate == DataFrequency.MINUTE:
 
-            def progress(self):
+            def progress(self) -> float:
                 return 1.0  # a fake value
 
         else:
@@ -163,10 +163,10 @@ class MetricsTracker:
     def positions(self):
         return self._ledger.positions
 
-    def transactions(self, dt=None):
+    def transactions(self, dt: 'datetime.datetime | None' = None):
         return [replace(transaction) for transaction in self._ledger.transactions(dt=dt)]
 
-    def orders(self, dt=None):
+    def orders(self, dt: 'datetime.datetime | None' = None):
         return [copy(order) for order in self._ledger.orders(dt=dt)]
 
     @property
@@ -221,7 +221,7 @@ class MetricsTracker:
         self.position_tracker = SimpleNamespace(stats=stats)
         self.investment = investment
 
-    async def handle_start_of_simulation(self):
+    async def handle_start_of_simulation(self) -> None:
         if self._currency_reporting is not None:
             reporting = self._currency_reporting
             initial_dt = self._trading_calendar.session_open(session=self._first_session).to_pydatetime()

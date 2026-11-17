@@ -48,7 +48,7 @@ class AdjustmentsService:
     ``price_adjusted`` when a ``price`` column is present).
     """
 
-    def __init__(self, asset_service: AssetService):
+    def __init__(self, asset_service: AssetService) -> None:
         """
         Args:
             asset_service (AssetService): Service providing assets and their corporate actions

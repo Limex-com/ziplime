@@ -10,7 +10,7 @@ class SimulationParameters:
             end_date: datetime.datetime,
             trading_calendar: ExchangeCalendar,
             emission_rate: datetime.timedelta,
-    ):
+    ) -> None:
 
         if start_date >= end_date:
             raise ValueError("Period start falls after period end.")

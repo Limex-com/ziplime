@@ -37,7 +37,7 @@ from ziplime.assets.entities.asset import Asset
 class AssetService:
 
     def __init__(self, asset_repository: AssetRepository, adjustments_repository: AdjustmentRepository,
-                 logger: Logger = structlog.get_logger(__name__)):
+                 logger: Logger = structlog.get_logger(__name__)) -> None:
         self._asset_repository = asset_repository
         self._adjustments_repository = adjustments_repository
         self._logger = logger

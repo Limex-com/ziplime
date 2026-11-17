@@ -12,7 +12,7 @@ branch_labels = None
 depends_on = None
 
 
-def upgrade():
+def upgrade() -> None:
     with op.batch_alter_table("dividend_payouts") as batch:
         batch.add_column(sa.Column("currency_id", sa.Integer(), nullable=False))
         batch.create_foreign_key(
@@ -20,7 +20,7 @@ def upgrade():
         batch.create_index(op.f("ix_dividend_payouts_currency_id"), ["currency_id"], unique=False)
 
 
-def downgrade():
+def downgrade() -> None:
     with op.batch_alter_table("dividend_payouts") as batch:
         batch.drop_index(op.f("ix_dividend_payouts_currency_id"))
         batch.drop_constraint(op.f("fk_dividend_payouts_currency_id_asset_router"), type_="foreignkey")

@@ -16,7 +16,7 @@ class RealtimeClock(TradingClock):
                  start_date: datetime.datetime | None = None,
                  end_date: datetime.datetime | None = None,
                  timedelta_diff_from_current_time: datetime.timedelta = None,
-                 ):
+                 ) -> None:
         super().__init__(trading_calendar=trading_calendar, emission_rate=emission_rate)
         if start_date is not None:
             start_date = normalize_datetime(start_date, trading_calendar.tz)

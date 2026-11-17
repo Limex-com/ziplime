@@ -13,7 +13,7 @@ class DataSetFamilyLookupError(AttributeError):
         The name of the column accessed.
     """
 
-    def __init__(self, family_name, column_name):
+    def __init__(self, family_name: str, column_name: str) -> None:
         self.family_name = family_name
         self.column_name = column_name
 

@@ -1,3 +1,7 @@
+import datetime
+
+from ziplime.finance.domain.order import Order
+from ziplime.finance.domain.transaction import Transaction
 from ziplime.assets.entities.bond import Bond
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.finance.bonds import BondBook
@@ -23,22 +27,22 @@ class PerBondTurnover(BondCommissionModel):
     """
 
     def __init__(self, cost: float = 0.0003, min_trade_cost: float = 0.0,
-                 bond_book: BondBook | None = None):
+                 bond_book: BondBook | None = None) -> None:
         self.cost_per_turnover = float(cost)
         self.min_trade_cost = min_trade_cost or 0.0
         self.bond_book = bond_book if bond_book is not None else BondBook()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (f"{self.__class__.__name__}(cost_per_turnover={self.cost_per_turnover}, "
                 f"min_trade_cost={self.min_trade_cost})")
 
-    def _turnover(self, asset: ExchangeAsset, amount: float, quoted_price: float, dt) -> float:
+    def _turnover(self, asset: ExchangeAsset, amount: float, quoted_price: float, dt: datetime.datetime) -> float:
         bond = asset.asset
         if not isinstance(bond, Bond):
             return abs(amount * quoted_price)
         return abs(amount) * self.bond_book.dirty_value(bond, quoted_price, dt)
 
-    def calculate(self, order, transaction) -> float:
+    def calculate(self, order: Order, transaction: Transaction) -> float:
         turnover = self._turnover(asset=transaction.asset, amount=transaction.amount,
                                   quoted_price=transaction.price, dt=transaction.dt)
         commission = turnover * self.cost_per_turnover

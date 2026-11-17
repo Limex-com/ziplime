@@ -1,3 +1,6 @@
+from numpy.typing import DTypeLike
+
+from ziplime.pipeline.data.dataset_meta import DataSetMeta
 from ziplime.pipeline.terms.bound_column import BoundColumn
 from ziplime.pipeline.terms.utils import validate_dtype
 from ziplime.utils.numpy_utils import NoDefaultMissingValue
@@ -12,7 +15,15 @@ class BoundColumnDescr:
     parent classes.
     """
 
-    def __init__(self, dtype, missing_value, name, doc, metadata, currency_aware):
+    def __init__(
+        self,
+        dtype: 'DTypeLike',
+        missing_value,
+        name: str,
+        doc: 'str | None',
+        metadata,
+        currency_aware: bool,
+    ) -> None:
         # Validating and calculating default missing values here guarantees
         # that we fail quickly if the user passes an unsupporte dtype or fails
         # to provide a missing value for a dtype that requires one
@@ -38,7 +49,7 @@ class BoundColumnDescr:
         self.metadata = metadata
         self.currency_aware = currency_aware
 
-    def __get__(self, instance, owner):
+    def __get__(self, instance: object, owner: DataSetMeta):
         """
         Produce a concrete BoundColumn object when accessed.
 

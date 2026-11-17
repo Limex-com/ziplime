@@ -13,7 +13,10 @@ class DataSetMeta(type):
     families of specialized dataset.
     """
 
-    def __new__(metacls, name, bases, dict_):
+    domain: Domain
+    ndim: int
+
+    def __new__(metacls: 'type[DataSetMeta]', name: str, bases: 'tuple[type, ...]', dict_):
         if len(bases) != 1:
             # Disallowing multiple inheritance makes it easier for us to
             # determine whether a given dataset is the root for its family of
@@ -105,7 +108,7 @@ class DataSetMeta(type):
         """
         return cls.specialize(GENERIC)
 
-    def _can_create_new_specialization(cls, domain):
+    def _can_create_new_specialization(cls, domain: 'Domain'):
         # Always allow specializing to a generic domain.
         if domain is GENERIC:
             return True
@@ -118,7 +121,7 @@ class DataSetMeta(type):
             # specializations.
             return False
 
-    def _create_specialization(cls, domain):
+    def _create_specialization(cls, domain: 'Domain'):
         # These are all assertions because we should have handled these cases
         # already in specialize().
         assert isinstance(domain, Domain)
