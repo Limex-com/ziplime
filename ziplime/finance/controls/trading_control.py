@@ -24,7 +24,7 @@ class TradingControl(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     async def validate(self, asset: ExchangeAsset, amount: int, portfolio: Portfolio,
-                       algo_datetime: 'datetime.datetime', algo_current_data: 'BarData') -> None:
+                       algo_datetime: datetime.datetime, algo_current_data: BarData) -> None:
         """Before any order is executed by TradingAlgorithm, this method should be
         called *exactly once* on each registered TradingControl object.
 
@@ -45,7 +45,7 @@ class TradingControl(metaclass=abc.ABCMeta):
             )
         return constraint
 
-    def handle_violation(self, asset: ExchangeAsset, amount: int, datetime: 'datetime.datetime', metadata=None) -> None:
+    def handle_violation(self, asset: ExchangeAsset, amount: int, datetime: datetime.datetime, metadata=None) -> None:
         """Handle a TradingControlViolation, either by raising or logging and
         error with information about the failure.
 

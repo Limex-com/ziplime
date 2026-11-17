@@ -30,7 +30,7 @@ class Order:
     def __init__(
             self,
             id: str,
-            dt: 'datetime.datetime',
+            dt: datetime.datetime,
             asset: ExchangeAsset,
             amount: int,
             filled: int,
@@ -73,7 +73,7 @@ class Order:
         self.exchange_order_id = exchange_order_id
         self.submitted_valuations: dict[str, OrderValuation] = {}
 
-    def check_triggers(self, price: float, dt: 'datetime.datetime') -> None:
+    def check_triggers(self, price: float, dt: datetime.datetime) -> None:
         """
         Update internal state based on price triggers and the
         trade event's price.
@@ -185,7 +185,7 @@ class Order:
             return self._status
 
     @status.setter
-    def status(self, status: 'OrderStatus') -> None:
+    def status(self, status: OrderStatus) -> None:
         self._status = status
 
     def cancel(self) -> None:

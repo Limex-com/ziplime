@@ -10,15 +10,15 @@ from ziplime.lib.adjustment import Adjustment
 from ziplime.pipeline.terms.bound_column import BoundColumn
 
 
-def is_sorted_ascending(a: 'np.ndarray'):
+def is_sorted_ascending(a: np.ndarray):
     """Check if a numpy array is sorted."""
     return (np.fmax.accumulate(a) <= a).all()
 
 
 def validate_event_metadata(
-    event_dates: 'np.ndarray',
-    event_timestamps: 'np.ndarray',
-    event_sids: 'np.ndarray',
+    event_dates: np.ndarray,
+    event_timestamps: np.ndarray,
+    event_sids: np.ndarray,
 ) -> None:
     assert is_sorted_ascending(event_dates), "event dates must be sorted"
     assert (
@@ -31,12 +31,12 @@ def validate_event_metadata(
 
 
 def next_event_indexer(
-    all_dates: 'np.ndarray',
-    data_query_cutoff: 'pd.DatetimeIndex',
-    all_sids: 'np.ndarray',
-    event_dates: 'np.ndarray',
-    event_timestamps: 'np.ndarray',
-    event_sids: 'np.ndarray',
+    all_dates: np.ndarray,
+    data_query_cutoff: pd.DatetimeIndex,
+    all_sids: np.ndarray,
+    event_dates: np.ndarray,
+    event_timestamps: np.ndarray,
+    event_sids: np.ndarray,
 ):
     """
     Construct an index array that, when applied to an array of values, produces
@@ -94,11 +94,11 @@ def next_event_indexer(
 
 
 def previous_event_indexer(
-    data_query_cutoff_times: 'pd.DatetimeIndex',
-    all_sids: 'np.ndarray',
-    event_dates: 'np.ndarray',
-    event_timestamps: 'np.ndarray',
-    event_sids: 'np.ndarray',
+    data_query_cutoff_times: pd.DatetimeIndex,
+    all_sids: np.ndarray,
+    event_dates: np.ndarray,
+    event_timestamps: np.ndarray,
+    event_sids: np.ndarray,
 ):
     """
     Construct an index array that, when applied to an array of values, produces
@@ -159,12 +159,12 @@ def previous_event_indexer(
 
 
 def last_in_date_group(
-        df: 'pd.DataFrame',
-        data_query_cutoff_times: 'pd.DatetimeIndex',
-        assets: 'pd.Index',
+        df: pd.DataFrame,
+        data_query_cutoff_times: pd.DatetimeIndex,
+        assets: pd.Index,
         reindex: bool = True,
         have_sids: bool = True,
-        extra_groupers: 'list[str] | None' = None,
+        extra_groupers: list[str] | None = None,
 ):
     """
     Determine the last piece of information known on each date in the date
@@ -240,7 +240,7 @@ def last_in_date_group(
     return last_in_group
 
 
-def ffill_across_cols(df: 'pd.DataFrame', columns: 'list[BoundColumn]', name_map: 'dict[str, str]') -> None:
+def ffill_across_cols(df: pd.DataFrame, columns: list[BoundColumn], name_map: dict[str, str]) -> None:
     """
     Forward fill values in a DataFrame with special logic to handle cases
     that pd.DataFrame.ffill cannot and cast columns to appropriate types.
@@ -290,7 +290,7 @@ def ffill_across_cols(df: 'pd.DataFrame', columns: 'list[BoundColumn]', name_map
             )
 
 
-def shift_dates(dates: 'pd.DatetimeIndex', start_date: 'pd.Timestamp', end_date: 'pd.Timestamp', shift: int):
+def shift_dates(dates: pd.DatetimeIndex, start_date: pd.Timestamp, end_date: pd.Timestamp, shift: int):
     """Shift dates of a pipeline query back by ``shift`` days.
 
     Parameters
@@ -373,7 +373,7 @@ def split_normalized_quarters(normalized_quarters):
     return years, quarters + 1
 
 
-def required_estimates_fields(columns: 'dict[str, str]'):
+def required_estimates_fields(columns: dict[str, str]):
     """Compute the set of resource columns required to serve
     `columns`.
     """
@@ -382,7 +382,7 @@ def required_estimates_fields(columns: 'dict[str, str]'):
     return metadata_columns.union(columns.values())
 
 
-def validate_column_specs(events: 'pd.DataFrame', columns: 'dict[str, str]') -> None:
+def validate_column_specs(events: pd.DataFrame, columns: dict[str, str]) -> None:
     """Verify that the columns of ``events`` can be used by a
     EarningsEstimatesLoader to serve the BoundColumns described by
     `columns`.
@@ -403,8 +403,8 @@ def validate_column_specs(events: 'pd.DataFrame', columns: 'dict[str, str]') -> 
 
 
 def add_new_adjustments(
-    adjustments_dict: 'dict[str, dict[int, list[Adjustment]]]',
-    adjustments: 'list[Adjustment]',
+    adjustments_dict: dict[str, dict[int, list[Adjustment]]],
+    adjustments: list[Adjustment],
     column_name: str,
     ts: int,
 ) -> None:
@@ -414,7 +414,7 @@ def add_new_adjustments(
         adjustments_dict[column_name][ts] = adjustments
 
 
-def validate_split_adjusted_column_specs(name_map: 'dict[str, str]', columns: 'Iterable[str]') -> None:
+def validate_split_adjusted_column_specs(name_map: dict[str, str], columns: Iterable[str]) -> None:
     to_be_split = set(columns)
     available = set(name_map.keys())
     extra = to_be_split - available

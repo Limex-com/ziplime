@@ -25,7 +25,7 @@ from ziplime.utils.numpy_utils import (
 )
 
 
-def coerce_numbers_to_my_dtype(f: 'Callable'):
+def coerce_numbers_to_my_dtype(f: Callable):
     """
     A decorator for methods whose signature is f(self, other) that coerces
     ``other`` to ``self.dtype``.
@@ -43,7 +43,7 @@ def coerce_numbers_to_my_dtype(f: 'Callable'):
     """
 
     @wraps(f)
-    def method(self, other: 'Term | Number'):
+    def method(self, other: Term | Number):
         if isinstance(other, Number):
             other = coerce_to_dtype(self.dtype, other)
         return f(self, other)
@@ -51,7 +51,7 @@ def coerce_numbers_to_my_dtype(f: 'Callable'):
     return method
 
 
-def binop_return_dtype(op: str, left: 'np.dtype', right: 'np.dtype'):
+def binop_return_dtype(op: str, left: np.dtype, right: np.dtype):
     """
     Compute the expected return dtype for the given binary operator.
 
@@ -147,7 +147,7 @@ def binary_operator(op: str):
     @with_doc(docstring)
     @with_name(method_name_for_op(op))
     @coerce_numbers_to_my_dtype
-    def binary_operator(self, other: 'Term | Number'):
+    def binary_operator(self, other: Term | Number):
         from ziplime.pipeline.terms.factors.num_expr_factor import NumExprFactor
 
         # This can't be hoisted up a scope because the types returned by
@@ -211,7 +211,7 @@ def reflected_binary_operator(op: str):
 
     @with_name(method_name_for_op(op, commute=True))
     @coerce_numbers_to_my_dtype
-    def reflected_binary_operator(self, other: 'Term | Number'):
+    def reflected_binary_operator(self, other: Term | Number):
         from ziplime.pipeline.terms.factors.num_expr_factor import NumExprFactor
 
         if isinstance(self, NumericalExpression):

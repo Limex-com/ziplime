@@ -59,14 +59,14 @@ MAX_QUARTER_RANGE = 60
 MAX_WEEK_RANGE = 5
 
 
-def ensure_utc(time: 'datetime.datetime | datetime.time', tz: str = "UTC"):
+def ensure_utc(time: datetime.datetime | datetime.time, tz: str = "UTC"):
     """Normalize a time. If the time is tz-naive, assume it is UTC."""
     if not time.tzinfo:
         time = time.replace(tzinfo=pytz.timezone(tz))
     return time.replace(tzinfo=pytz.utc)
 
 
-def _out_of_range_error(a: int, b: 'int | None' = None, var: str = "offset"):
+def _out_of_range_error(a: int, b: int | None = None, var: str = "offset"):
     start = 0
     if b is None:
         end = a - 1
@@ -82,7 +82,7 @@ def _out_of_range_error(a: int, b: 'int | None' = None, var: str = "offset"):
     )
 
 
-def _td_check(td: 'datetime.timedelta'):
+def _td_check(td: datetime.timedelta):
     seconds = td.total_seconds()
 
     # 43200 seconds = 12 hours
@@ -95,9 +95,9 @@ def _td_check(td: 'datetime.timedelta'):
 
 
 def _build_offset(
-    offset: 'datetime.timedelta | None',
-    kwargs: 'dict[str, float | None]',
-    default: 'datetime.timedelta | None',
+    offset: datetime.timedelta | None,
+    kwargs: dict[str, float | None],
+    default: datetime.timedelta | None,
 ):
     """
     Builds the offset argument for event rules.
@@ -117,7 +117,7 @@ def _build_offset(
         raise TypeError("Must pass 'hours' and/or 'minutes' as keywords")
 
 
-def _build_date(date: 'datetime.date | None', kwargs: 'dict[str, int]'):
+def _build_date(date: datetime.date | None, kwargs: dict[str, int]):
     """
     Builds the date argument for event rules.
     """
@@ -159,7 +159,7 @@ def lossless_float_to_int(funcname: str, argname: str, arg: float):
     raise TypeError(arg)
 
 
-def _per_calendar(compute: 'Callable'):
+def _per_calendar(compute: Callable):
     """Memoise a rule property against the calendar it was computed for.
 
     ``execution_period_values`` groups every session the calendar knows -- 36 410 of them for
@@ -195,7 +195,7 @@ class EventManager:
         to handle_data. This will be passed the current BarData.
     """
 
-    def __init__(self, create_context: 'Callable | None' = None) -> None:
+    def __init__(self, create_context: Callable | None = None) -> None:
         self._events = []
         self._create_context = (
             create_context if create_context is not None else lambda *_: nop_context
@@ -211,7 +211,7 @@ class EventManager:
             self._events.append(event)
 
     async def handle_data(
-        self, context: BaseTradingAlgorithm, data: 'BarData', dt: 'datetime.datetime',
+        self, context: BaseTradingAlgorithm, data: BarData, dt: datetime.datetime,
     ) -> None:
         with self._create_context(data):
             for event in self._events:
@@ -229,12 +229,12 @@ class Event(namedtuple("Event", ["rule", "callback"])):
     is triggered.
     """
 
-    def __new__(cls, rule: 'EventRule | None', callback: 'Callable | None' = None):
+    def __new__(cls, rule: EventRule | None, callback: Callable | None = None):
         callback = callback or (lambda *args, **kwargs: None)
         return super(cls, cls).__new__(cls, rule=rule, callback=callback)
 
     async def handle_data(
-        self, context: BaseTradingAlgorithm, data: 'BarData', dt: 'datetime.datetime',
+        self, context: BaseTradingAlgorithm, data: BarData, dt: datetime.datetime,
     ) -> None:
         """
         Calls the callable only when the rule is triggered.
@@ -251,7 +251,7 @@ class StatelessRule(EventRule):
     Because these are pure, they can be composed to create new rules.
     """
 
-    def and_(self, rule: 'EventRule') -> 'ComposedRule':
+    def and_(self, rule: EventRule) -> 'ComposedRule':
         """
         Logical and of two rules, triggers only when both rules trigger.
         This follows the short circuiting rules for normal and.
@@ -277,12 +277,12 @@ class ComposedRule(StatelessRule):
 
     def __init__(
         self,
-        first: 'EventRule',
-        second: 'EventRule',
-        composer: (
-            'Callable[[Callable[[datetime.datetime], bool], Callable[[datetime.datetime], bool], dat'
-            'etime.datetime], bool]'
-        ),
+        first: EventRule,
+        second: EventRule,
+        composer: Callable[
+            [Callable[[datetime.datetime], bool], Callable[[datetime.datetime], bool], datetime.datetime],
+            bool,
+        ],
     ) -> None:
         if not (isinstance(first, StatelessRule) and isinstance(second, StatelessRule)):
             raise ValueError("Only two StatelessRules can be composed")
@@ -291,7 +291,7 @@ class ComposedRule(StatelessRule):
         self.second = second
         self.composer = composer
 
-    def should_trigger(self, dt: 'datetime.datetime'):
+    def should_trigger(self, dt: datetime.datetime):
         """
         Composes the two rules with a lazy composer.
         """
@@ -299,9 +299,9 @@ class ComposedRule(StatelessRule):
 
     @staticmethod
     def lazy_and(
-        first_should_trigger: 'Callable[[datetime.datetime], bool]',
-        second_should_trigger: 'Callable[[datetime.datetime], bool]',
-        dt: 'datetime.datetime',
+        first_should_trigger: Callable[[datetime.datetime], bool],
+        second_should_trigger: Callable[[datetime.datetime], bool],
+        dt: datetime.datetime,
     ):
         """
         Lazily ands the two rules. This will NOT call the should_trigger of the
@@ -314,7 +314,7 @@ class ComposedRule(StatelessRule):
         return self.first.cal
 
     @cal.setter
-    def cal(self, value: 'ExchangeCalendar') -> None:
+    def cal(self, value: ExchangeCalendar) -> None:
         # Thread the calendar through to the underlying rules.
         self.first.cal = self.second.cal = value
 
@@ -325,7 +325,7 @@ class Always(StatelessRule):
     """
 
     @staticmethod
-    def always_trigger(dt: 'datetime.datetime') -> bool:
+    def always_trigger(dt: datetime.datetime) -> bool:
         """
         A should_trigger implementation that will always trigger.
         """
@@ -340,7 +340,7 @@ class Never(StatelessRule):
     """
 
     @staticmethod
-    def never_trigger(dt: 'datetime.datetime') -> bool:
+    def never_trigger(dt: datetime.datetime) -> bool:
         """
         A should_trigger implementation that will never trigger.
         """
@@ -358,7 +358,7 @@ class AfterOpen(StatelessRule):
     <ziplime.utils.events.AfterOpen object at ...>
     """
 
-    def __init__(self, offset: 'datetime.timedelta | None' = None, **kwargs) -> None:
+    def __init__(self, offset: datetime.timedelta | None = None, **kwargs) -> None:
         self.offset = _build_offset(
             offset,
             kwargs,
@@ -371,7 +371,7 @@ class AfterOpen(StatelessRule):
 
         self._one_minute = datetime.timedelta(minutes=1)
 
-    def calculate_dates(self, dt: 'datetime.datetime') -> None:
+    def calculate_dates(self, dt: datetime.datetime) -> None:
         """Given a date, find that day's open and period end (open + offset)."""
 
         period_start = self.cal.session_first_minute(self.cal.minute_to_session(dt))
@@ -389,7 +389,7 @@ class AfterOpen(StatelessRule):
 
         self._period_end = self._period_start + self.offset - self._one_minute
 
-    def should_trigger(self, dt: 'datetime.datetime'):
+    def should_trigger(self, dt: datetime.datetime):
         # There are two reasons why we might want to recalculate the dates.
         # One is the first time we ever call should_trigger, when
         # self._period_start is none. The second is when we're on a new day,
@@ -418,7 +418,7 @@ class BeforeClose(StatelessRule):
     <ziplime.utils.events.BeforeClose object at ...>
     """
 
-    def __init__(self, offset: 'datetime.timedelta | None' = None, **kwargs) -> None:
+    def __init__(self, offset: datetime.timedelta | None = None, **kwargs) -> None:
         self.offset = _build_offset(
             offset,
             kwargs,
@@ -431,7 +431,7 @@ class BeforeClose(StatelessRule):
 
         self._one_minute = datetime.timedelta(minutes=1)
 
-    def calculate_dates(self, dt: 'datetime.datetime') -> None:
+    def calculate_dates(self, dt: datetime.datetime) -> None:
         """
         Given a dt, find that day's close and period start (close - offset).
         """
@@ -448,7 +448,7 @@ class BeforeClose(StatelessRule):
         self._period_start = self._period_end - self.offset
         self._period_close = self._period_end
 
-    def should_trigger(self, dt: 'datetime.datetime'):
+    def should_trigger(self, dt: datetime.datetime):
         # There are two reasons why we might want to recalculate the dates.
         # One is the first time we ever call should_trigger, when
         # self._period_start is none. The second is when we're on a new day,
@@ -474,7 +474,7 @@ class NotHalfDay(StatelessRule):
     A rule that only triggers when it is not a half day.
     """
 
-    def should_trigger(self, dt: 'datetime.datetime'):
+    def should_trigger(self, dt: datetime.datetime):
         return self.cal.minute_to_session(dt) not in self.cal.early_closes
 
 
@@ -486,7 +486,7 @@ class TradingDayOfWeekRule(StatelessRule, metaclass=ABCMeta):
 
         self.td_delta = (-n - 1) if invert else n
 
-    def should_trigger(self, dt: 'datetime.datetime'):
+    def should_trigger(self, dt: datetime.datetime):
         # is this market minute's period in the list of execution periods?
         val = self.cal.minute_to_session(dt, direction="none").value
         return val in self.execution_period_values
@@ -533,7 +533,7 @@ class TradingDayOfMonthRule(StatelessRule, metaclass=ABCMeta):
         else:
             self.td_delta = n
 
-    def should_trigger(self, dt: 'datetime.datetime'):
+    def should_trigger(self, dt: datetime.datetime):
         # is this market minute's period in the list of execution periods?
         value = self.cal.minute_to_session(dt, direction="none").value
         return value in self.execution_period_values
@@ -588,7 +588,7 @@ class TradingDayOfQuarterRule(StatelessRule, metaclass=ABCMeta):
             raise _out_of_range_error(MAX_QUARTER_RANGE)
         self.td_delta = (-n - 1) if invert else n
 
-    def should_trigger(self, dt: 'datetime.datetime'):
+    def should_trigger(self, dt: datetime.datetime):
         value = self.cal.minute_to_session(dt, direction="none").value
         return value in self.execution_period_values
 
@@ -628,7 +628,7 @@ class StatefulRule(EventRule):
     StatefulRules wrap other rules as state transformers.
     """
 
-    def __init__(self, rule: 'EventRule | None' = None) -> None:
+    def __init__(self, rule: EventRule | None = None) -> None:
         self.rule = rule or Always()
 
     @property
@@ -636,13 +636,13 @@ class StatefulRule(EventRule):
         return self.rule.cal
 
     @cal.setter
-    def cal(self, value: 'ExchangeCalendar') -> None:
+    def cal(self, value: ExchangeCalendar) -> None:
         # Thread the calendar through to the underlying rule.
         self.rule.cal = value
 
 
 class OncePerDay(StatefulRule):
-    def __init__(self, rule: 'EventRule | None' = None) -> None:
+    def __init__(self, rule: EventRule | None = None) -> None:
         self.triggered = False
 
         self.date = None
@@ -650,7 +650,7 @@ class OncePerDay(StatefulRule):
 
         super(OncePerDay, self).__init__(rule)
 
-    def should_trigger(self, dt: 'datetime.datetime'):
+    def should_trigger(self, dt: datetime.datetime):
         if self.date is None or dt >= self.next_date:
             # initialize or reset for new date
             self.triggered = False
@@ -677,7 +677,7 @@ class date_rules:
     """
 
     @staticmethod
-    def every_day() -> 'Always':
+    def every_day() -> Always:
         """Create a rule that triggers every day.
 
         Returns
@@ -687,7 +687,7 @@ class date_rules:
         return Always()
 
     @staticmethod
-    def month_start(days_offset: int = 0) -> 'NthTradingDayOfMonth':
+    def month_start(days_offset: int = 0) -> NthTradingDayOfMonth:
         """
         Create a rule that triggers a fixed number of trading days after the
         start of each month.
@@ -706,7 +706,7 @@ class date_rules:
         return NthTradingDayOfMonth(n=days_offset)
 
     @staticmethod
-    def month_end(days_offset: int = 0) -> 'NDaysBeforeLastTradingDayOfMonth':
+    def month_end(days_offset: int = 0) -> NDaysBeforeLastTradingDayOfMonth:
         """
         Create a rule that triggers a fixed number of trading days before the
         end of each month.
@@ -724,7 +724,7 @@ class date_rules:
         return NDaysBeforeLastTradingDayOfMonth(n=days_offset)
 
     @staticmethod
-    def quarter_start(days_offset: int = 0) -> 'NthTradingDayOfQuarter':
+    def quarter_start(days_offset: int = 0) -> NthTradingDayOfQuarter:
         """Create a rule that triggers a fixed number of trading days after each quarter starts.
 
         Parameters
@@ -740,7 +740,7 @@ class date_rules:
         return NthTradingDayOfQuarter(n=days_offset)
 
     @staticmethod
-    def quarter_end(days_offset: int = 0) -> 'NDaysBeforeLastTradingDayOfQuarter':
+    def quarter_end(days_offset: int = 0) -> NDaysBeforeLastTradingDayOfQuarter:
         """Create a rule that triggers a fixed number of trading days before each quarter ends.
 
         Parameters
@@ -756,7 +756,7 @@ class date_rules:
         return NDaysBeforeLastTradingDayOfQuarter(n=days_offset)
 
     @staticmethod
-    def week_start(days_offset: int = 0) -> 'NthTradingDayOfWeek':
+    def week_start(days_offset: int = 0) -> NthTradingDayOfWeek:
         """
         Create a rule that triggers a fixed number of trading days after the
         start of each week.
@@ -770,7 +770,7 @@ class date_rules:
         return NthTradingDayOfWeek(n=days_offset)
 
     @staticmethod
-    def week_end(days_offset: int = 0) -> 'NDaysBeforeLastTradingDayOfWeek':
+    def week_end(days_offset: int = 0) -> NDaysBeforeLastTradingDayOfWeek:
         """
         Create a rule that triggers a fixed number of trading days before the
         end of each week.
@@ -794,10 +794,10 @@ class time_rules:
 
     @staticmethod
     def market_open(
-        offset: 'datetime.timedelta | None' = None,
-        hours: 'int | None' = None,
-        minutes: 'int | None' = None,
-    ) -> 'AfterOpen':
+        offset: datetime.timedelta | None = None,
+        hours: int | None = None,
+        minutes: int | None = None,
+    ) -> AfterOpen:
         """
         Create a rule that triggers at a fixed offset from market open.
 
@@ -831,10 +831,10 @@ class time_rules:
 
     @staticmethod
     def market_close(
-        offset: 'datetime.timedelta | None' = None,
-        hours: 'int | None' = None,
-        minutes: 'int | None' = None,
-    ) -> 'BeforeClose':
+        offset: datetime.timedelta | None = None,
+        hours: int | None = None,
+        minutes: int | None = None,
+    ) -> BeforeClose:
         """
         Create a rule that triggers at a fixed offset from market close.
 
@@ -898,7 +898,7 @@ def _check_if_not_called(v):
     raise TypeError(msg)
 
 
-def make_eventrule(date_rule: 'EventRule', time_rule: 'EventRule', cal: 'ExchangeCalendar', half_days: bool = True):
+def make_eventrule(date_rule: EventRule, time_rule: EventRule, cal: ExchangeCalendar, half_days: bool = True):
     """
     Constructs an event rule from the factory api.
     """

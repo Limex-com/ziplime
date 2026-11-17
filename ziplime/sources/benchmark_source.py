@@ -137,7 +137,7 @@ class BenchmarkSource:
 
         return daily_returns.filter(pl.col("date").is_between(start, end))
 
-    def daily_returns_by_session(self, sessions: 'Iterable[datetime.date]') -> pl.DataFrame:
+    def daily_returns_by_session(self, sessions: Iterable[datetime.date]) -> pl.DataFrame:
         """One benchmark return per **session**, in session order.
 
         :meth:`daily_returns` answers with the days the benchmark has bars for, which is not the

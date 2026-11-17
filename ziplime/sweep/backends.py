@@ -87,7 +87,7 @@ class Backend:
             return self.xp.asnumpy(values)
         return np.asarray(values)
 
-    def compile(self, function: 'Callable'):
+    def compile(self, function: Callable):
         """The step compiled into a few kernels. Not shapeless: on CUDA that fails inside MLX
         (an illegal memory access) and on Apple GPUs it is slower; ZIPLIME_SWEEP_SHAPELESS=1 to try."""
         if self.name != "mlx":

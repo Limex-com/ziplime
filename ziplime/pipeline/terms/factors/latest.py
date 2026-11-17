@@ -15,5 +15,5 @@ class Latest(LatestMixin, CustomFactor):
 
     window_length = 1
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', data: 'np.ndarray') -> None:
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, data: np.ndarray) -> None:
         out[:] = data[-1]

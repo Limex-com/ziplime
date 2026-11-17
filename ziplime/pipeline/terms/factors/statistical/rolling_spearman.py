@@ -47,11 +47,11 @@ class RollingSpearman(RollingCorrelation):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        base_data: 'np.ndarray',
-        target_data: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        base_data: np.ndarray,
+        target_data: np.ndarray,
     ) -> None:
         # If `target_data` is a Slice or single column of data, broadcast it
         # out to the same shape as `base_data`, then compute column-wise. This

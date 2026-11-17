@@ -26,7 +26,7 @@ class DailySummary(SingleInputMixin, Factor):
     window_length = 0
     params = ("func",)
 
-    def __new__(cls, func: 'Callable', input_: 'Factor', mask: 'Filter | None', dtype: 'np.dtype'):
+    def __new__(cls, func: Callable, input_: Factor, mask: Filter | None, dtype: np.dtype):
         # TODO: We should be able to support datetime64 as well, but that
         # requires extra care for handling NaT.
         if dtype != float64_dtype:
@@ -44,7 +44,7 @@ class DailySummary(SingleInputMixin, Factor):
             mask=mask,
         )
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         func = self.params["func"]
 
         data = arrays[0]

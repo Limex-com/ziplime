@@ -99,7 +99,7 @@ NUMEXPR_MATH_FUNCS = {
 NPY_MAXARGS = 32
 
 
-def _ensure_element(tup: 'tuple[Term, ...]', elem: 'Term'):
+def _ensure_element(tup: tuple[Term, ...], elem: Term):
     """
     Create a tuple containing all elements of tup, plus elem.
 
@@ -171,7 +171,7 @@ class NumericalExpression(ComputableTerm):
 
     window_length = 0
 
-    def __new__(cls, expr: str, binds: 'tuple[Term, ...]', dtype: 'DTypeLike | None'):
+    def __new__(cls, expr: str, binds: tuple[Term, ...], dtype: DTypeLike | None):
         # We always allow filters to be used in windowed computations.
         # Otherwise, an expression is window_safe if all its constituents are
         # window_safe.
@@ -223,7 +223,7 @@ class NumericalExpression(ComputableTerm):
             )
         super(NumericalExpression, self)._validate()
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         """
         Compute our stored expression string with numexpr.
         """
@@ -237,7 +237,7 @@ class NumericalExpression(ComputableTerm):
         )
         return out
 
-    def _rebind_variables(self, new_inputs: 'tuple[Term, ...]'):
+    def _rebind_variables(self, new_inputs: tuple[Term, ...]):
         """
         Return self._expr with all variables rebound to the indices implied by
         new_inputs.
@@ -276,7 +276,7 @@ class NumericalExpression(ComputableTerm):
         new_other_expr = other._rebind_variables(new_inputs)
         return new_self_expr, new_other_expr, new_inputs
 
-    def build_binary_op(self, op: str, other: 'Term | Number'):
+    def build_binary_op(self, op: str, other: Term | Number):
         """
         Compute new expression strings and a new inputs tuple for combining
         self and other with a binary operator.

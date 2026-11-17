@@ -30,6 +30,7 @@ catch one contrived to hide between them. It is a smoke alarm, not a proof.
 
 import datetime
 from collections.abc import Callable
+from typing import Self
 
 import numpy as np
 import pandas as pd
@@ -121,7 +122,7 @@ class PricePanel:
             {name: panel.truncated(rows) for name, panel in self._datasets.items()})
 
     @classmethod
-    def from_bundle_rows(cls, rows: pl.DataFrame, names: dict[int, str]) -> "PricePanel":
+    def from_bundle_rows(cls, rows: pl.DataFrame, names: dict[int, str]) -> Self:
         """Pivot flat ``date``/``sid`` bundle rows into one wide frame per field."""
         frame = rows.to_pandas()
         frame["_name"] = frame["sid"].map(names)
@@ -269,7 +270,7 @@ class SignalPanel:
     look ahead here by being careless, only by reaching past this object entirely.
     """
 
-    def __init__(self, frames: dict[str, pd.DataFrame | pd.Series], clock: 'Callable[[], datetime.datetime]') -> None:
+    def __init__(self, frames: dict[str, pd.DataFrame | pd.Series], clock: Callable[[], datetime.datetime]) -> None:
         self._frames = frames
         self._clock = clock
         # Every signal shares the panel's index -- `normalise_signals` refuses one that does not --
@@ -372,7 +373,7 @@ def _numeric_where_possible(column: pd.Series) -> pd.Series:
 
 
 def normalise_signals(
-    returned: 'pd.DataFrame | pd.Series | dict[str, pd.DataFrame | pd.Series]',
+    returned: pd.DataFrame | pd.Series | dict[str, pd.DataFrame | pd.Series],
     index: pd.DatetimeIndex,
 ) -> dict[str, pd.DataFrame | pd.Series]:
     """Accept what a strategy naturally returns, and insist it is indexed like the panel.
@@ -409,7 +410,7 @@ def normalise_signals(
 
 
 def verify_causality(
-    compute: 'Callable[[PricePanel], dict[str, pd.DataFrame | pd.Series]]',
+    compute: Callable[[PricePanel], dict[str, pd.DataFrame | pd.Series]],
     panel: PricePanel,
     computed: dict[str, pd.DataFrame | pd.Series],
     cuts: int = DEFAULT_CUTS,
@@ -451,7 +452,7 @@ def verify_causality(
                               rows=rows, stamp=panel.index[rows - 1])
 
 
-def _compare_last_row(name: str, full, partial, rows: int, stamp: 'pd.Timestamp') -> None:
+def _compare_last_row(name: str, full, partial, rows: int, stamp: pd.Timestamp) -> None:
     """Fail unless the truncated computation reproduces the full one's value at that bar."""
     full_values = np.asarray(pd.Series(full).to_numpy() if isinstance(full, pd.Series) else [full])
     part_values = np.asarray(pd.Series(partial).to_numpy() if isinstance(partial, pd.Series) else [partial])

@@ -39,7 +39,7 @@ class BusinessDaysUntilNextEvent(Factor):
     window_length = 0
     dtype = float64_dtype
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
 
         # Coerce from [ns] to [D] for numpy busday_count.
         announce_dates = arrays[0].astype(datetime64D_dtype)

@@ -16,21 +16,21 @@ class SingleAsset(Filter):
     inputs = []
     window_length = 1
 
-    def __new__(cls, asset: 'ExchangeAsset | ContinuousFuture'):
+    def __new__(cls, asset: ExchangeAsset | ContinuousFuture):
         return super(SingleAsset, cls).__new__(cls, asset=asset)
 
-    def _init(self, asset: 'ExchangeAsset | ContinuousFuture', *args, **kwargs):
+    def _init(self, asset: ExchangeAsset | ContinuousFuture, *args, **kwargs):
         self._asset = asset
         return super(SingleAsset, self)._init(*args, **kwargs)
 
     @classmethod
-    def _static_identity(cls, asset: 'ExchangeAsset | ContinuousFuture', *args, **kwargs):
+    def _static_identity(cls, asset: ExchangeAsset | ContinuousFuture, *args, **kwargs):
         return (
             super(SingleAsset, cls)._static_identity(*args, **kwargs),
             asset,
         )
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         is_my_asset = assets == self._asset.sid
         out = repeat_first_axis(is_my_asset, len(mask))
         # Raise an exception if `self._asset` does not exist for the entirety

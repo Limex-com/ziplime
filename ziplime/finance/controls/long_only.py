@@ -13,7 +13,7 @@ class LongOnly(TradingControl):
         super(LongOnly, self).__init__(on_error)
 
     async def validate(self, asset: ExchangeAsset, amount: int, portfolio: Portfolio,
-                       algo_datetime: 'datetime.datetime', algo_current_data: 'BarData') -> None:
+                       algo_datetime: datetime.datetime, algo_current_data: BarData) -> None:
         """
         Fail if we would hold negative shares of asset after completing this
         order.

@@ -46,7 +46,7 @@ from ziplime.assets.entities.split import Split
 from ziplime.assets.services.asset_service import AssetService
 
 
-def _is_margined_option(instrument: 'Asset') -> bool:
+def _is_margined_option(instrument: Asset) -> bool:
     """Whether ``instrument`` is an option that settles variation margin rather than a premium.
 
     A free function rather than a method because three separate places have to agree on it -- the
@@ -652,7 +652,7 @@ class Ledger:
             else:
                 future.setdefault(stamp, {}).setdefault(key, []).append(amount)
 
-        def check(stamp: 'datetime.datetime') -> None:
+        def check(stamp: datetime.datetime) -> None:
             for (exchange, account, currency), values in amounts.items():
                 balance = self._cash_balance(values)
                 if balance < 0 and changes[(exchange, account, currency)] < 0:
@@ -936,7 +936,7 @@ class Ledger:
         else:
             self.__dirty_portfolio = value
 
-    def start_of_session(self, session_label: 'datetime.date | datetime.datetime') -> None:
+    def start_of_session(self, session_label: datetime.date | datetime.datetime) -> None:
         self._processed_transactions.clear()
         self._orders_by_modified.clear()
         self._orders_by_id.clear()
@@ -1135,7 +1135,7 @@ class Ledger:
         if currency_trade:
             return
 
-    def process_splits(self, splits: 'Iterable[Split]') -> None:
+    def process_splits(self, splits: Iterable[Split]) -> None:
         """Processes a list of splits by modifying any positions as needed.
 
         Parameters
@@ -1282,7 +1282,7 @@ class Ledger:
         self,
         asset: ExchangeAsset,
         quoted_price: float,
-        dt: 'datetime.date | datetime.datetime',
+        dt: datetime.date | datetime.datetime,
     ) -> float:
         """What one bond of ``asset`` changes hands for at ``quoted_price``: clean value plus
         accrued coupon interest."""
@@ -1299,8 +1299,8 @@ class Ledger:
 
     async def process_bond_events(
         self,
-        next_session: 'datetime.date | datetime.datetime',
-        asset_service: 'AssetService',
+        next_session: datetime.date | datetime.datetime,
+        asset_service: AssetService,
     ) -> None:
         """Earn and pay the bond schedule for ``next_session``.
 
@@ -1340,8 +1340,8 @@ class Ledger:
 
     async def redeem_matured_bonds(
         self,
-        session: 'datetime.date | datetime.datetime',
-        asset_service: 'AssetService | None' = None,
+        session: datetime.date | datetime.datetime,
+        asset_service: AssetService | None = None,
     ) -> None:
         """Repay the principal of every bond position that has reached maturity.
 
@@ -1392,8 +1392,8 @@ class Ledger:
 
     async def process_dividends(
         self,
-        next_session: 'datetime.date | datetime.datetime',
-        asset_service: 'AssetService',
+        next_session: datetime.date | datetime.datetime,
+        asset_service: AssetService,
     ) -> None:
         """Process dividends for the next session.
 
@@ -1494,7 +1494,7 @@ class Ledger:
         self._portfolio.portfolio_value += change_amount
         self._portfolio.cash += change_amount
 
-    def transactions(self, dt: 'datetime.datetime | None' = None):
+    def transactions(self, dt: datetime.datetime | None = None):
         """Retrieve the dict-form of all of the transactions in a given bar or
         for the whole simulation.
 
@@ -1520,7 +1520,7 @@ class Ledger:
 
         return self._processed_transactions.get(dt, [])
 
-    def orders(self, dt: 'datetime.datetime | None' = None):
+    def orders(self, dt: datetime.datetime | None = None):
         """Retrieve the dict-form of all of the orders in a given bar or for
         the whole simulation.
 
@@ -1598,7 +1598,7 @@ class Ledger:
             )
         return next(iter(totals.values()), 0.0)
 
-    def _get_payout_total(self, positions: 'Mapping[tuple[str, str, ExchangeAsset], Position]'):
+    def _get_payout_total(self, positions: Mapping[tuple[str, str, ExchangeAsset], Position]):
 
         total = 0
         for asset, old_price in self._payout_last_sale_prices.items():

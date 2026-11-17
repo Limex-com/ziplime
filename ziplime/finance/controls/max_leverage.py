@@ -31,10 +31,10 @@ class MaxLeverage(AccountControl):
 
     async def validate(
         self,
-        _portfolio: 'Portfolio',
-        _account: 'Account',
-        _algo_datetime: 'datetime.datetime',
-        _algo_current_data: 'BarData',
+        _portfolio: Portfolio,
+        _account: Account,
+        _algo_datetime: datetime.datetime,
+        _algo_current_data: BarData,
     ) -> None:
         """Fail if the leverage is greater than the allowed leverage."""
         if _account.leverage > self.max_leverage:

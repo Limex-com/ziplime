@@ -37,7 +37,7 @@ class SweepContext:
     OWN = {"algorithm", "_asset_service", "_found", "requested", "_indicators", "_scheduled",
            "_commission", "_slippage", "_cancel_policy", "universe", "datasets"}
 
-    def __init__(self, algorithm: AlgorithmFile, asset_service: 'AssetService', found: dict | None = None) -> None:
+    def __init__(self, algorithm: AlgorithmFile, asset_service: AssetService, found: dict | None = None) -> None:
         self.algorithm = algorithm
         self._asset_service = asset_service
         #: Instruments already looked up: initialize runs once per distinct config
@@ -68,15 +68,15 @@ class SweepContext:
     async def symbols(self, *symbols: str, **kwargs):
         return [await self.symbol(symbol, **kwargs) for symbol in symbols]
 
-    def indicators(self, **expressions: 'pl.Expr') -> None:
+    def indicators(self, **expressions: pl.Expr) -> None:
         """As TradingAlgorithm.indicators: the expressions are kept, not computed."""
         self._indicators.update(expressions)
 
     def schedule_function(
         self,
-        func: 'Callable',
-        date_rule: 'EventRule | None' = None,
-        time_rule: 'EventRule | None' = None,
+        func: Callable,
+        date_rule: EventRule | None = None,
+        time_rule: EventRule | None = None,
         half_days: bool = True,
         calendar=None,
     ) -> None:
@@ -84,9 +84,9 @@ class SweepContext:
 
     def set_commission(
         self,
-        us_equities: 'CommissionModel | None' = None,
-        us_futures: 'CommissionModel | None' = None,
-        bonds: 'CommissionModel | None' = None,
+        us_equities: CommissionModel | None = None,
+        us_futures: CommissionModel | None = None,
+        bonds: CommissionModel | None = None,
     ) -> None:
         if bonds is not None:
             raise SweepError("Bonds are not supported in a sweep.")
@@ -95,16 +95,16 @@ class SweepContext:
 
     def set_slippage(
         self,
-        us_equities: 'SlippageModel | None' = None,
-        us_futures: 'SlippageModel | None' = None,
-        bonds: 'SlippageModel | None' = None,
+        us_equities: SlippageModel | None = None,
+        us_futures: SlippageModel | None = None,
+        bonds: SlippageModel | None = None,
     ) -> None:
         if bonds is not None:
             raise SweepError("Bonds are not supported in a sweep.")
         self._slippage.update({k: v for k, v in (("equities", us_equities),
                                                   ("futures", us_futures)) if v is not None})
 
-    def set_cancel_policy(self, cancel_policy: 'CancelPolicy') -> None:
+    def set_cancel_policy(self, cancel_policy: CancelPolicy) -> None:
         self._cancel_policy = cancel_policy
 
     def state(self) -> dict:
@@ -124,7 +124,7 @@ class Combinations:
         combos: list[dict],
         shared: dict,
         paths: dict[str, str],
-        config_class: 'type[BaseAlgorithmConfig]',
+        config_class: type[BaseAlgorithmConfig],
     ) -> None:
         self.combos, self.shared, self.paths, self.config_class = combos, shared, paths, config_class
 
@@ -139,7 +139,7 @@ class Combinations:
             raise SweepError(f"Grid values {self.combos[index]} do not fit "
                              f"{self.config_class.__name__}:\n{error}") from None
 
-    def configs(self, indices: 'Iterable[int]') -> list:
+    def configs(self, indices: Iterable[int]) -> list:
         return [self.config(index) for index in indices]
 
     def key(self, index: int, fields: set[str]) -> tuple:
@@ -181,7 +181,7 @@ def load_algorithm(params: SweepParams, base: Path, combos: list[dict]):
 class _ReadTracker:
     """A config that records which of its fields were read."""
 
-    def __init__(self, config: 'BaseAlgorithmConfig') -> None:
+    def __init__(self, config: BaseAlgorithmConfig) -> None:
         object.__setattr__(self, "_config", config)
         object.__setattr__(self, "read", set())
 
@@ -210,8 +210,8 @@ class Initialized:
 
 async def run_initialize(
     algorithm: AlgorithmFile,
-    asset_service: 'AssetService',
-    config: 'BaseAlgorithmConfig',
+    asset_service: AssetService,
+    config: BaseAlgorithmConfig,
     found: dict,
 ) -> Initialized:
     algorithm.config = config
@@ -228,7 +228,7 @@ async def run_initialize(
     return Initialized(context)
 
 
-def symbols_in(function: 'Callable') -> list[tuple[str, str | None]]:
+def symbols_in(function: Callable) -> list[tuple[str, str | None]]:
     """The tickers a hook passes to context.symbol / context.symbols: string constants, and the
     items of a list of them the call's argument loops over
     (``{s: await context.symbol(s) for s in ["SOXL", "TQQQ"]}``)."""
@@ -247,7 +247,7 @@ def symbols_in(function: 'Callable') -> list[tuple[str, str | None]]:
                 if isinstance(target, ast.Name):
                     lists[target.id] = [e.value for e in node.value.elts]
 
-    def items(node: 'ast.AST'):
+    def items(node: ast.AST):
         if isinstance(node, (ast.List, ast.Tuple)):
             return [e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
         if isinstance(node, ast.Name):
@@ -277,7 +277,7 @@ def symbols_in(function: 'Callable') -> list[tuple[str, str | None]]:
     return found
 
 
-async def initialize_each(algorithm: AlgorithmFile, asset_service: 'AssetService', combinations: Combinations,
+async def initialize_each(algorithm: AlgorithmFile, asset_service: AssetService, combinations: Combinations,
                           found: dict) -> list[Initialized]:
     """initialize for every combination -- once per distinct value of the fields it reads.
 

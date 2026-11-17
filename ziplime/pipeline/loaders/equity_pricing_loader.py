@@ -47,7 +47,7 @@ class EquityPricingLoader(PipelineLoader):
        Reader providing currency conversions.
     """
 
-    def __init__(self, data_source: DataSource, asset_service: AssetService, fx_reader: 'FXRateReader | None') -> None:
+    def __init__(self, data_source: DataSource, asset_service: AssetService, fx_reader: FXRateReader | None) -> None:
         self.data_source = data_source
         self.asset_service = asset_service
         self.fx_reader = fx_reader
@@ -81,10 +81,10 @@ class EquityPricingLoader(PipelineLoader):
     async def load_adjusted_array(
         self,
         domain: Domain,
-        columns: 'list[BoundColumn]',
-        dates: 'pd.DatetimeIndex',
-        sids: 'pd.Index',
-        mask: 'np.ndarray',
+        columns: list[BoundColumn],
+        dates: pd.DatetimeIndex,
+        sids: pd.Index,
+        mask: np.ndarray,
     ):
         # load_adjusted_array is called with dates on which the user's algo
         # will be shown data, which means we need to return the data that would
@@ -150,10 +150,10 @@ class EquityPricingLoader(PipelineLoader):
 
     def _inplace_currency_convert(
         self,
-        columns: 'list[BoundColumn]',
-        arrays: 'list[np.ndarray]',
-        dates: 'pd.DatetimeIndex',
-        sids: 'pd.Index',
+        columns: list[BoundColumn],
+        arrays: list[np.ndarray],
+        dates: pd.DatetimeIndex,
+        sids: pd.Index,
     ):
         """
         Currency convert raw data loaded for ``column``.
@@ -203,7 +203,7 @@ class EquityPricingLoader(PipelineLoader):
             for arr in arrays:
                 multiply(arr, rates, out=arr)
 
-    def _split_column_types(self, columns: 'list[BoundColumn]'):
+    def _split_column_types(self, columns: list[BoundColumn]):
         """Split out currency columns from OHLCV columns.
 
         Parameters

@@ -173,7 +173,7 @@ def build_grouped_ownership_map(conn, table, key_from_row, value_from_row, group
 
 
 @curry
-def _filter_kwargs(names: 'set[str] | frozenset[str]', dict_):
+def _filter_kwargs(names: set[str] | frozenset[str], dict_):
     """Filter out kwargs from a dictionary.
 
     Parameters
@@ -239,9 +239,9 @@ def _encode_continuous_future_sid(
     root_symbol: str,
     offset: int,
     roll_style: str,
-    adjustment_style: 'str | None',
-    mic: 'str | None' = None,
-    roll_offset_days: 'int | None' = None,
+    adjustment_style: str | None,
+    mic: str | None = None,
+    roll_offset_days: int | None = None,
 ):
     # Generate a unique int identifier. The exchange is part of it: NG on the Moscow Exchange and
     # NG on NYMEX are two chains, and so are Si (Moscow) and SI (COMEX), which upper() made one.

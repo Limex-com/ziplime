@@ -12,11 +12,11 @@ class PipelineLoader:
 
     async def load_adjusted_array(
         self,
-        domain: 'Domain',
-        columns: 'list[BoundColumn]',
-        dates: 'pd.DatetimeIndex',
-        sids: 'pd.Index',
-        mask: 'np.ndarray',
+        domain: Domain,
+        columns: list[BoundColumn],
+        dates: pd.DatetimeIndex,
+        sids: pd.Index,
+        mask: np.ndarray,
     ):
         """
         Load data for ``columns`` as AdjustedArrays.

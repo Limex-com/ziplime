@@ -33,7 +33,7 @@ class FixedSlippage(SlippageModel):
             spread=self.spread,
         )
 
-    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: 'Order',
+    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: Order,
                             price: float = None):
         # `simulate` passes the bar's price; this used to take no `price`, so every order raised
         # TypeError, and the fallback read added a float to a frame and returned the full amount

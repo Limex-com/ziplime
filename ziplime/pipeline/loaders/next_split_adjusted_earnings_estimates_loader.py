@@ -13,16 +13,16 @@ class NextSplitAdjustedEarningsEstimatesLoader(
 ):
     def collect_split_adjustments(
         self,
-        adjustments_for_sid: 'dict[str, dict[int, list[Adjustment]]]',
-        requested_qtr_data: 'pd.DataFrame',
-        dates: 'pd.DatetimeIndex',
+        adjustments_for_sid: dict[str, dict[int, list[Adjustment]]],
+        requested_qtr_data: pd.DataFrame,
+        dates: pd.DatetimeIndex,
         sid: int,
         sid_idx: int,
-        sid_estimates: 'pd.DataFrame',
+        sid_estimates: pd.DataFrame,
         split_adjusted_asof_idx: int,
-        pre_adjustments: 'tuple[np.ndarray, np.ndarray]',
-        post_adjustments: 'tuple[np.ndarray, np.ndarray, pd.DatetimeIndex]',
-        requested_split_adjusted_columns: 'list[str]',
+        pre_adjustments: tuple[np.ndarray, np.ndarray],
+        post_adjustments: tuple[np.ndarray, np.ndarray, pd.DatetimeIndex],
+        requested_split_adjusted_columns: list[str],
     ) -> None:
         """Collect split adjustments for future quarters. Re-apply adjustments
         that would be overwritten by overwrites. Merge split adjustments with

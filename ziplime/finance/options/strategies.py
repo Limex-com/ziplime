@@ -441,7 +441,7 @@ def custom(name: str, legs: Iterable[tuple[ExchangeAsset, float]]) -> OptionStra
                           legs=tuple(_leg(listing, ratio) for listing, ratio in legs))
 
 
-def _require_sides(call: 'ExchangeAsset', put: 'ExchangeAsset') -> None:
+def _require_sides(call: ExchangeAsset, put: ExchangeAsset) -> None:
     if not call.is_call:
         raise ValueError(f"Expected a call, got a put at {call.strike:g}.")
     if not put.is_put:

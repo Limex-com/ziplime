@@ -151,7 +151,7 @@ class YahooOptionChainSource(OptionChainSource):
                 f"interest {self._minimum_open_interest}).")
         return specs
 
-    def _to_specs(self, frame: 'pd.DataFrame', underlying_symbol: str, expiry: datetime.date,
+    def _to_specs(self, frame: pd.DataFrame, underlying_symbol: str, expiry: datetime.date,
                   option_type: OptionType, first: datetime.date,
                   reference: float | None) -> list[ContractSpec]:
         specs = []
@@ -270,7 +270,7 @@ class YahooOptionChainSource(OptionChainSource):
                 data = data.with_columns(pl.lit(None, dtype=pl.Float64).alias(column))
         return data.select(BAR_COLUMNS).sort(["symbol", "date"])
 
-    def _interval(self, stamps: 'list[datetime.datetime]') -> str:
+    def _interval(self, stamps: list[datetime.datetime]) -> str:
         """Yahoo's name for the bar size the clock is running at."""
         if len(stamps) < 2:
             return "1d"
@@ -301,7 +301,7 @@ class YahooOptionChainSource(OptionChainSource):
             out[symbol] = part.dropna(how="all")
         return out
 
-    def _to_bars(self, frame: 'pd.DataFrame', spec: ContractSpec, zone: str) -> pl.DataFrame:
+    def _to_bars(self, frame: pd.DataFrame, spec: ContractSpec, zone: str) -> pl.DataFrame:
         """One contract's Yahoo frame in the bundle's own columns."""
         local = frame.tz_convert(zone) if frame.index.tz is not None else frame.tz_localize(zone)
         closes = local["Close"].astype(float)

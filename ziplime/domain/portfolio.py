@@ -8,7 +8,7 @@ from ziplime.domain.position import Position
 
 
 
-def _in_chain(position: 'Position', continuous_future: ContinuousFuture) -> bool:
+def _in_chain(position: Position, continuous_future: ContinuousFuture) -> bool:
     """Whether ``position`` is a contract of ``continuous_future``'s chain, on its exchange."""
     asset = position.asset
     return (getattr(asset.asset, "root_symbol", None) == continuous_future.root_symbol
@@ -25,7 +25,7 @@ class Positions(dict):
     rather than picking one. Iteration and the tuple keys are unchanged.
     """
 
-    def _by_asset(self, asset: 'ExchangeAsset | ContinuousFuture'):
+    def _by_asset(self, asset: ExchangeAsset | ContinuousFuture):
         sid = getattr(asset, "sid", None)
         found = [position for key, position in dict.items(self)
                  if key[-1] == asset or (sid is not None and getattr(key[-1], "sid", None) == sid)]
@@ -34,7 +34,7 @@ class Positions(dict):
                              f"(exchange, trading account, asset).")
         return found[0] if found else None
 
-    def __getitem__(self, key: 'tuple[str, str, ExchangeAsset] | ExchangeAsset | ContinuousFuture'):
+    def __getitem__(self, key: tuple[str, str, ExchangeAsset] | ExchangeAsset | ContinuousFuture):
         if isinstance(key, tuple) or dict.__contains__(self, key):
             return dict.__getitem__(self, key)
         position = self._by_asset(key)
@@ -42,13 +42,13 @@ class Positions(dict):
             raise KeyError(key)
         return position
 
-    def get(self, key: 'tuple[str, str, ExchangeAsset] | ExchangeAsset | ContinuousFuture', default=None):
+    def get(self, key: tuple[str, str, ExchangeAsset] | ExchangeAsset | ContinuousFuture, default=None):
         if isinstance(key, tuple) or dict.__contains__(self, key):
             return dict.get(self, key, default)
         position = self._by_asset(key)
         return default if position is None else position
 
-    def __contains__(self, key: 'tuple[str, str, ExchangeAsset] | ExchangeAsset | ContinuousFuture'):
+    def __contains__(self, key: tuple[str, str, ExchangeAsset] | ExchangeAsset | ContinuousFuture):
         if isinstance(key, tuple) or dict.__contains__(self, key):
             return dict.__contains__(self, key)
         return self._by_asset(key) is not None

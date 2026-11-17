@@ -72,11 +72,11 @@ class Term(ABC):
 
     def __new__(
         cls,
-        domain: 'Domain | None' = None,
-        dtype: 'DTypeLike | None' = None,
+        domain: Domain | None = None,
+        dtype: DTypeLike | None = None,
         missing_value=None,
-        window_safe: 'bool | None' = None,
-        ndim: 'int | None' = None,
+        window_safe: bool | None = None,
+        ndim: int | None = None,
         # params is explicitly not allowed to be passed to an instance.
         *args,
         **kwargs,
@@ -224,12 +224,12 @@ class Term(ABC):
     @classmethod
     def _static_identity(
         cls,
-        domain: 'Domain',
-        dtype: 'np.dtype',
+        domain: Domain,
+        dtype: np.dtype,
         missing_value,
         window_safe: bool,
         ndim: int,
-        params: 'tuple[tuple[str, Hashable], ...]',
+        params: tuple[tuple[str, Hashable], ...],
     ):
         """
         Return the identity of the Term that would be constructed from the
@@ -246,12 +246,12 @@ class Term(ABC):
 
     def _init(
         self,
-        domain: 'Domain',
-        dtype: 'np.dtype',
+        domain: Domain,
+        dtype: np.dtype,
         missing_value,
         window_safe: bool,
         ndim: int,
-        params: 'tuple[tuple[str, Hashable], ...]',
+        params: tuple[tuple[str, Hashable], ...],
     ):
         """
         Parameters
@@ -313,9 +313,9 @@ class Term(ABC):
 
     def compute_extra_rows(
         self,
-        all_dates: 'pd.DatetimeIndex',
-        start_date: 'pd.Timestamp',
-        end_date: 'pd.Timestamp',
+        all_dates: pd.DatetimeIndex,
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
         min_extra_rows: int,
     ):
         """

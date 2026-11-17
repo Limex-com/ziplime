@@ -101,7 +101,7 @@ class ExpiringCache:
     KeyError: 'foo'
     """
 
-    def __init__(self, cache=None, cleanup: 'Callable' = lambda value_to_clean: None) -> None:
+    def __init__(self, cache=None, cleanup: Callable = lambda value_to_clean: None) -> None:
         if cache is not None:
             self._cache = cache
         else:

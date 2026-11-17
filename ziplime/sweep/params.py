@@ -23,6 +23,7 @@ import datetime
 import itertools
 import math
 from pathlib import Path
+from typing import Self
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -93,7 +94,7 @@ class Commission(Strict):
         }[self.type]()
 
     @classmethod
-    def of(cls, model: 'CommissionModel') -> "Commission":
+    def of(cls, model: CommissionModel) -> Self:
         """The sweep's description of a ziplime commission model (set_commission in initialize)."""
         if model is None or isinstance(model, NoCommission):
             return cls()
@@ -122,7 +123,7 @@ class Slippage(Strict):
         return NoSlippage()
 
     @classmethod
-    def of(cls, model: 'SlippageModel') -> "Slippage":
+    def of(cls, model: SlippageModel) -> Self:
         """The sweep's description of a ziplime slippage model (set_slippage in initialize)."""
         if model is None or isinstance(model, NoSlippage):
             return cls()

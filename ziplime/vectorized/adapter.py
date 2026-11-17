@@ -78,7 +78,7 @@ class ReconciliationError(ValueError):
 
     def __init__(
         self,
-        session: 'datetime.date | datetime.datetime',
+        session: datetime.date | datetime.datetime,
         replayed: float,
         reported: float,
         tolerance: float,
@@ -248,7 +248,7 @@ def _reject_unrepresentable_instruments(listings: dict[str, ExchangeAsset]) -> N
     )
 
 
-def _reject_ignored_cost_models(exchange: 'Exchange', listings: dict[str, ExchangeAsset]) -> None:
+def _reject_ignored_cost_models(exchange: Exchange, listings: dict[str, ExchangeAsset]) -> None:
     """Refuse an exchange whose cost models this path cannot run.
 
     vectorbt decides its own fills: it applies ``fees``, ``fixed_fees`` and ``slippage`` inside
@@ -309,10 +309,10 @@ async def to_execution_result(
         portfolio,
         listings: dict[str, ExchangeAsset],
         prices: pd.DataFrame,
-        trading_calendar: 'ExchangeCalendar | None',
-        exchange: 'Exchange | None',
-        asset_service: 'AssetService | None' = None,
-        benchmark_source: 'BenchmarkSource | None' = None,
+        trading_calendar: ExchangeCalendar | None,
+        exchange: Exchange | None,
+        asset_service: AssetService | None = None,
+        benchmark_source: BenchmarkSource | None = None,
         metrics=None,
         emission_rate: datetime.timedelta = datetime.timedelta(days=1),
         trading_account_id: str = "vectorized_account",
@@ -537,7 +537,7 @@ async def to_execution_result(
     )
 
 
-def _session_boundaries(index: 'pd.DatetimeIndex') -> tuple[list[int], list[int]]:
+def _session_boundaries(index: pd.DatetimeIndex) -> tuple[list[int], list[int]]:
     """Positions of the first and last bar of each trading session, in chronological order.
 
     Ordered lists rather than sets, and that is not a detail. Built as sets, the session closes
@@ -565,12 +565,12 @@ def _session_boundaries(index: 'pd.DatetimeIndex') -> tuple[list[int], list[int]
 
 
 def _zero_benchmark(
-    asset_service: 'AssetService',
-    trading_calendar: 'ExchangeCalendar',
-    sessions: 'pd.DatetimeIndex',
-    exchange: 'Exchange',
+    asset_service: AssetService,
+    trading_calendar: ExchangeCalendar,
+    sessions: pd.DatetimeIndex,
+    exchange: Exchange,
     emission_rate: datetime.timedelta,
-    index: 'pd.DatetimeIndex',
+    index: pd.DatetimeIndex,
 ) -> BenchmarkSource:
     """A benchmark of zero returns, for a run measured against nothing.
 

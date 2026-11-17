@@ -18,7 +18,7 @@ class MaxDrawdown(SingleInputMixin, CustomFactor):
 
     # ctx = ignore_nanwarnings()
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', data: 'np.ndarray') -> None:
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, data: np.ndarray) -> None:
         drawdowns = fmax.accumulate(data, axis=0) - data
         drawdowns[isnan(drawdowns)] = -np.inf
         drawdown_ends = nanargmax(drawdowns, axis=0)

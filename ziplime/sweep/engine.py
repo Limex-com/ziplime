@@ -60,13 +60,13 @@ class RunPlain(Exception):
 
 # -- costs ----------------------------------------------------------------------------------------
 
-def resolve_costs(params: 'SweepParams', market: Market) -> Costs:
+def resolve_costs(params: SweepParams, market: Market) -> Costs:
     columns = len(market.listings)
 
     def per(field: str, equity, future):
         return np.where(market.is_future, future, equity).astype(float)
 
-    def commission_parts(model: 'CommissionModel'):
+    def commission_parts(model: CommissionModel):
         kind = model.type
         return {
             "per_unit": model.cost if kind in ("per_share", "per_contract") else 0.0,
@@ -77,7 +77,7 @@ def resolve_costs(params: 'SweepParams', market: Market) -> Costs:
             "per_trade": model.cost if kind == "per_trade" else 0.0,
         }
 
-    def slippage_parts(model: 'SlippageModel'):
+    def slippage_parts(model: SlippageModel):
         return {
             "percentage": model.basis_points / 10_000 if model.type == "fixed_bps" else 0.0,
             "spread": model.spread if model.type == "fixed_spread" else 0.0,
@@ -133,12 +133,12 @@ def run(
     configs: list,
     states: list,
     signals: dict,
-    signal_index: 'np.ndarray | dict[str, np.ndarray] | None',
+    signal_index: np.ndarray | dict[str, np.ndarray] | None,
     timing: str,
     initial_cash: float,
     costs: Costs,
     backend: str,
-    cancel_at_session_end: 'bool | np.ndarray' = False,
+    cancel_at_session_end: bool | np.ndarray = False,
     compile: bool | None = None,
     record: bool = False,
     windows: Windows | None = None,
@@ -205,29 +205,29 @@ def _merge(result: Result, again: Result, rows: np.ndarray) -> Result:
 
 def _run(
     *,
-    market: 'Market',
-    hooks: 'Hooks',
-    configs: 'list[BaseAlgorithmConfig]',
+    market: Market,
+    hooks: Hooks,
+    configs: list[BaseAlgorithmConfig],
     states,
-    signals: 'dict[str, np.ndarray]',
-    signal_index: 'np.ndarray | dict[str, np.ndarray] | None',
+    signals: dict[str, np.ndarray],
+    signal_index: np.ndarray | dict[str, np.ndarray] | None,
     timing: str,
     initial_cash: float,
-    costs: 'Costs',
+    costs: Costs,
     backend: str,
-    cancel_at_session_end: 'bool | np.ndarray',
-    compile: 'bool | None',
+    cancel_at_session_end: bool | np.ndarray,
+    compile: bool | None,
     record: bool,
-    windows: 'Windows | None',
+    windows: Windows | None,
     periods_per_year: int,
-    schedule: 'Sequence[np.ndarray]',
+    schedule: Sequence[np.ndarray],
     order_slots: int,
 ) -> Result:
     b = Backend(backend)
     windows = windows or Windows(market, b)
     windows.backend = b
 
-    def simulation(on: 'Backend | None' = None):
+    def simulation(on: Backend | None = None):
         on = on or b
         windows.backend = on
         made = _Simulation(market, hooks, configs, states, signals, signal_index, timing,
@@ -275,19 +275,19 @@ def _run(
 class _Simulation:
     def __init__(
         self,
-        market: 'Market',
-        hooks: 'Hooks',
-        configs: 'list[BaseAlgorithmConfig]',
+        market: Market,
+        hooks: Hooks,
+        configs: list[BaseAlgorithmConfig],
         states,
-        signals: 'dict[str, np.ndarray]',
-        signal_index: 'np.ndarray | dict[str, np.ndarray] | None',
+        signals: dict[str, np.ndarray],
+        signal_index: np.ndarray | dict[str, np.ndarray] | None,
         timing: str,
         initial_cash: float,
-        costs: 'Costs',
-        backend: 'Backend',
-        cancel_at_session_end: 'bool | np.ndarray',
+        costs: Costs,
+        backend: Backend,
+        cancel_at_session_end: bool | np.ndarray,
         record: bool,
-        windows: 'Windows',
+        windows: Windows,
     ) -> None:
         self.m, self.hooks, self.b, self.xp = market, hooks, backend, backend.xp
         self.timing, self.record, self.windows = timing, record, windows
@@ -372,7 +372,7 @@ class _Simulation:
             call.namespace.update(api.STYLES)
         self.log, self.cash_log, self.held_log = [], [], []
 
-    def set_schedule(self, schedule: 'Sequence[np.ndarray]') -> None:
+    def set_schedule(self, schedule: Sequence[np.ndarray]) -> None:
         self.schedule = [np.asarray(flags[:, 0] if flags.ndim == 2 and (flags == flags[:, :1]).all()
                                     else flags) for flags in schedule]
         self.schedule_device = [self.b.array(flags[:, :, None]) if flags.ndim == 2 else None
@@ -560,7 +560,7 @@ class _Simulation:
         self.context.portfolio.update(self.xp, state["cash"], state["held"], marks,
                                       self.multiplier, self.is_future)
 
-    def _hook(self, hook: 'Converted', now, before: bool, mask=True) -> None:
+    def _hook(self, hook: Converted, now, before: bool, mask=True) -> None:
         ctx, data = self.context, self.context._data
         data.before = before
         data.now = {"spot": now["spot"], "spot_before": now["spot_before"],
@@ -876,7 +876,7 @@ def _running_max(b: Backend, curves):
     return peak
 
 
-def _round_cents(xp: 'ModuleType', value):
+def _round_cents(xp: ModuleType, value):
     """Python's round(value, 2): the nearer of the two cents around the exact value. numpy's round
     scales by 100 first, and that product can land on the other side of a half cent."""
     low = xp.floor(value * 100.0) / 100.0
@@ -884,7 +884,7 @@ def _round_cents(xp: 'ModuleType', value):
     return xp.where(value - low < high - value, low, high)
 
 
-def _cost_basis(xp: 'ModuleType', basis, held, amount, price, traded, fee, multiplier):
+def _cost_basis(xp: ModuleType, basis, held, amount, price, traded, fee, multiplier):
     """Position._update_position and adjust_commission_cost_basis."""
     total = held + amount
     same = (xp.sign(held) == xp.sign(amount)) | (held == 0)

@@ -50,7 +50,7 @@ def calendar_tz(name: str):
         ) from None
 
 
-def parse_date(value: str, field: str, tz: 'dt.tzinfo | None' = None) -> dt.datetime:
+def parse_date(value: str, field: str, tz: dt.tzinfo | None = None) -> dt.datetime:
     """A calendar date, made aware in the trading calendar's own timezone.
 
     **Not UTC.** Bundle rows are stored in the calendar's zone, and Polars

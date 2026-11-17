@@ -22,17 +22,17 @@ class MinLeverage(AccountControl):
     double the account value by the deadline date.
     """
 
-    def __init__(self, min_leverage: float, deadline: 'pd.Timestamp') -> None:
+    def __init__(self, min_leverage: float, deadline: pd.Timestamp) -> None:
         super(MinLeverage, self).__init__(min_leverage=min_leverage, deadline=deadline)
         self.min_leverage = min_leverage
         self.deadline = deadline
 
     async def validate(
         self,
-        _portfolio: 'Portfolio',
-        account: 'Account',
-        algo_datetime: 'datetime.datetime',
-        _algo_current_data: 'BarData',
+        _portfolio: Portfolio,
+        account: Account,
+        algo_datetime: datetime.datetime,
+        _algo_current_data: BarData,
     ) -> None:
         """Make validation checks if we are after the deadline.
         Fail if the leverage is less than the min leverage.

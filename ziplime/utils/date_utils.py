@@ -9,8 +9,8 @@ from ziplime.constants.period import Period
 
 def compute_date_range_chunks(
     sessions: pd.DatetimeIndex,
-    start_date: 'datetime.datetime',
-    end_date: 'datetime.datetime',
+    start_date: datetime.datetime,
+    end_date: datetime.datetime,
     chunksize: int | None,
 ):
     """Compute the start and end dates to run a pipeline for.

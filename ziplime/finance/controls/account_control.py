@@ -21,10 +21,10 @@ class AccountControl(metaclass=abc.ABCMeta):
     @abc.abstractmethod
     async def validate(
         self,
-        _portfolio: 'Portfolio',
-        _account: 'Account',
-        _algo_datetime: 'datetime.datetime',
-        _algo_current_data: 'BarData',
+        _portfolio: Portfolio,
+        _account: Account,
+        _algo_datetime: datetime.datetime,
+        _algo_current_data: BarData,
     ):
         """On each call to handle data by TradingAlgorithm, this method should be
         called *exactly once* on each registered AccountControl object.

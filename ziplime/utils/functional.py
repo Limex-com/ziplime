@@ -4,7 +4,7 @@ from toolz import curry
 
 
 @curry
-def apply(f: 'Callable', *args, **kwargs):
+def apply(f: Callable, *args, **kwargs):
     """Apply a function to arguments.
 
     Parameters
@@ -64,7 +64,7 @@ def set_attribute(name: str, value):
     'foo'
     """
 
-    def decorator(f: 'Callable'):
+    def decorator(f: Callable):
         setattr(f, name, value)
         return f
 

@@ -30,8 +30,8 @@ class LimeTraderSdkDataSource(DataBundleSource):
         self,
         assets: frozenset[ExchangeAsset],
         fields: frozenset[str],
-        dt: 'datetime.datetime',
-        data_frequency: 'datetime.timedelta',
+        dt: datetime.datetime,
+        data_frequency: datetime.timedelta,
         exchange_name: str,
         exchange_country: str,
     ) -> pl.DataFrame:

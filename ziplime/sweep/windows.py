@@ -26,7 +26,7 @@ class Windows:
         #: What happened to a compiled run, for the report (explain.py)
         self.notes = set()
 
-    def request(self, field: str, op: str, before: bool, lengths: 'Iterable[int]', daily: bool = False) -> bool:
+    def request(self, field: str, op: str, before: bool, lengths: Iterable[int], daily: bool = False) -> bool:
         key = (field, op, before, daily)
         known = set(self.lengths.get(key, ()))
         if not set(lengths) <= known:

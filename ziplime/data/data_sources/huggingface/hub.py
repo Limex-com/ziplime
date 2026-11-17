@@ -82,7 +82,7 @@ class RepoRevision:
 #: to confirm what it already named. Keyed by what was asked for, so `main` and a commit stay
 #: distinct -- and `main` is still re-resolved in the next process, which is where a moving branch
 #: is allowed to move.
-_RESOLVED: dict[tuple[str, str | None], "RepoRevision"] = {}
+_RESOLVED: dict[tuple[str, str | None], RepoRevision] = {}
 
 
 def resolve_revision(repo_id: str, revision: str | None = None) -> RepoRevision:

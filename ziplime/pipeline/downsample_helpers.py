@@ -18,7 +18,7 @@ _dt_to_period = {
 SUPPORTED_DOWNSAMPLE_FREQUENCIES = frozenset(_dt_to_period)
 
 
-def select_sampling_indices(dates: 'pd.DatetimeIndex', frequency: str):
+def select_sampling_indices(dates: pd.DatetimeIndex, frequency: str):
     """
     Choose entries from ``dates`` to use for downsampling at ``frequency``.
 

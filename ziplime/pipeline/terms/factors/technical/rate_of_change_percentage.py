@@ -16,7 +16,7 @@ class RateOfChangePercentage(CustomFactor):
     prevPrice - the price n days ago, equals window length
     """
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', close: 'np.ndarray') -> None:
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, close: np.ndarray) -> None:
         today_close = close[-1]
         prev_close = close[0]
         evaluate(

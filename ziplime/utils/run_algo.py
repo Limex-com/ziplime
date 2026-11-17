@@ -71,7 +71,7 @@ async def run_algorithm(
         asset_service: AssetService,
         print_algo: bool,
         metrics_set: str,
-        custom_loader: 'Mapping[LoadableTerm, PipelineLoader] | None',
+        custom_loader: Mapping[LoadableTerm, PipelineLoader] | None,
         clock: TradingClock,
         custom_data_sources: list[DataSource],
         exchange_repository: ExchangeRepository,
@@ -140,7 +140,7 @@ async def run_algorithm_iter(
         asset_service: AssetService,
         print_algo: bool,
         metrics_set: str,
-        custom_loader: 'Mapping[LoadableTerm, PipelineLoader] | None',
+        custom_loader: Mapping[LoadableTerm, PipelineLoader] | None,
         clock: TradingClock,
         custom_data_sources: list[DataSource],
         exchange_repository: ExchangeRepository,
@@ -207,7 +207,7 @@ async def _prepare_algorithm(
         asset_service: AssetService,
         print_algo: bool,
         metrics_set: str,
-        custom_loader: 'Mapping[LoadableTerm, PipelineLoader] | None',
+        custom_loader: Mapping[LoadableTerm, PipelineLoader] | None,
         clock: TradingClock,
         custom_data_sources: list[DataSource],
         exchange_repository: ExchangeRepository,
@@ -264,7 +264,7 @@ async def _prepare_algorithm(
                                                      asset_service=asset_service
                                                      )  # TODO: fix pipeline
 
-    def choose_loader(column: 'LoadableTerm'):
+    def choose_loader(column: LoadableTerm):
         if column in EquityPricing.columns:
             return pipeline_loader
         try:

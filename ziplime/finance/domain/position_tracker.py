@@ -107,8 +107,8 @@ class PositionTracker:
             trading_account_id: str,
             amount: int | None = None,
             last_sale_price: float | None = None,
-            last_sale_date: 'datetime.datetime | None' = None,
-            cost_basis: 'float | None' = None,
+            last_sale_date: datetime.datetime | None = None,
+            cost_basis: float | None = None,
     ) -> Position:
         self._dirty_stats = True
 
@@ -147,7 +147,7 @@ class PositionTracker:
             position.cost_basis = cost_basis
         return position
 
-    def execute_transaction(self, txn: 'Transaction') -> None:
+    def execute_transaction(self, txn: Transaction) -> None:
         self._dirty_stats = True
 
         # asset = txn.asset
@@ -270,7 +270,7 @@ class PositionTracker:
         new_cost = prev_cost + cost_to_use
         position.cost_basis = new_cost / position.amount
 
-    def handle_splits(self, splits: 'Iterable[Split]'):
+    def handle_splits(self, splits: Iterable[Split]):
         """Processes a list of splits by modifying any positions as needed.
 
         Parameters
@@ -305,7 +305,7 @@ class PositionTracker:
         return total_leftover_cash
 
 
-    def earn_stock_dividend(self, position: Position, stock_dividend: 'StockDividendPayout'):
+    def earn_stock_dividend(self, position: Position, stock_dividend: StockDividendPayout):
         """
         Register the number of shares we held at this dividend's ex date so
         that we can pay out the correct amount on the dividend's pay date.
@@ -394,8 +394,8 @@ class PositionTracker:
 
     def earn_dividends(
         self,
-        cash_dividends: 'Iterable[DividendPayout]',
-        stock_dividends: 'Iterable[StockDividendPayout]',
+        cash_dividends: Iterable[DividendPayout],
+        stock_dividends: Iterable[StockDividendPayout],
         earned_at: datetime.datetime | None = None,
     ) -> None:
         """Capture each account's entitlement on the ex-date, retaining payout currency."""

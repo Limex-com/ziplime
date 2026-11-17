@@ -20,7 +20,7 @@ class AllPresent(CustomFilter, SingleInputMixin, StandardOutputs):
 
         return super(AllPresent, self)._validate()
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', value: 'np.ndarray') -> None:
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, value: np.ndarray) -> None:
         if isinstance(value, LabelArray):
             out[:] = ~np_any(value.is_missing(), axis=0)
         else:

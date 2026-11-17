@@ -120,7 +120,7 @@ class BatchSimulationResult:
     def total_return(self) -> pd.Series:
         return self.final_value / self.initial_cash - 1.0
 
-    def rerun(self, label: 'Hashable') -> VectorSimulationResult:
+    def rerun(self, label: Hashable) -> VectorSimulationResult:
         """One combination through :func:`simulate_signals`: float64, every fill and rejection.
 
         This is the result to report, replay through the ledger or compare with an event-driven
@@ -133,17 +133,17 @@ class BatchSimulationResult:
 
 
 def simulate_signals_batch(
-    prices: 'pd.DataFrame | pd.Series',
+    prices: pd.DataFrame | pd.Series,
     entries=None,
     exits=None,
     *,
     short_entries=None,
     short_exits=None,
-    labels: 'Iterable[Hashable] | None' = None,
+    labels: Iterable[Hashable] | None = None,
     size=1.0,
     initial_cash: float = 100_000.0,
     execution: ExecutionTiming | None = None,
-    opens: 'pd.DataFrame | pd.Series | None' = None,
+    opens: pd.DataFrame | pd.Series | None = None,
     volumes=None,
     commission: CommissionModel | None = None,
     slippage: SlippageModel | None = None,
@@ -217,7 +217,7 @@ def simulate_signals_batch(
     commission_model = costs.resolve_commission(commission)
     execution_prices = _execution_prices(timing, prices, opens, index, columns)
 
-    def rerun(label: 'Hashable') -> VectorSimulationResult:
+    def rerun(label: Hashable) -> VectorSimulationResult:
         position = _position_of(labels, label)
         frames = {name: pd.DataFrame(stacks[name][position], index=index, columns=columns)
                   for name in _SIGNAL_NAMES}
@@ -307,7 +307,7 @@ def _signal_stack(value, name: str, index: pd.DatetimeIndex, columns: list[str])
     raise VectorKernelError(f"{name} has dtype {array.dtype}; signals have to be booleans.")
 
 
-def _labels(labels: 'Iterable[Hashable] | None', n_combos: int) -> list:
+def _labels(labels: Iterable[Hashable] | None, n_combos: int) -> list:
     if labels is None:
         return list(range(n_combos))
     labels = list(labels)
@@ -326,7 +326,7 @@ def _labels(labels: 'Iterable[Hashable] | None', n_combos: int) -> list:
     return labels
 
 
-def _position_of(labels: list, label: 'Hashable') -> int:
+def _position_of(labels: list, label: Hashable) -> int:
     try:
         return labels.index(label)
     except ValueError:
@@ -334,7 +334,7 @@ def _position_of(labels: list, label: 'Hashable') -> int:
 
 
 def _run_exact(
-    rerun: 'Callable[[Hashable], VectorSimulationResult]',
+    rerun: Callable[[Hashable], VectorSimulationResult],
     labels: list,
     n_bars: int,
     n_columns: int,

@@ -87,7 +87,7 @@ class Domain:
             "available" on each session.
         """
 
-    def roll_forward(self, dt: 'pd.Timestamp'):
+    def roll_forward(self, dt: pd.Timestamp):
         """Given a date, align it to the calendar of the pipeline's domain.
 
         Parameters
@@ -149,7 +149,7 @@ class EquityCalendarDomain(Domain):
     """
 
     def __init__(
-            self, country_code: str, calendar_name: str, data_query_offset: 'np.timedelta64' = -np.timedelta64(45, "m")
+            self, country_code: str, calendar_name: str, data_query_offset: np.timedelta64 = -np.timedelta64(45, "m")
     ) -> None:
         self._country_code = country_code
         self.calendar_name = calendar_name
@@ -206,7 +206,7 @@ class AmbiguousDomain(Exception):
         {domains}"""
     )
 
-    def __init__(self, domains: 'list[Domain]') -> None:
+    def __init__(self, domains: list[Domain]) -> None:
         self.domains = domains
 
     def __str__(self):

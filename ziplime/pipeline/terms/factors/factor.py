@@ -22,11 +22,7 @@ from ziplime.pipeline.expression import (
     UNARY_OPS,
     unary_op_name,
 )
-from ziplime.pipeline.terms.filters import (
-    Filter,
-    PercentileFilter,
-    MaximumFilter,
-)
+from ziplime.pipeline.terms.filters.filter import Filter
 from ziplime.pipeline.mixins import RestrictedDTypeMixin
 
 from ziplime.utils.numpy_utils import float64_dtype
@@ -310,8 +306,8 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         self,
         method: str = "ordinal",
         ascending: bool = True,
-        mask: 'Filter | None' = None,
-        groupby: 'Classifier | None' = None,
+        mask: Filter | None = None,
+        groupby: Classifier | None = None,
     ):
         """
         Construct a new Factor representing the sorted rank of each column
@@ -746,7 +742,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         """
         return self.quantiles(bins=10, mask=mask)
 
-    def top(self, N: int, mask: 'Filter | None' = None, groupby: 'Classifier | None' = None):
+    def top(self, N: int, mask: Filter | None = None, groupby: Classifier | None = None):
         """
         Construct a Filter matching the top N asset values of self each day.
 
@@ -774,7 +770,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
             return self._maximum(mask=mask, groupby=groupby)
         return self.rank(ascending=False, mask=mask, groupby=groupby) <= N
 
-    def bottom(self, N: int, mask: 'Filter | None' = None, groupby: 'Classifier | None' = None):
+    def bottom(self, N: int, mask: Filter | None = None, groupby: Classifier | None = None):
         """
         Construct a Filter matching the bottom N asset values of self each day.
 
@@ -798,10 +794,12 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         """
         return self.rank(ascending=True, mask=mask, groupby=groupby) <= N
 
-    def _maximum(self, mask: 'Filter | None' = None, groupby: 'Classifier | None' = None):
+    def _maximum(self, mask: Filter | None = None, groupby: Classifier | None = None):
+        from ziplime.pipeline.terms.filters.maximum_filter import MaximumFilter
+
         return MaximumFilter(self, groupby=groupby, mask=mask)
 
-    def percentile_between(self, min_percentile: float, max_percentile: float, mask: 'Filter | None' = None):
+    def percentile_between(self, min_percentile: float, max_percentile: float, mask: Filter | None = None):
         """
         Construct a Filter matching values of self that fall within the range
         defined by ``min_percentile`` and ``max_percentile``.
@@ -824,6 +822,8 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         out : ziplime.pipeline.Filter
             A new filter that will compute the specified percentile-range mask.
         """
+        from ziplime.pipeline.terms.filters.percentile_filter import PercentileFilter
+
         return PercentileFilter(
             self,
             min_percentile=min_percentile,
@@ -861,7 +861,7 @@ class Factor(RestrictedDTypeMixin, ComputableTerm):
         """
         return (-inf < self) & (self < inf)
 
-    def clip(self, min_bound: float, max_bound: float, mask: 'Filter | None' = None):
+    def clip(self, min_bound: float, max_bound: float, mask: Filter | None = None):
         """
         Clip (limit) the values in a factor.
 

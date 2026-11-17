@@ -15,7 +15,7 @@ class AssetDateBounds(TradingControl):
         super(AssetDateBounds, self).__init__(on_error)
 
     async def validate(self, asset: ExchangeAsset, amount: int, portfolio: Portfolio,
-                       algo_datetime: 'pd.Timestamp', algo_current_data: 'BarData') -> None:
+                       algo_datetime: pd.Timestamp, algo_current_data: BarData) -> None:
         """Fail if the algo has passed this Asset's end_date, or before the
         Asset's start date.
         """

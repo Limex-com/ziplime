@@ -36,7 +36,7 @@ from ziplime.sweep.report import Stages
 PER_JOB = 4
 
 
-def _bundle_parts(bundle: 'DataBundle') -> dict:
+def _bundle_parts(bundle: DataBundle) -> dict:
     """What a worker needs to rebuild the bundle: its rows and how they are stamped."""
     return dict(name=bundle.name, version=bundle.version, start_date=bundle.start_date,
                 end_date=bundle.end_date, calendar=bundle.trading_calendar.name,
@@ -54,18 +54,18 @@ def _bundle_from(parts: dict):
     return DataBundle(trading_calendar=calendar, **parts)
 
 
-def _db_path(asset_service: 'AssetService') -> str:
+def _db_path(asset_service: AssetService) -> str:
     url = asset_service._asset_repository.db_url
     return url.split("///", 1)[1] if "///" in url else url
 
 
 async def _run_one(
     *,
-    params: 'SweepParams',
+    params: SweepParams,
     algorithm_file: str,
     config: dict,
-    bundle: 'DataBundle',
-    asset_service: 'AssetService',
+    bundle: DataBundle,
+    asset_service: AssetService,
     sources: list,
     folder: Path,
     record: bool = False,
@@ -103,7 +103,7 @@ async def _run_one(
     return value, trades
 
 
-def _row(index: int, value: pd.Series, trades: list, params: 'SweepParams') -> pd.DataFrame:
+def _row(index: int, value: pd.Series, trades: list, params: SweepParams) -> pd.DataFrame:
     table = report.metrics(pd.DataFrame({index: value.to_numpy()}), params.total_cash,
                            pd.Series([len(trades)], index=[index]),
                            pd.Series([float("nan")], index=[index]), 0, params.periods_per_year)
@@ -139,15 +139,15 @@ def _worker(job: dict) -> pd.DataFrame:
 
 async def sweep_on_engine(
     *,
-    params: 'SweepParams',
+    params: SweepParams,
     algorithm_file: Path,
-    combinations: 'Combinations',
+    combinations: Combinations,
     indices: list[int],
-    bundle: 'DataBundle',
-    asset_service: 'AssetService',
+    bundle: DataBundle,
+    asset_service: AssetService,
     sources: dict,
     say: Callable[[str], None],
-    stages: 'Stages',
+    stages: Stages,
 ) -> pd.DataFrame:
     """Every combination in ``indices`` through run_simulation, on ``workers`` processes."""
     workers = params.workers or os.cpu_count() or 1
@@ -193,11 +193,11 @@ async def sweep_on_engine(
 
 async def best_fills(
     *,
-    params: 'SweepParams',
+    params: SweepParams,
     algorithm_file: Path,
     config: dict,
-    bundle: 'DataBundle',
-    asset_service: 'AssetService',
+    bundle: DataBundle,
+    asset_service: AssetService,
     sources: dict,
     output: Path,
 ):

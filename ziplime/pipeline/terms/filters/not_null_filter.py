@@ -20,13 +20,13 @@ class NotNullFilter(SingleInputMixin, Filter):
 
     window_length = 0
 
-    def __new__(cls, term: 'Term'):
+    def __new__(cls, term: Term):
         return super(NotNullFilter, cls).__new__(
             cls,
             inputs=(term,),
         )
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         data = arrays[0]
         if isinstance(data, LabelArray):
             return ~data.is_missing()

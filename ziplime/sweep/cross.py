@@ -72,7 +72,7 @@ class SweepDict(dict):
     is an ordinary dict.
     """
 
-    def __init__(self, runtime: 'Runtime', *args, **kwargs) -> None:
+    def __init__(self, runtime: Runtime, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._runtime = runtime
         self._values = None
@@ -189,7 +189,7 @@ class SweepDict(dict):
             return dict.values(self)
         return CrossSection(self._values, self._present)
 
-    def scores(self, key: 'Callable | None' = None):
+    def scores(self, key: Callable | None = None):
         """The values to rank by, and which instruments take part."""
         if key is None:
             raise NotConvertible("sorted() of instruments needs a key -- the score to rank by.")
@@ -235,7 +235,7 @@ class Ranking:
     list of instruments that differs between combinations. ``items``: {column: the object the
     strategy put in the list for it (its name or its listing)}."""
 
-    def __init__(self, xp: 'ModuleType', places, present, items=None) -> None:
+    def __init__(self, xp: ModuleType, places, present, items=None) -> None:
         self.xp, self.places, self.present = xp, places, present
         self.items = items or {}
 
@@ -280,7 +280,7 @@ class Ranking:
 class Selection:
     """Some instruments of each combination: ``ranked[:k]``."""
 
-    def __init__(self, xp: 'ModuleType', mask) -> None:
+    def __init__(self, xp: ModuleType, mask) -> None:
         self.xp, self.mask = xp, mask
 
     def sweep_contains(self, key):
@@ -299,7 +299,7 @@ class Selection:
 class Choice:
     """One instrument of each combination: ``ranked[0]``, ``max(scores, key=...)``."""
 
-    def __init__(self, xp: 'ModuleType', mask) -> None:
+    def __init__(self, xp: ModuleType, mask) -> None:
         self.xp, self.mask = xp, mask
 
     def sweep_equals_all(self):
@@ -314,7 +314,7 @@ class Choice:
     __hash__ = object.__hash__
 
 
-def rank(xp: 'ModuleType', scores, present, descending: bool, inf=np.inf, order=None):
+def rank(xp: ModuleType, scores, present, descending: bool, inf=np.inf, order=None):
     """Each instrument's place in Python's sorted() of its combination's present instruments:
     those ahead of it are the better ones and the equal ones inserted before it (sorted is stable,
     with reverse=True too). NaN ranks last; absent instruments take no place. ``order``: where
@@ -339,12 +339,12 @@ def rank(xp: 'ModuleType', scores, present, descending: bool, inf=np.inf, order=
 
 
 def ranking(
-    xp: 'ModuleType',
+    xp: ModuleType,
     iterable,
-    key: 'Callable | None',
+    key: Callable | None,
     reverse: bool,
-    runtime: 'Runtime | None' = None,
-) -> 'Ranking':
+    runtime: Runtime | None = None,
+) -> Ranking:
     """``sorted(iterable, key=key, reverse=reverse)`` of instruments."""
     if key is None:
         raise NotConvertible("sorted() of instruments needs a key -- the score to rank by.")
@@ -374,7 +374,7 @@ class Names(Vectorized):
     """A comprehension over instruments that yields the instruments themselves
     (``[name for name in scores if scores[name] > 0]``): a selection."""
 
-    def __init__(self, xp: 'ModuleType', mask) -> None:
+    def __init__(self, xp: ModuleType, mask) -> None:
         super().__init__([ALL], mask=mask)
         self.xp = xp
 
@@ -385,7 +385,7 @@ class Names(Vectorized):
         return _select(self.mask, key)
 
 
-def cross_section_of(xp: 'ModuleType', values, mask):
+def cross_section_of(xp: ModuleType, values, mask):
     """A comprehension over instruments: its values and which instruments it kept."""
     names = _columns()[0]
     if values is ALL or isinstance(values, tuple) and values and values[0] is ALL:
@@ -396,7 +396,7 @@ def cross_section_of(xp: 'ModuleType', values, mask):
     return CrossSection(values, mask)
 
 
-def reduce_across(xp: 'ModuleType', name: str, values, runtime: 'Runtime | None' = None):
+def reduce_across(xp: ModuleType, name: str, values, runtime: Runtime | None = None):
     """``sum``/``max``/``min``/``any``/``all``/``len`` of a cross section: across each
     combination's present instruments."""
     present = values.present
@@ -416,7 +416,7 @@ def reduce_across(xp: 'ModuleType', name: str, values, runtime: 'Runtime | None'
 
 # -- lists of instruments that differ between combinations ----------------------------------------
 
-def as_ranking(xp: 'ModuleType', value):
+def as_ranking(xp: ModuleType, value):
     """A list of instruments as a Ranking -- its order as places; None if it is not one."""
     n = len(_columns()[0])
     if isinstance(value, Ranking):
@@ -443,7 +443,7 @@ def _instrument_list(value) -> bool:
         (isinstance(value, (list, tuple)) and all(column_index(item) is not None for item in value))
 
 
-def merge_instruments(xp: 'ModuleType', mask, new, previous):
+def merge_instruments(xp: ModuleType, mask, new, previous):
     """``new`` where the mask holds and ``previous`` elsewhere, for lists of instruments: a list
     that differs between combinations. None if they are not both lists of instruments."""
     if not (_instrument_list(new) and _instrument_list(previous)):
@@ -458,7 +458,7 @@ def merge_instruments(xp: 'ModuleType', mask, new, previous):
                    {**previous.items, **new.items})
 
 
-def sort_instruments(runtime: 'Runtime', items, key: 'Callable | None', reverse: bool):
+def sort_instruments(runtime: Runtime, items, key: Callable | None, reverse: bool):
     """``sorted(items, key=key)`` / ``items.sort(key=key)`` for a list of instruments whose key
     differs between combinations: the key of every instrument, ranked per combination. None when
     plain Python does it: not instruments, or keys that are plain numbers."""

@@ -112,7 +112,7 @@ class TradingAlgorithmExecutor:
         )
         yield status
 
-    def analyze(self, trading_algorithm: TradingAlgorithm, perf: 'pd.DataFrame') -> None:
+    def analyze(self, trading_algorithm: TradingAlgorithm, perf: pd.DataFrame) -> None:
         if trading_algorithm._analyze is None:
             return
 

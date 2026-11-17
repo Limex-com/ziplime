@@ -29,7 +29,7 @@ class AssetCalendarDomain(Domain):
         self,
         assets: list[Asset],
         calendar_name: str,
-        data_query_offset: 'np.timedelta64' = -np.timedelta64(45, "m"),
+        data_query_offset: np.timedelta64 = -np.timedelta64(45, "m"),
     ) -> None:
         super().__init__()
         self.calendar_name = calendar_name
@@ -57,7 +57,7 @@ class AssetCalendarDomain(Domain):
     def sessions(self):
         return self.calendar.sessions
 
-    def data_query_cutoff_for_sessions(self, sessions: 'pd.DatetimeIndex'):
+    def data_query_cutoff_for_sessions(self, sessions: pd.DatetimeIndex):
         opens = self.calendar.first_minutes.reindex(sessions)
         missing_mask = pd.isnull(opens)
         if missing_mask.any():

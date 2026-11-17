@@ -12,7 +12,7 @@ class PeriodLabel:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-    def start_of_session(self, ledger: 'Ledger', session: 'datetime.datetime', exchanges: dict[str, Exchange]) -> None:
+    def start_of_session(self, ledger: Ledger, session: datetime.datetime, exchanges: dict[str, Exchange]) -> None:
         self._label = session.strftime("%Y-%m")
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,

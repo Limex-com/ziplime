@@ -247,7 +247,7 @@ def host_inputs(execution_values: np.ndarray, close_values: np.ndarray, size_val
     else:
         volumes = np.zeros(1)
 
-    def finite(values: 'np.ndarray'):
+    def finite(values: np.ndarray):
         return np.where(np.isfinite(values), values, 0.0).astype(np.float32)
 
     return {

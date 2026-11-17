@@ -13,6 +13,7 @@ from the one the strategy's numbers were computed for.
 import dataclasses
 import datetime
 from collections.abc import Iterable, Sequence
+from typing import Self
 
 from ziplime.assets.domain.option_type import OptionType
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
@@ -56,7 +57,7 @@ class OptionChain:
 
     @classmethod
     def from_listings(cls, listings: Iterable[ExchangeAsset],
-                      expiration_date: datetime.date | None = None) -> "OptionChain":
+                      expiration_date: datetime.date | None = None) -> Self:
         """Build a chain from listings, optionally keeping only one expiry.
 
         Raises:

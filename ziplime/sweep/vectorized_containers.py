@@ -17,13 +17,13 @@ class Vectorized(list):
 class VectorUniverse(dict):
     """context.universe in a sweep: len and lookup by name as a dict, iteration in one pass."""
 
-    def items(self) -> 'Vectorized':
+    def items(self) -> Vectorized:
         return Vectorized([(ALL, ALL)])
 
-    def keys(self) -> 'Vectorized':
+    def keys(self) -> Vectorized:
         return Vectorized([ALL])
 
-    def values(self) -> 'Vectorized':
+    def values(self) -> Vectorized:
         return Vectorized([ALL])
 
     def __iter__(self):

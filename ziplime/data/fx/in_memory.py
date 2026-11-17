@@ -21,11 +21,11 @@ class InMemoryFXRateReader(FXRateReader):
         Rate to use when ``get_rates`` is called with a rate of 'default'.
     """
 
-    def __init__(self, data: 'dict[str, dict[str, pd.DataFrame]]', default_rate: str) -> None:
+    def __init__(self, data: dict[str, dict[str, pd.DataFrame]], default_rate: str) -> None:
         self._data = data
         self._default_rate = default_rate
 
-    def get_rates(self, rate: str, quote: str, bases: 'np.ndarray', dts: 'pd.DatetimeIndex'):
+    def get_rates(self, rate: str, quote: str, bases: np.ndarray, dts: pd.DatetimeIndex):
         """Get rates to convert ``bases`` into ``quote``.
 
         See :class:`ziplime.data.fx.base.FXRateReader` for details.

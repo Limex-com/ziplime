@@ -74,7 +74,7 @@ class Exchange(DataSource, ABC):
         """Return the venue's current cash balance."""
         raise NotImplementedError
 
-    def subscribe_to_market_data(self, asset: 'ExchangeAsset'):
+    def subscribe_to_market_data(self, asset: ExchangeAsset):
         """Subscribe to market data when the venue supports subscriptions.
 
         The simulation has no push feed, so the deliberately safe default is an empty
@@ -120,7 +120,7 @@ class Exchange(DataSource, ABC):
     def get_commission_model(self, asset: ExchangeAsset) -> CommissionModel:
         raise NotImplementedError
 
-    async def current_contract(self, continuous_future: 'ContinuousFuture', dt: datetime.datetime):
+    async def current_contract(self, continuous_future: ContinuousFuture, dt: datetime.datetime):
         """Return the contract a continuous future holds at ``dt``.
 
         Exchanges sit in front of the data bundle in ``BarData.data_sources``, so continuous-future
@@ -128,7 +128,7 @@ class Exchange(DataSource, ABC):
         """
         return await self.data_source.current_contract(continuous_future=continuous_future, dt=dt)
 
-    async def get_current_future_chain(self, continuous_future: 'ContinuousFuture', dt: datetime.datetime):
+    async def get_current_future_chain(self, continuous_future: ContinuousFuture, dt: datetime.datetime):
         """Return the active contracts of a chain at ``dt``, front contract first."""
         return await self.data_source.get_current_future_chain(
             continuous_future=continuous_future, dt=dt)

@@ -1,8 +1,7 @@
-from ziplime.pipeline.terms.term import Term
-from ziplime.utils.numpy_utils import bool_dtype
+from ziplime.pipeline.terms.boolean_term import BooleanTerm
 
 
-class AssetExists(Term):
+class AssetExists(BooleanTerm):
     """
     Pseudo-filter describing whether or not an asset existed on a given day.
     This is the default mask for all terms that haven't been passed a mask
@@ -20,7 +19,6 @@ class AssetExists(Term):
     ziplime.assets.AssetFinder.lifetimes
     """
 
-    dtype = bool_dtype
     dataset = None
     inputs = ()
     dependencies = {}

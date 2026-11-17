@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 from numpy import (
     uint8,
 )
@@ -10,15 +8,12 @@ from ziplime.lib.rank import is_missing, grouped_masked_is_maximal
 from ziplime.pipeline.mixins import (
     StandardOutputs,
 )
-from ziplime.pipeline.terms.filters import Filter
+from ziplime.pipeline.terms.classifiers.classifier import Classifier
+from ziplime.pipeline.terms.factors.factor import Factor
+from ziplime.pipeline.terms.filters.filter import Filter
 from ziplime.utils.numpy_utils import (
     int64_dtype,
 )
-
-# Classifier and Factor import the filter package during initialization.
-if TYPE_CHECKING:
-    from ziplime.pipeline.terms.classifiers.classifier import Classifier
-    from ziplime.pipeline.terms.factors.factor import Factor
 
 
 class MaximumFilter(Filter, StandardOutputs):
@@ -26,7 +21,7 @@ class MaximumFilter(Filter, StandardOutputs):
 
     window_length = 0
 
-    def __new__(cls, factor: 'Factor', groupby: 'Classifier | None', mask: 'Filter | None'):
+    def __new__(cls, factor: Factor, groupby: Classifier | None, mask: Filter | None):
         if groupby is None:
             from ziplime.pipeline.terms.classifiers.everything import Everything
 
@@ -38,7 +33,7 @@ class MaximumFilter(Filter, StandardOutputs):
             mask=mask,
         )
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         # XXX: We're doing a lot of unncessary work here if `groupby` isn't
         # specified.
         data = arrays[0]

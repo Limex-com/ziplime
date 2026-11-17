@@ -55,7 +55,7 @@ except ImportError:  # pragma: no cover
         if args and callable(args[0]):
             return args[0]
 
-        def wrap(function: 'Callable'):
+        def wrap(function: Callable):
             return function
 
         return wrap
@@ -63,17 +63,17 @@ except ImportError:  # pragma: no cover
 
 @njit(cache=True, nogil=True)
 def run_events(
-    event_bar: 'np.ndarray',
-    event_col: 'np.ndarray',
-    event_intent: 'np.ndarray',
-    event_signal_bar: 'np.ndarray',
-    execution_values: 'np.ndarray',
-    close_values: 'np.ndarray',
-    size_values: 'np.ndarray',
-    volume_values: 'np.ndarray',
+    event_bar: np.ndarray,
+    event_col: np.ndarray,
+    event_intent: np.ndarray,
+    event_signal_bar: np.ndarray,
+    execution_values: np.ndarray,
+    close_values: np.ndarray,
+    size_values: np.ndarray,
+    volume_values: np.ndarray,
     has_volume: bool,
-    closing_long: 'np.ndarray',
-    closing_short: 'np.ndarray',
+    closing_long: np.ndarray,
+    closing_short: np.ndarray,
     slip_percentage: float,
     slip_spread: float,
     slip_volume_limit: float,

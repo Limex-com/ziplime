@@ -2,6 +2,7 @@
 
 import dataclasses
 from types import ModuleType
+from typing import Self
 
 import numpy as np
 
@@ -27,7 +28,7 @@ class Costs:
     #: 0 none, 1 fixed basis points, 2 fixed spread
     slippage_kind: np.ndarray
 
-    def on(self, backend: Backend) -> "Costs":
+    def on(self, backend: Backend) -> Self:
         return dataclasses.replace(self, **{
             field.name: backend.array(getattr(self, field.name)[None, :])
             for field in dataclasses.fields(self)})
@@ -52,12 +53,12 @@ class Costs:
                              "in the engine (FixedSlippage has no order_target_percentage_maximum_"
                              "quantity); use fixed_bps or none.")
 
-    def projected(self, xp: 'ModuleType', quantity, value):
+    def projected(self, xp: ModuleType, quantity, value):
         """commission.calculate_for_asset: what sizing expects to pay."""
         unit = xp.maximum(self.min_trade, abs(quantity * self.per_unit) + self.initial)
         return xp.where(self.unit_model, unit, 0.0) + value * self.per_dollar + self.per_trade
 
-    def maximum_quantity(self, xp: 'ModuleType', cash, now):
+    def maximum_quantity(self, xp: ModuleType, cash, now):
         """slippage.order_target_percentage_maximum_quantity: shares the cash buys at the close,
         priced as a buy, capped by what the bar's volume still allows."""
         close = now["spot_close"]

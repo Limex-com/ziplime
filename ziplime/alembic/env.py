@@ -36,11 +36,11 @@ x_args = context.get_x_argument(as_dictionary=True)
 
 
 def include_object(
-    object: 'SchemaItem',
-    name: 'str | None',
+    object: SchemaItem,
+    name: str | None,
     type_: str,
     reflected: bool,
-    compare_to: 'SchemaItem | None',
+    compare_to: SchemaItem | None,
 ):
     """
     Exclude views from Alembic's consideration.
@@ -82,11 +82,11 @@ def run_migrations_offline() -> None:
 
 
 def my_compare_type(
-    context: 'MigrationContext',
-    inspected_column: 'Column',
-    metadata_column: 'Column',
-    inspected_type: 'TypeEngine',
-    metadata_type: 'TypeEngine',
+    context: MigrationContext,
+    inspected_column: Column,
+    metadata_column: Column,
+    inspected_type: TypeEngine,
+    metadata_type: TypeEngine,
 ) -> bool | None:
     # return False if the metadata_type is the same as the inspected_type
     # or None to allow the default implementation to compare these

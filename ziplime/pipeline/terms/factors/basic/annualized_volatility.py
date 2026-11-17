@@ -27,10 +27,10 @@ class AnnualizedVolatility(CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        returns: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        returns: np.ndarray,
         annualization_factor: float,
     ) -> None:
         out[:] = nanstd(returns, axis=0) * (annualization_factor**0.5)

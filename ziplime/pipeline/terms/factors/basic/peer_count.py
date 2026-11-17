@@ -28,10 +28,10 @@ class PeerCount(SingleInputMixin, CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        classifier_values: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        classifier_values: np.ndarray,
     ) -> None:
         # Convert classifier array to group label int array
         group_labels, null_label = self.inputs[0]._to_integral(classifier_values[0])

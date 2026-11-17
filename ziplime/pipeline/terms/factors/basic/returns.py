@@ -24,5 +24,5 @@ class Returns(CustomFactor):
                 "length of 2.".format(window_length=self.window_length)
             )
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', close: 'np.ndarray') -> None:
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, close: np.ndarray) -> None:
         out[:] = (close[-1] - close[0]) / close[0]

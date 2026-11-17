@@ -39,10 +39,10 @@ class ExponentialWeightedMovingAverage(ExponentialWeightedFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        data: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        data: np.ndarray,
         decay_rate: float,
     ) -> None:
         out[:] = average(

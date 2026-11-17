@@ -37,7 +37,7 @@ class _DatetimeParam(click.ParamType):
     def name(self) -> str:
         return type(self).__name__.upper()
 
-    def convert(self, value: 'str | datetime.date', param: 'click.Parameter | None', ctx: 'click.Context | None'):
+    def convert(self, value: str | datetime.date, param: click.Parameter | None, ctx: click.Context | None):
         try:
             return self.parser(value)
         except (ValueError, TypeError):

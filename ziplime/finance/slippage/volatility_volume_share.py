@@ -65,7 +65,7 @@ class VolatilityVolumeShare(MarketImpactBase):
 
     def get_simulated_impact(
             self,
-            order: 'Order',
+            order: Order,
             current_price: float,
             current_volume: float,
             txn_volume: int,
@@ -86,5 +86,5 @@ class VolatilityVolumeShare(MarketImpactBase):
         # convert from % to fraction.
         return (current_price * market_impact) / 10000
 
-    def get_txn_volume(self, volume: float, order: 'Order'):
+    def get_txn_volume(self, volume: float, order: Order):
         return volume * self.volume_limit

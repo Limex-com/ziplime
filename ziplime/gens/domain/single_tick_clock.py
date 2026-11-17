@@ -39,7 +39,7 @@ from ziplime.trading.enums.simulation_event import SimulationEvent
 
 class SingleTickClock(RealtimeClock):
     def __init__(self,
-                 trading_calendar: 'ExchangeCalendar',
+                 trading_calendar: ExchangeCalendar,
                  emission_rate: datetime.timedelta,
                  tick_dt: datetime.datetime | None = None,
                  timedelta_diff_from_current_time: datetime.timedelta | None = None,

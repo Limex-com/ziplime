@@ -18,7 +18,7 @@ class EyeLoader(PrecomputedLoader):
         Same as PrecomputedLoader
     """
 
-    def __init__(self, columns: 'list[BoundColumn]', dates, sids) -> None:
+    def __init__(self, columns: list[BoundColumn], dates, sids) -> None:
         shape = (len(dates), len(sids))
         super(EyeLoader, self).__init__(
             {column: np.eye(shape, dtype=column.dtype) for column in columns},

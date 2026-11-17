@@ -1,5 +1,6 @@
 """Call or put."""
 import enum
+from typing import Self
 
 
 class OptionType(enum.Enum):
@@ -34,7 +35,7 @@ class OptionType(enum.Enum):
         return self.letter.lower()
 
     @classmethod
-    def from_letter(cls, letter: str) -> "OptionType":
+    def from_letter(cls, letter: str) -> Self:
         """Parse ``C``/``P`` (in either case), as found in an OCC symbol."""
         try:
             return {"C": cls.CALL, "P": cls.PUT}[letter.upper()]

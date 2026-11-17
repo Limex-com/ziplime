@@ -138,7 +138,7 @@ def resolve_commission(model: CommissionModel | None) -> ResolvedCommission:
     )
 
 
-def charge_through_model(model: CommissionModel, asset: 'ExchangeAsset', quantity: float,
+def charge_through_model(model: CommissionModel, asset: ExchangeAsset, quantity: float,
                          transaction_amount: float) -> float:
     """One fill's commission, straight through the model's own code.
 

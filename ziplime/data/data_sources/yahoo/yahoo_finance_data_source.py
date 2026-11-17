@@ -1,6 +1,7 @@
 import datetime
 import multiprocessing
 from collections.abc import Sequence
+from typing import Self
 import yfinance as yf
 
 import structlog
@@ -33,7 +34,7 @@ class YahooFinanceDataSource(DataBundleSource):
         self._symbol_mics = dict(symbol_mics or {})
 
     @classmethod
-    def for_assets(cls, assets: 'Sequence[ExchangeAsset]', **kwargs) -> "YahooFinanceDataSource":
+    def for_assets(cls, assets: Sequence[ExchangeAsset], **kwargs) -> Self:
         """Build a source that already knows each listing's exchange."""
         return cls(symbol_mics={a.symbol: a.mic for a in assets}, **kwargs)
 

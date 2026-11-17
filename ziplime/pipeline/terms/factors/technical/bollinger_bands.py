@@ -31,10 +31,10 @@ class BollingerBands(CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        close: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        close: np.ndarray,
         k: float,
     ) -> None:
         difference = k * nanstd(close, axis=0)

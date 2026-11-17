@@ -27,8 +27,8 @@ DECISION_NAMES = ("entries", "exits", "short_entries", "short_exits")
 
 
 def compute(
-    algorithm: 'AlgorithmFile',
-    context: 'SweepContext',
+    algorithm: AlgorithmFile,
+    context: SweepContext,
     panel: PricePanel,
     config: 'BaseAlgorithmConfig | _ReadTracker',
     decisions: bool = True,
@@ -45,8 +45,8 @@ def compute(
 
 
 def check_causality(
-    algorithm: 'AlgorithmFile',
-    context: 'SweepContext',
+    algorithm: AlgorithmFile,
+    context: SweepContext,
     panel: PricePanel,
     config: 'BaseAlgorithmConfig | _ReadTracker',
     decisions: bool = True,
@@ -92,7 +92,7 @@ def signal_arrays(computed: dict, in_run: np.ndarray, columns: list[str],
 class _ReadTracker:
     """A config that records which of its fields compute_signals read."""
 
-    def __init__(self, config: 'BaseAlgorithmConfig') -> None:
+    def __init__(self, config: BaseAlgorithmConfig) -> None:
         object.__setattr__(self, "_config", config)
         object.__setattr__(self, "read", set())
 
@@ -110,21 +110,21 @@ class SignalCache:
 
     def __init__(
         self,
-        algorithm: 'AlgorithmFile',
-        context: 'SweepContext',
-        panel: 'PricePanel',
-        in_run: 'np.ndarray',
-        columns: 'list[str]',
+        algorithm: AlgorithmFile,
+        context: SweepContext,
+        panel: PricePanel,
+        in_run: np.ndarray,
+        columns: list[str],
         decisions: bool,
     ) -> None:
         self._args = (algorithm, context, panel, in_run, columns, decisions)
         self.fields = None
         self.variants = {}
 
-    def key(self, config: 'BaseAlgorithmConfig'):
+    def key(self, config: BaseAlgorithmConfig):
         return tuple((name, repr(getattr(config, name))) for name in sorted(self.fields))
 
-    def get(self, config: 'BaseAlgorithmConfig'):
+    def get(self, config: BaseAlgorithmConfig):
         if self.fields is not None and self.key(config) in self.variants:
             return self.key(config)
         algorithm, context, panel, in_run, columns, decisions = self._args
@@ -138,7 +138,7 @@ class SignalCache:
         self.variants[self.key(config)] = arrays
         return self.key(config)
 
-    def stacks(self, configs: 'Sequence[BaseAlgorithmConfig]', n_bars: int, n_columns: int, decisions: bool = True):
+    def stacks(self, configs: Sequence[BaseAlgorithmConfig], n_bars: int, n_columns: int, decisions: bool = True):
         """decisions=True: each combination's decisions, (combinations, bars, instruments) per
         name, for the vector kernel. decisions=False: the distinct signal sets (variants, bars,
         instruments) and each combination's variant, so nothing is copied per combination."""
@@ -213,7 +213,7 @@ class IndicatorSignals:
     def variants(self) -> int:
         return len(self.arrays)
 
-    def stacks(self, indices: 'Sequence[int]'):
+    def stacks(self, indices: Sequence[int]):
         """Each indicator's distinct arrays among these combinations, and each one's index."""
         stacks, index = {}, {}
         for name in self.names:
@@ -225,7 +225,7 @@ class IndicatorSignals:
         return stacks, index
 
 
-def check_indicators(expressions: dict, panel: PricePanel, warmup: int, config: 'BaseAlgorithmConfig') -> None:
+def check_indicators(expressions: dict, panel: PricePanel, warmup: int, config: BaseAlgorithmConfig) -> None:
     """verify_causality for one combination's indicators."""
     computed = normalise_signals(compute_indicators(expressions, panel), panel.index)
     try:

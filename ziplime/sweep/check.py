@@ -33,7 +33,7 @@ HINTS = {
 }
 
 
-def problems(functions: 'Iterable[Callable]', state_names: set[str]) -> list[str]:
+def problems(functions: Iterable[Callable], state_names: set[str]) -> list[str]:
     """Every unsupported use in ``functions``, as ``file, line N: ...``."""
     found = []
     for function in functions:
@@ -89,7 +89,7 @@ def _module_of(value) -> str:
     return module or ""
 
 
-def _chain(node: 'ast.AST'):
+def _chain(node: ast.AST):
     """``a.b.c`` -> ("a", ["b", "c"]); None for anything that does not start with a name."""
     parts = []
     while isinstance(node, ast.Attribute):
@@ -98,7 +98,7 @@ def _chain(node: 'ast.AST'):
     return (node.id, list(reversed(parts))) if isinstance(node, ast.Name) else None
 
 
-def _reads(node: 'ast.Call', names: set[str], data: str) -> bool:
+def _reads(node: ast.Call, names: set[str], data: str) -> bool:
     """Whether a call's arguments read history: a name holding history rows, or data.history."""
     for argument in [*node.args, *(k.value for k in node.keywords)]:
         for child in ast.walk(argument):
@@ -110,7 +110,7 @@ def _reads(node: 'ast.Call', names: set[str], data: str) -> bool:
     return False
 
 
-def _history_names(definition: 'ast.FunctionDef | ast.AsyncFunctionDef', data: str) -> set[str]:
+def _history_names(definition: ast.FunctionDef | ast.AsyncFunctionDef, data: str) -> set[str]:
     """Names that hold history rows or what is computed from them: assigned from data.history
     or from such a name, or filled with them (``prices[s] = df["close"].to_numpy()``)."""
     names = set()
@@ -131,7 +131,7 @@ def _history_names(definition: 'ast.FunctionDef | ast.AsyncFunctionDef', data: s
             return names
 
 
-def foreign_calls(functions: 'Iterable[Callable]', state: dict) -> list[str]:
+def foreign_calls(functions: Iterable[Callable], state: dict) -> list[str]:
     """Calls into code the sweep cannot run for every combination: other libraries, objects of
     other libraries kept on the context, functions of the strategy's other modules.
 
@@ -219,7 +219,7 @@ def foreign_calls(functions: 'Iterable[Callable]', state: dict) -> list[str]:
 
 
 
-def containers(hooks: 'Iterable[Converted]', state: dict, universe: dict) -> list[str]:
+def containers(hooks: Iterable[Converted], state: dict, universe: dict) -> list[str]:
     """Containers on the context changed in place that are not per-instrument dicts of numbers.
 
     ``context.entry[asset] = price`` is held as arrays; ``context.seen.append(x)`` or a dict of
@@ -247,11 +247,11 @@ def containers(hooks: 'Iterable[Converted]', state: dict, universe: dict) -> lis
 
 
 def check(
-    functions: 'Iterable[Callable]',
+    functions: Iterable[Callable],
     state_names: set[str],
     state: dict | None = None,
-    hooks: 'Iterable[Converted]' = (),
-    universe: 'dict[str, ExchangeAsset] | None' = None,
+    hooks: Iterable[Converted] = (),
+    universe: dict[str, ExchangeAsset] | None = None,
 ) -> None:
     found = problems(functions, state_names) + foreign_calls(functions, state or {})
     if universe is not None:

@@ -71,7 +71,7 @@ def nearest_unequal_elements(
     return lower_value, upper_value
 
 
-def timedelta_to_integral_seconds(delta: 'pd.Timedelta | datetime.timedelta') -> int:
+def timedelta_to_integral_seconds(delta: pd.Timedelta | datetime.timedelta) -> int:
     """Convert a pd.Timedelta to a number of seconds as an int."""
     return int(delta.total_seconds())
 
@@ -146,7 +146,7 @@ def _sort_set_none_first(set_):
         return sorted(set_)
 
 
-def empty_dataframe(*columns: 'tuple[str, DTypeLike]'):
+def empty_dataframe(*columns: tuple[str, DTypeLike]):
     """Create an empty dataframe with columns of particular types.
 
     Parameters

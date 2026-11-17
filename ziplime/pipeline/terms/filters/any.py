@@ -14,5 +14,5 @@ class Any(CustomFilter):
     **Default Window Length:** None
     """
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', arg: 'np.ndarray') -> None:
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, arg: np.ndarray) -> None:
         out[:] = arg.sum(axis=0) > 0

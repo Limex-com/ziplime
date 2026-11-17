@@ -57,9 +57,9 @@ class DataFrameLoader(PipelineLoader):
 
     def __init__(
         self,
-        column: 'BoundColumn',
-        baseline: 'pd.DataFrame',
-        adjustments: 'pd.DataFrame | None' = None,
+        column: BoundColumn,
+        baseline: pd.DataFrame,
+        adjustments: pd.DataFrame | None = None,
     ) -> None:
         self.column = column
         self.baseline = baseline.values.astype(self.column.dtype)
@@ -81,7 +81,7 @@ class DataFrameLoader(PipelineLoader):
         self.adjustment_end_dates = pd.DatetimeIndex(adjustments.end_date)
         self.adjustment_sids = pd.Index(adjustments.sid, dtype="int64")
 
-    def format_adjustments(self, dates: 'pd.DatetimeIndex', assets: 'pd.Index'):
+    def format_adjustments(self, dates: pd.DatetimeIndex, assets: pd.Index):
         """Build a dict of Adjustment objects in the format expected by
         AdjustedArray.
 
@@ -148,11 +148,11 @@ class DataFrameLoader(PipelineLoader):
 
     async def load_adjusted_array(
         self,
-        domain: 'Domain',
-        columns: 'list[BoundColumn]',
-        dates: 'pd.DatetimeIndex',
-        sids: 'pd.Index',
-        mask: 'np.ndarray',
+        domain: Domain,
+        columns: list[BoundColumn],
+        dates: pd.DatetimeIndex,
+        sids: pd.Index,
+        mask: np.ndarray,
     ):
         """Load data from our stored baseline."""
 
@@ -184,7 +184,7 @@ class DataFrameLoader(PipelineLoader):
             ),
         }
 
-    def _validate_input_column(self, column: 'BoundColumn') -> None:
+    def _validate_input_column(self, column: BoundColumn) -> None:
         """Make sure a passed column is our column."""
 
         if column != self.column and column.unspecialize() != self.column:

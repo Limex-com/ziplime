@@ -13,17 +13,17 @@ class NoHooks(PipelineHooks):
     """A PipelineHooks that defines no-op methods for all available hooks."""
 
     @contextmanager
-    def running_pipeline(self, pipeline: 'Pipeline', start_date: 'datetime.date', end_date: 'datetime.date'):
+    def running_pipeline(self, pipeline: Pipeline, start_date: datetime.date, end_date: datetime.date):
         yield
 
     @contextmanager
-    def computing_chunk(self, terms: 'list[Term]', start_date: 'datetime.date', end_date: 'datetime.date'):
+    def computing_chunk(self, terms: list[Term], start_date: datetime.date, end_date: datetime.date):
         yield
 
     @contextmanager
-    def loading_terms(self, terms: 'list[LoadableTerm]'):
+    def loading_terms(self, terms: list[LoadableTerm]):
         yield
 
     @contextmanager
-    def computing_term(self, term: 'ComputableTerm'):
+    def computing_term(self, term: ComputableTerm):
         yield

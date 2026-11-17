@@ -109,10 +109,10 @@ class RollingLinearRegressionOfReturns(RollingLinearRegression):
 
     def __new__(
         cls,
-        target: 'ExchangeAsset | ContinuousFuture',
+        target: ExchangeAsset | ContinuousFuture,
         returns_length: int,
         regression_length: int,
-        mask: 'Filter | None' = None,
+        mask: Filter | None = None,
     ):
         # Use the `SingleAsset` filter here because it protects against
         # inputting a non-existent target asset.

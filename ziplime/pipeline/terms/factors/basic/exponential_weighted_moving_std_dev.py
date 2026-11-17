@@ -43,10 +43,10 @@ class ExponentialWeightedMovingStdDev(ExponentialWeightedFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        data: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        data: np.ndarray,
         decay_rate: float,
     ) -> None:
         weights = exponential_weights(len(data), decay_rate)

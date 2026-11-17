@@ -55,15 +55,15 @@ class BaseTradingAlgorithm:
 
     def get_datetime(self): ...
 
-    def set_slippage(self, us_equities: 'SlippageModel | None' = None, us_futures: 'SlippageModel | None' = None): ...
+    def set_slippage(self, us_equities: SlippageModel | None = None, us_futures: SlippageModel | None = None): ...
 
     def set_commission(
             self,
-            us_equities: 'CommissionModel | None' = None,
-            us_futures: 'CommissionModel | None' = None,
+            us_equities: CommissionModel | None = None,
+            us_futures: CommissionModel | None = None,
     ): ...
 
-    def set_cancel_policy(self, cancel_policy: 'CancelPolicy'): ...
+    def set_cancel_policy(self, cancel_policy: CancelPolicy): ...
 
     def set_symbol_lookup_date(self, dt): ...
 
@@ -84,7 +84,7 @@ class BaseTradingAlgorithm:
             style: ExecutionStyle
     ): ...
 
-    def get_open_orders(self, asset: 'ExchangeAsset | None' = None): ...
+    def get_open_orders(self, asset: ExchangeAsset | None = None): ...
 
     def get_order(self, order_id: str) -> Order | None: ...
 
@@ -92,21 +92,21 @@ class BaseTradingAlgorithm:
 
     def set_max_leverage(self, max_leverage: float): ...
 
-    def set_min_leverage(self, min_leverage: float, grace_period: 'pd.Timedelta'): ...
+    def set_min_leverage(self, min_leverage: float, grace_period: pd.Timedelta): ...
 
     def set_max_position_size(
         self,
-        asset: 'ExchangeAsset | None' = None,
-        max_shares: 'int | None' = None,
-        max_notional: 'float | None' = None,
+        asset: ExchangeAsset | None = None,
+        max_shares: int | None = None,
+        max_notional: float | None = None,
         on_error: str = "fail",
     ): ...
 
     def set_max_order_size(
         self,
-        asset: 'ExchangeAsset | None' = None,
-        max_shares: 'int | None' = None,
-        max_notional: 'float | None' = None,
+        asset: ExchangeAsset | None = None,
+        max_shares: int | None = None,
+        max_notional: float | None = None,
         on_error: str = "fail",
     ): ...
 
@@ -118,9 +118,9 @@ class BaseTradingAlgorithm:
 
     def attach_pipeline(
         self,
-        pipeline: 'Pipeline',
+        pipeline: Pipeline,
         name: str,
-        chunks: 'int | Iterator[int] | None' = None,
+        chunks: int | Iterator[int] | None = None,
         eager: bool = True,
     ): ...
 

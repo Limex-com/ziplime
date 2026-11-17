@@ -246,7 +246,7 @@ class UserDatasetSource(HuggingFaceDataSource):
         fields = self._projected
         return self._cache_base + ((fields if fields == self._ALL else tuple(sorted(fields))),)
 
-    def _need(self, fields: 'frozenset[str] | None') -> None:
+    def _need(self, fields: frozenset[str] | None) -> None:
         """Make sure the materialised frame carries ``fields`` (all columns for ``None``)."""
         if self._fixed:
             return
@@ -287,11 +287,11 @@ class UserDatasetSource(HuggingFaceDataSource):
 
     async def get_data_by_limit(
         self,
-        fields: 'frozenset[str] | None',
+        fields: frozenset[str] | None,
         limit: int,
-        end_date: 'datetime.datetime',
-        frequency: 'datetime.timedelta | Period',
-        assets: 'frozenset[ExchangeAsset]',
+        end_date: datetime.datetime,
+        frequency: datetime.timedelta | Period,
+        assets: frozenset[ExchangeAsset],
         include_end_date: bool,
     ):
         self._need(fields)
@@ -301,11 +301,11 @@ class UserDatasetSource(HuggingFaceDataSource):
 
     async def get_data_by_window(
         self,
-        fields: 'frozenset[str] | None',
-        since: 'datetime.timedelta',
-        end_date: 'datetime.datetime',
-        frequency: 'datetime.timedelta | Period',
-        assets: 'frozenset[ExchangeAsset]',
+        fields: frozenset[str] | None,
+        since: datetime.timedelta,
+        end_date: datetime.datetime,
+        frequency: datetime.timedelta | Period,
+        assets: frozenset[ExchangeAsset],
         include_end_date: bool,
     ):
         self._need(fields)
@@ -315,10 +315,10 @@ class UserDatasetSource(HuggingFaceDataSource):
 
     async def get_spot_value(
         self,
-        assets: 'frozenset[ExchangeAsset]',
-        fields: 'frozenset[str] | None',
-        dt: 'datetime.datetime',
-        frequency: 'datetime.timedelta | Period | None' = None,
+        assets: frozenset[ExchangeAsset],
+        fields: frozenset[str] | None,
+        dt: datetime.datetime,
+        frequency: datetime.timedelta | Period | None = None,
         **kwargs,
     ):
         self._need(fields)
@@ -329,10 +329,10 @@ class UserDatasetSource(HuggingFaceDataSource):
 def mount_user_dataset(
     address: str,
     *,
-    asset_service: 'AssetService | None' = None,
+    asset_service: AssetService | None = None,
     start_date: datetime.date | None = None,
     end_date: datetime.date | None = None,
-    trading_calendar: 'ExchangeCalendar | None' = None,
+    trading_calendar: ExchangeCalendar | None = None,
     user_id: Any = None,
     user_datasets_bucket: str | None = None,
     user_dataset_store: UserDatasetStore | None = None,

@@ -13,7 +13,7 @@ class NumExprFilter(NumericalExpression, Filter):
     """
 
     @classmethod
-    def create(cls, expr: str, binds: 'tuple[Term, ...]'):
+    def create(cls, expr: str, binds: tuple[Term, ...]):
         """
         Helper for creating new NumExprFactors.
 
@@ -23,7 +23,7 @@ class NumExprFilter(NumericalExpression, Filter):
         """
         return cls(expr=expr, binds=binds, dtype=bool_dtype)
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         """
         Compute our result with numexpr, then re-apply `mask`.
         """

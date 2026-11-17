@@ -69,16 +69,16 @@ class MovingAverageConvergenceDivergenceSignal(CustomFactor):
             **kwargs,
         )
 
-    def _ewma(self, data: 'np.ndarray', length: int):
+    def _ewma(self, data: np.ndarray, length: int):
         decay_rate = 1.0 - (2.0 / (1.0 + length))
         return average(data, axis=1, weights=exponential_weights(length, decay_rate))
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        close: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        close: np.ndarray,
         fast_period: int,
         slow_period: int,
         signal_period: int,

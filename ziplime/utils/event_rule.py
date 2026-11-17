@@ -33,11 +33,11 @@ class EventRule(ABC):
         return self._cal
 
     @cal.setter
-    def cal(self, value: 'ExchangeCalendar') -> None:
+    def cal(self, value: ExchangeCalendar) -> None:
         self._cal = value
 
     @abstractmethod
-    def should_trigger(self, dt: 'datetime.datetime'):
+    def should_trigger(self, dt: datetime.datetime):
         """
         Checks if the rule should trigger with its current state.
         This method should be pure and NOT mutate any state on the object.

@@ -59,7 +59,7 @@ class BarData:
                  data_sources: dict[str, DataSource],
                  simulation_dt_func: Callable,
                  trading_calendar: ExchangeCalendar,
-                 restrictions: 'Restrictions',
+                 restrictions: Restrictions,
                  data_source_resolver: Callable[[str], Awaitable[DataSource]] | None = None,
                  emission_rate: datetime.timedelta | None = None) -> None:
         # self.data_bundle = data_bundle
@@ -89,7 +89,7 @@ class BarData:
         # first_exchange = exchanges[list(exchanges.keys())[0]]
         # self.default_exchange = first_exchange
 
-    async def resolve_data_source(self, data_source: 'DataSource | str | None') -> DataSource:
+    async def resolve_data_source(self, data_source: DataSource | str | None) -> DataSource:
         """Return the source a read is addressed to, mounting it on demand.
 
         Accepts the three things a strategy may pass as ``data_source``:
@@ -423,7 +423,7 @@ class BarData:
         return self._venue_is_open(asset=asset, dt=dt, session=session, session_label=session_label)
 
     def _venue_is_open(self, asset: ExchangeAsset, dt: datetime.datetime,
-                       session: datetime.date, session_label: 'datetime.date | datetime.datetime') -> bool:
+                       session: datetime.date, session_label: datetime.date | datetime.datetime) -> bool:
         """Whether the listing's own market is trading at this point in the simulation.
 
         The listing's calendar, not the simulation's. The two agree while a run stays on one

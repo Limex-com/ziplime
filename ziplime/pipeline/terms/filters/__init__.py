@@ -3,11 +3,9 @@ from .custom_filter import CustomFilter
 from .all_present import AllPresent
 from .filter import Filter
 from .latest import Latest
-from .maximum_filter import MaximumFilter
 from .not_null_filter import NotNullFilter
 from .null_filter import NullFilter
 from .num_expr_filter import NumExprFilter
-from .percentile_filter import PercentileFilter
 from .single_asset import SingleAsset
 from .all import All
 from .any import Any
@@ -33,3 +31,22 @@ __all__ = [
     "StaticAssets",
     "StaticSids",
 ]
+
+
+def __getattr__(name: str) -> type[Filter]:
+    # These filters depend on Factor and Classifier, which import the base filters.
+    if name == "MaximumFilter":
+        from .maximum_filter import MaximumFilter
+
+        globals()[name] = MaximumFilter
+        return MaximumFilter
+    if name == "PercentileFilter":
+        from .percentile_filter import PercentileFilter
+
+        globals()[name] = PercentileFilter
+        return PercentileFilter
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

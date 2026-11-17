@@ -41,10 +41,10 @@ class Clip(CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        values: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        values: np.ndarray,
         min_bound: float,
         max_bound: float,
     ) -> None:

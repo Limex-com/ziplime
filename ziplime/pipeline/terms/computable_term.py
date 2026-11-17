@@ -1,7 +1,6 @@
 from abc import abstractmethod
 from bisect import insort
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
 
 from numpy import (
     record,
@@ -29,11 +28,8 @@ from ziplime.utils.numpy_utils import (
     float64_dtype,
 )
 from ziplime.lib.windowtemplate import AdjustedArrayWindow
-
-# Term classes and their mixins import one another during initialization.
-if TYPE_CHECKING:
-    from ziplime.pipeline.mixins import UniversalMixin
-    from ziplime.pipeline.terms.filters.filter import Filter
+from ziplime.pipeline.terms.boolean_term import BooleanTerm
+from ziplime.pipeline.universal_mixin import UniversalMixin
 
 
 class ComputableTerm(Term):
@@ -52,11 +48,11 @@ class ComputableTerm(Term):
 
     def __new__(
             cls,
-            inputs: 'Iterable[Term] | None' = inputs,
-            outputs: 'Iterable[str] | None' = outputs,
-            window_length: 'int | None' = window_length,
-            mask: 'Filter | None' = mask,
-            domain: 'Domain | None' = domain,
+            inputs: Iterable[Term] | None = inputs,
+            outputs: Iterable[str] | None = outputs,
+            window_length: int | None = window_length,
+            mask: BooleanTerm | None = mask,
+            domain: Domain | None = domain,
             *args,
             **kwargs,
     ):
@@ -106,10 +102,10 @@ class ComputableTerm(Term):
 
     def _init(
         self,
-        inputs: 'tuple[Term, ...] | None',
-        outputs: 'tuple[str, ...] | None',
-        window_length: 'int | None',
-        mask: 'Filter',
+        inputs: tuple[Term, ...] | None,
+        outputs: tuple[str, ...] | None,
+        window_length: int | None,
+        mask: BooleanTerm,
         *args,
         **kwargs,
     ):
@@ -122,10 +118,10 @@ class ComputableTerm(Term):
     @classmethod
     def _static_identity(
         cls,
-        inputs: 'tuple[Term, ...] | None',
-        outputs: 'tuple[str, ...] | None',
-        window_length: 'int | None',
-        mask: 'Filter',
+        inputs: tuple[Term, ...] | None,
+        outputs: tuple[str, ...] | None,
+        window_length: int | None,
+        mask: BooleanTerm,
         *args,
         **kwargs,
     ):
@@ -188,10 +184,10 @@ class ComputableTerm(Term):
 
     def _compute(
         self,
-        inputs: 'list[np.ndarray | AdjustedArrayWindow]',
-        dates: 'pd.DatetimeIndex',
-        assets: 'pd.Index',
-        mask: 'np.ndarray',
+        inputs: list[np.ndarray | AdjustedArrayWindow],
+        dates: pd.DatetimeIndex,
+        assets: pd.Index,
+        mask: np.ndarray,
     ):
         """
         Subclasses should implement this to perform actual computation.
@@ -265,7 +261,7 @@ class ComputableTerm(Term):
             return [tuple(r) for r in data]
         return data
 
-    def to_workspace_value(self, result: 'pd.Series', assets: 'pd.Index'):
+    def to_workspace_value(self, result: pd.Series, assets: pd.Index):
         """
         Called with a column of the result of a pipeline. This needs to put
         the data into a format that can be used in a workspace to continue
@@ -491,7 +487,7 @@ class ComputableTerm(Term):
         return type(self).__name__ + "(...)"
 
     @classmethod
-    def _with_mixin(cls, mixin_type: 'type[UniversalMixin]'):
+    def _with_mixin(cls, mixin_type: type[UniversalMixin]):
         return mixin_type.universal_mixin_specialization(
             cls._principal_computable_term_type(),
         )

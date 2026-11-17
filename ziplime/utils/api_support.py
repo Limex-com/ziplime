@@ -25,9 +25,9 @@ class ZiplineAPI(object):
 
     def __exit__(
         self,
-        _type: 'type[BaseException] | None',
-        _value: 'BaseException | None',
-        _tb: 'TracebackType | None',
+        _type: type[BaseException] | None,
+        _value: BaseException | None,
+        _tb: TracebackType | None,
     ) -> None:
         """
         Restore the algo instance stored in __enter__.
@@ -35,7 +35,7 @@ class ZiplineAPI(object):
         set_algo_instance(self.old_algo_instance)
 
 
-def api_method(f: 'Callable'):
+def api_method(f: Callable):
     # Decorator that adds the decorated class method as a callable
     # function (wrapped) to ziplime.api
     @wraps(f)
@@ -55,7 +55,7 @@ def api_method(f: 'Callable'):
     return f
 
 
-def require_not_initialized(exception: 'Exception'):
+def require_not_initialized(exception: Exception):
     """
     Decorator for API methods that should only be called during or before
     TradingAlgorithm.initialize.  `exception` will be raised if the method is
@@ -67,7 +67,7 @@ def require_not_initialized(exception: 'Exception'):
     def method(self):
         # Do stuff that should only be allowed during initialize.
     """
-    def decorator(method: 'Callable'):
+    def decorator(method: Callable):
         @wraps(method)
         def wrapped_method(self, *args, **kwargs):
             if self.initialized:
@@ -77,7 +77,7 @@ def require_not_initialized(exception: 'Exception'):
     return decorator
 
 
-def require_initialized(exception: 'Exception'):
+def require_initialized(exception: Exception):
     """
     Decorator for API methods that should only be called after
     TradingAlgorithm.initialize.  `exception` will be raised if the method is
@@ -89,7 +89,7 @@ def require_initialized(exception: 'Exception'):
     def method(self):
         # Do stuff that should only be allowed after initialize.
     """
-    def decorator(method: 'Callable'):
+    def decorator(method: Callable):
         @wraps(method)
         def wrapped_method(self, *args, **kwargs):
             if not self.initialized:
@@ -99,7 +99,7 @@ def require_initialized(exception: 'Exception'):
     return decorator
 
 
-def disallowed_in_before_trading_start(exception: 'Exception'):
+def disallowed_in_before_trading_start(exception: Exception):
     """
     Decorator for API methods that cannot be called from within
     TradingAlgorithm.before_trading_start.  `exception` will be raised if the
@@ -111,7 +111,7 @@ def disallowed_in_before_trading_start(exception: 'Exception'):
     def method(self):
         # Do stuff that is not allowed inside before_trading_start.
     """
-    def decorator(method: 'Callable'):
+    def decorator(method: Callable):
         @wraps(method)
         def wrapped_method(self, *args, **kwargs):
             if self._in_before_trading_start:

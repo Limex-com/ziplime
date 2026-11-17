@@ -10,9 +10,9 @@ class Column:
 
     def __init__(
             self,
-            dtype: 'DTypeLike',
+            dtype: DTypeLike,
             missing_value=None,
-            doc: 'str | None' = None,
+            doc: str | None = None,
             metadata=None,
             currency_aware: bool = False,
     ) -> None:

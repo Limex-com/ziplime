@@ -24,7 +24,7 @@ class MarketImpactBase(SlippageModel):
         self._window_data_cache = ExpiringCache()
 
     @abstractmethod
-    def get_txn_volume(self, volume: float, order: 'Order'):
+    def get_txn_volume(self, volume: float, order: Order):
         """Return the number of shares/contracts we would like to fill in this bar.
 
         Parameters
@@ -42,7 +42,7 @@ class MarketImpactBase(SlippageModel):
     @abstractmethod
     def get_simulated_impact(
             self,
-            order: 'Order',
+            order: Order,
             current_price: float,
             current_volume: float,
             txn_volume: int,
@@ -66,7 +66,7 @@ class MarketImpactBase(SlippageModel):
         """
         raise NotImplementedError("get_simulated_impact")
 
-    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: 'Order',
+    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: Order,
                             price: float = None):
         """Fill an order at a price moved by this model's simulated market impact.
 
@@ -128,7 +128,7 @@ class MarketImpactBase(SlippageModel):
 
         return impacted_price, math.copysign(txn_volume, order.direction)
 
-    async def _get_window_data(self, exchange: Exchange, asset: 'ExchangeAsset', dt: datetime.datetime,
+    async def _get_window_data(self, exchange: Exchange, asset: ExchangeAsset, dt: datetime.datetime,
                                window_length: int):
         """Return the trailing mean volume and annualised close-price volatility of ``asset``.
 

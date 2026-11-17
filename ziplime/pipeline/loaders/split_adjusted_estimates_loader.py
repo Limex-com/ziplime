@@ -38,11 +38,11 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
 
     def __init__(
         self,
-        estimates: 'pd.DataFrame',
-        name_map: 'dict[str, str]',
+        estimates: pd.DataFrame,
+        name_map: dict[str, str],
         split_adjustments_loader,
-        split_adjusted_column_names: 'Sequence[str]',
-        split_adjusted_asof: 'pd.Timestamp',
+        split_adjusted_column_names: Sequence[str],
+        split_adjusted_asof: pd.Timestamp,
     ) -> None:
         validate_split_adjusted_column_specs(name_map, split_adjusted_column_names)
         self._split_adjustments = split_adjustments_loader
@@ -54,30 +54,30 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
     @abstractmethod
     def collect_split_adjustments(
         self,
-        adjustments_for_sid: 'dict[str, dict[int, list[Adjustment]]]',
-        requested_qtr_data: 'pd.DataFrame',
-        dates: 'pd.DatetimeIndex',
+        adjustments_for_sid: dict[str, dict[int, list[Adjustment]]],
+        requested_qtr_data: pd.DataFrame,
+        dates: pd.DatetimeIndex,
         sid: int,
         sid_idx: int,
-        sid_estimates: 'pd.DataFrame',
+        sid_estimates: pd.DataFrame,
         split_adjusted_asof_idx: int,
-        pre_adjustments: 'tuple[np.ndarray, np.ndarray]',
-        post_adjustments: 'tuple[np.ndarray, np.ndarray, pd.DatetimeIndex]',
-        requested_split_adjusted_columns: 'list[str]',
+        pre_adjustments: tuple[np.ndarray, np.ndarray],
+        post_adjustments: tuple[np.ndarray, np.ndarray, pd.DatetimeIndex],
+        requested_split_adjusted_columns: list[str],
     ):
         raise NotImplementedError("collect_split_adjustments")
 
     def get_adjustments_for_sid(
         self,
-        group: 'pd.DataFrame',
-        dates: 'pd.DatetimeIndex',
-        requested_qtr_data: 'pd.DataFrame',
-        last_per_qtr: 'pd.DataFrame',
-        sid_to_idx: 'dict[int, int]',
-        columns: 'list[BoundColumn]',
-        col_to_all_adjustments: 'dict[str, dict[int, list[Adjustment]]]',
-        split_adjusted_asof_idx: 'int | None' = None,
-        split_adjusted_cols_for_group: 'list[str] | None' = None,
+        group: pd.DataFrame,
+        dates: pd.DatetimeIndex,
+        requested_qtr_data: pd.DataFrame,
+        last_per_qtr: pd.DataFrame,
+        sid_to_idx: dict[int, int],
+        columns: list[BoundColumn],
+        col_to_all_adjustments: dict[str, dict[int, list[Adjustment]]],
+        split_adjusted_asof_idx: int | None = None,
+        split_adjusted_cols_for_group: list[str] | None = None,
     ) -> None:
         """Collects both overwrites and adjustments for a particular sid.
 
@@ -132,12 +132,12 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
 
     def get_adjustments(
         self,
-        zero_qtr_data: 'pd.DataFrame',
-        requested_qtr_data: 'pd.DataFrame',
-        last_per_qtr: 'pd.DataFrame',
-        dates: 'pd.DatetimeIndex',
-        assets: 'pd.Index',
-        columns: 'list[BoundColumn]',
+        zero_qtr_data: pd.DataFrame,
+        requested_qtr_data: pd.DataFrame,
+        last_per_qtr: pd.DataFrame,
+        dates: pd.DatetimeIndex,
+        assets: pd.Index,
+        columns: list[BoundColumn],
         **kwargs,
     ):
         """Calculates both split adjustments and overwrites for all sids."""
@@ -161,11 +161,11 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
 
     def determine_end_idx_for_adjustment(
         self,
-        adjustment_ts: 'pd.Timestamp',
-        dates: 'pd.DatetimeIndex',
+        adjustment_ts: pd.Timestamp,
+        dates: pd.DatetimeIndex,
         upper_bound: int,
         requested_quarter: float,
-        sid_estimates: 'pd.DataFrame',
+        sid_estimates: pd.DataFrame,
     ):
         """Determines the date until which the adjustment at the given date
         index should be applied for the given quarter.
@@ -218,8 +218,8 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
         self,
         split_adjusted_asof_date_idx: int,
         sid_idx: int,
-        pre_adjustments: 'tuple[np.ndarray, np.ndarray]',
-        requested_split_adjusted_columns: 'list[str]',
+        pre_adjustments: tuple[np.ndarray, np.ndarray],
+        requested_split_adjusted_columns: list[str],
     ):
         """Collect split adjustments that occur before the
         split-adjusted-asof-date. All those adjustments must first be
@@ -276,12 +276,12 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
 
     def collect_post_asof_split_adjustments(
         self,
-        post_adjustments: 'tuple[np.ndarray, np.ndarray, pd.DatetimeIndex]',
-        requested_qtr_data: 'pd.DataFrame',
+        post_adjustments: tuple[np.ndarray, np.ndarray, pd.DatetimeIndex],
+        requested_qtr_data: pd.DataFrame,
         sid: int,
         sid_idx: int,
-        sid_estimates: 'pd.DataFrame',
-        requested_split_adjusted_columns: 'list[str]',
+        sid_estimates: pd.DataFrame,
+        requested_split_adjusted_columns: list[str],
     ):
         """Collect split adjustments that occur after the
         split-adjusted-asof-date. Each adjustment needs to be applied to all
@@ -372,7 +372,7 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
         return col_to_split_adjustments
 
     def retrieve_split_adjustment_data_for_sid(
-        self, dates: 'pd.DatetimeIndex', sid: int, split_adjusted_asof_idx: int
+        self, dates: pd.DatetimeIndex, sid: int, split_adjusted_asof_idx: int
     ):
         """
 
@@ -418,14 +418,14 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
 
     def _collect_adjustments(
         self,
-        requested_qtr_data: 'pd.DataFrame',
+        requested_qtr_data: pd.DataFrame,
         sid: int,
         sid_idx: int,
-        sid_estimates: 'pd.DataFrame',
+        sid_estimates: pd.DataFrame,
         split_adjusted_asof_idx: int,
-        pre_adjustments: 'tuple[np.ndarray, np.ndarray]',
-        post_adjustments: 'tuple[np.ndarray, np.ndarray, pd.DatetimeIndex]',
-        requested_split_adjusted_columns: 'list[str]',
+        pre_adjustments: tuple[np.ndarray, np.ndarray],
+        post_adjustments: tuple[np.ndarray, np.ndarray, pd.DatetimeIndex],
+        requested_split_adjusted_columns: list[str],
     ):
         pre_adjustments_dict = self.collect_pre_split_asof_date_adjustments(
             split_adjusted_asof_idx,
@@ -446,10 +446,10 @@ class SplitAdjustedEstimatesLoader(EarningsEstimatesLoader):
 
     def merge_split_adjustments_with_overwrites(
         self,
-        pre: 'dict[str, dict[int, list[Adjustment]]]',
-        post: 'dict[str, dict[int, list[Adjustment]]]',
-        overwrites: 'dict[str, dict[int, list[Adjustment]]]',
-        requested_split_adjusted_columns: 'list[str]',
+        pre: dict[str, dict[int, list[Adjustment]]],
+        post: dict[str, dict[int, list[Adjustment]]],
+        overwrites: dict[str, dict[int, list[Adjustment]]],
+        requested_split_adjusted_columns: list[str],
     ) -> None:
         """Merge split adjustments with the dict containing overwrites.
 

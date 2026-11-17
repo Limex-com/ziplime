@@ -30,6 +30,6 @@ class PercentChange(SingleInputMixin, CustomFactor):
                 "length of 2.".format(window_length=self.window_length)
             )
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', values: 'np.ndarray') -> None:
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, values: np.ndarray) -> None:
         with np_errstate(divide="ignore", invalid="ignore"):
             out[:] = (values[-1] - values[0]) / abs(values[0])

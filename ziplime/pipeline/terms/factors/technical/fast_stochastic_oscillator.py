@@ -33,12 +33,12 @@ class FastStochasticOscillator(CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        closes: 'np.ndarray',
-        lows: 'np.ndarray',
-        highs: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        closes: np.ndarray,
+        lows: np.ndarray,
+        highs: np.ndarray,
     ) -> None:
 
         highest_highs = nanmax(highs, axis=0)

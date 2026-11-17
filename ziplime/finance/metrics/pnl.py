@@ -23,10 +23,10 @@ class PNL:
     ) -> None:
         self._previous_pnl = 0.0
 
-    def start_of_session(self, ledger: 'Ledger', session: 'datetime.datetime', exchanges: dict[str, Exchange]) -> None:
+    def start_of_session(self, ledger: Ledger, session: datetime.datetime, exchanges: dict[str, Exchange]) -> None:
         self._previous_pnl = ledger.portfolio.pnl
 
-    def _end_of_period(self, field: str, packet, ledger: 'Ledger') -> None:
+    def _end_of_period(self, field: str, packet, ledger: Ledger) -> None:
         pnl = ledger.portfolio.pnl
         packet[field]["pnl"] = pnl - self._previous_pnl
         packet["cumulative_perf"]["pnl"] = ledger.portfolio.pnl

@@ -10,6 +10,7 @@ from ziplime.pipeline.expression import (
 )
 from ziplime.pipeline.mixins import IfElseMixin, RestrictedDTypeMixin
 from ziplime.pipeline.terms.term import Term
+from ziplime.pipeline.terms.boolean_term import BooleanTerm
 from ziplime.pipeline.terms.computable_term import ComputableTerm
 
 from ziplime.utils.numpy_utils import same, bool_dtype
@@ -27,7 +28,7 @@ def binary_operator(op: str):
     # NumericalExpression operator.
     commuted_method_getter = attrgetter(method_name_for_op(op, commute=True))
 
-    def binary_operator(self, other: 'Term | int'):
+    def binary_operator(self, other: Term | int):
         from ziplime.pipeline.terms.filters.num_expr_filter import NumExprFilter
         if isinstance(self, NumericalExpression):
             self_expr, other_expr, new_inputs = self.build_binary_op(
@@ -95,7 +96,7 @@ def unary_operator(op: str):
     return unary_operator
 
 
-class Filter(RestrictedDTypeMixin, ComputableTerm):
+class Filter(RestrictedDTypeMixin, ComputableTerm, BooleanTerm):
     """
     Pipeline expression computing a boolean output.
 
@@ -150,7 +151,6 @@ class Filter(RestrictedDTypeMixin, ComputableTerm):
 
     # Used by RestrictedDTypeMixin
     ALLOWED_DTYPES = FILTER_DTYPES
-    dtype = bool_dtype
 
     clsdict = locals()
     clsdict.update(

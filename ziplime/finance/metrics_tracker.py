@@ -163,10 +163,10 @@ class MetricsTracker:
     def positions(self):
         return self._ledger.positions
 
-    def transactions(self, dt: 'datetime.datetime | None' = None):
+    def transactions(self, dt: datetime.datetime | None = None):
         return [replace(transaction) for transaction in self._ledger.transactions(dt=dt)]
 
-    def orders(self, dt: 'datetime.datetime | None' = None):
+    def orders(self, dt: datetime.datetime | None = None):
         return [copy(order) for order in self._ledger.orders(dt=dt)]
 
     @property

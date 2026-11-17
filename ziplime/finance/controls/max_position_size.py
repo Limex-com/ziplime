@@ -30,7 +30,7 @@ class MaxPositionSize(TradingControl):
             raise ValueError("max_notional must be positive.")
 
     async def validate(self, asset: ExchangeAsset, amount: int, portfolio: Portfolio,
-                       algo_datetime: 'datetime.datetime', algo_current_data: 'BarData') -> None:
+                       algo_datetime: datetime.datetime, algo_current_data: BarData) -> None:
         """Fail if the given order would cause the magnitude of our position to be
         greater in shares than self.max_shares or greater in dollar value than
         self.max_notional.

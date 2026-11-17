@@ -48,11 +48,11 @@ class PrecomputedLoader(PipelineLoader):
 
     async def load_adjusted_array(
         self,
-        domain: 'Domain',
-        columns: 'list[BoundColumn]',
-        dates: 'pd.DatetimeIndex',
-        sids: 'pd.Index',
-        mask: 'np.ndarray',
+        domain: Domain,
+        columns: list[BoundColumn],
+        dates: pd.DatetimeIndex,
+        sids: pd.Index,
+        mask: np.ndarray,
     ):
         """Load by delegating to sub-loaders."""
         out = {}

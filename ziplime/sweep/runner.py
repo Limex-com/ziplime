@@ -97,7 +97,7 @@ def _apple_gpu() -> bool:
 
 
 async def run_sweep(params: SweepParams, base: Path, say: Callable[[str], None] = print, *,
-                    market_data: 'DataBundle | None' = None, asset_service: 'AssetService | None' = None,
+                    market_data: DataBundle | None = None, asset_service: AssetService | None = None,
                     custom_data_sources: list | None = None) -> pd.DataFrame:
     """Run the sweep the file describes; returns every combination's metrics.
 
@@ -124,17 +124,17 @@ async def run_sweep(params: SweepParams, base: Path, say: Callable[[str], None] 
 
 
 async def _sweep(
-    params: 'SweepParams',
-    base: 'Path',
-    say: 'Callable[[str], None]',
-    stages: 'Stages',
+    params: SweepParams,
+    base: Path,
+    say: Callable[[str], None],
+    stages: Stages,
     started: float,
-    combos: 'list[dict]',
-    algorithm: 'AlgorithmFile',
-    combinations: 'Combinations',
-    asset_service: 'AssetService',
-    market_data: 'DataBundle | None',
-    registered: 'dict[str, DataSource]',
+    combos: list[dict],
+    algorithm: AlgorithmFile,
+    combinations: Combinations,
+    asset_service: AssetService,
+    market_data: DataBundle | None,
+    registered: dict[str, DataSource],
 ):
     found = {}
     first = await run_initialize(algorithm, asset_service, combinations.config(0), found)
@@ -155,7 +155,7 @@ async def _sweep(
 
     memo = {}
 
-    async def once(bundle: 'DataBundle', rank_only: bool = False):
+    async def once(bundle: DataBundle, rank_only: bool = False):
         """The sweep on these bars; ``rank_only`` -- every combination's metrics and nothing
         else: no printing, no refinement, no files, no verification (a synthetic path)."""
         quiet = (lambda message: None) if rank_only else say
@@ -193,14 +193,14 @@ async def _sweep(
     return await once(bundle)
 
 
-def first_context(algorithm: 'AlgorithmFile', asset_service: 'AssetService', found):
+def first_context(algorithm: AlgorithmFile, asset_service: AssetService, found):
     from ziplime.sweep.initialize import SweepContext
     return SweepContext(algorithm, asset_service, found)
 
 
 # -- handle_data ----------------------------------------------------------------------------------
 
-def _same_frequency(bundle: 'DataBundle', params: 'SweepParams') -> None:
+def _same_frequency(bundle: DataBundle, params: SweepParams) -> None:
     """The bundle's bars are the run's bars. A finer bundle loaded at a coarser rate is stamped at
     each window's start, so the engine reads a bar's whole window at its first minute -- look-ahead
     a sweep would have to copy; it refuses instead."""
@@ -211,7 +211,7 @@ def _same_frequency(bundle: 'DataBundle', params: 'SweepParams') -> None:
                          f"the bundle at the run's frequency.")
 
 
-def hooks_of(algorithm: 'AlgorithmFile', initialized: list, calendar: 'ExchangeCalendar', market: 'Market'):
+def hooks_of(algorithm: AlgorithmFile, initialized: list, calendar: ExchangeCalendar, market: Market):
     """handle_data, before_trading_start and the scheduled functions, converted; and for each
     scheduled function the bars it runs at, per distinct initialize result -- decided by the
     engine's own rules (make_eventrule) over the run's bars."""
@@ -266,11 +266,11 @@ def _rule_key(rule):
     return type(rule).__name__, settings
 
 
-def schedule_for(flags: 'list[np.ndarray]', which: 'np.ndarray', chunk: 'Sequence[int] | np.ndarray') -> list:
+def schedule_for(flags: list[np.ndarray], which: np.ndarray, chunk: Sequence[int] | np.ndarray) -> list:
     return [matrix[:, which[chunk]] for matrix in flags]
 
 
-def costs_for(params: SweepParams, initialized: 'Initialized') -> SweepParams:
+def costs_for(params: SweepParams, initialized: Initialized) -> SweepParams:
     """set_commission / set_slippage in initialize win over the sweep file, as over run_simulation's
     arguments."""
     changes = {}
@@ -294,23 +294,23 @@ def remap(stacks: dict, rows: np.ndarray) -> dict:
 
 async def _sweep_handle_data(
     *,
-    params: 'SweepParams',
-    base: 'Path',
-    say: 'Callable[[str], None]',
-    stages: 'Stages',
-    combos: 'list[dict]',
-    algorithm: 'AlgorithmFile',
-    combinations: 'Combinations',
-    asset_service: 'AssetService',
-    calendar: 'ExchangeCalendar',
-    bundle: 'DataBundle',
-    panel: 'PricePanel',
-    in_run: 'np.ndarray',
-    universe: 'dict[str, ExchangeAsset]',
-    columns: 'list[str]',
+    params: SweepParams,
+    base: Path,
+    say: Callable[[str], None],
+    stages: Stages,
+    combos: list[dict],
+    algorithm: AlgorithmFile,
+    combinations: Combinations,
+    asset_service: AssetService,
+    calendar: ExchangeCalendar,
+    bundle: DataBundle,
+    panel: PricePanel,
+    in_run: np.ndarray,
+    universe: dict[str, ExchangeAsset],
+    columns: list[str],
     found,
-    first: 'Initialized',
-    registered: 'dict[str, DataSource]',
+    first: Initialized,
+    registered: dict[str, DataSource],
     rank_only: bool = False,
     memo=None,
 ):
@@ -498,15 +498,15 @@ async def _sweep_handle_data(
 async def _on_engine(
     reason: str,
     *,
-    params: 'SweepParams',
-    base: 'Path',
-    say: 'Callable[[str], None]',
-    stages: 'Stages',
-    combos: 'list[dict]',
-    combinations: 'Combinations',
-    bundle: 'DataBundle',
-    asset_service: 'AssetService',
-    registered: 'dict[str, DataSource]',
+    params: SweepParams,
+    base: Path,
+    say: Callable[[str], None],
+    stages: Stages,
+    combos: list[dict],
+    combinations: Combinations,
+    bundle: DataBundle,
+    asset_service: AssetService,
+    registered: dict[str, DataSource],
     rank_only: bool = False,
 ):
     """The strategy cannot run for every combination at once: run each through the engine."""
@@ -549,11 +549,11 @@ async def _on_engine(
 def _check_best(
     indicators,
     cache,
-    algorithm: 'AlgorithmFile',
-    asset_service: 'AssetService',
-    combinations: 'Combinations',
+    algorithm: AlgorithmFile,
+    asset_service: AssetService,
+    combinations: Combinations,
     best,
-    panel: 'PricePanel',
+    panel: PricePanel,
     found,
     initialized,
 ) -> None:
@@ -568,9 +568,9 @@ def _check_best(
 
 def _metrics(
     result: engine.Result,
-    index: 'pd.DatetimeIndex',
-    chunk: 'Sequence[int] | np.ndarray',
-    params: 'SweepParams',
+    index: pd.DatetimeIndex,
+    chunk: Sequence[int] | np.ndarray,
+    params: SweepParams,
 ) -> pd.DataFrame:
     table = pd.DataFrame(result.metrics, index=chunk)
     table["fills"], table["fees"], table["rejects"] = result.fills, result.fees, 0
@@ -623,22 +623,22 @@ def _worker(job: dict) -> pd.DataFrame:
 
 async def _sweep_signals(
     *,
-    params: 'SweepParams',
-    base: 'Path',
-    say: 'Callable[[str], None]',
-    stages: 'Stages',
-    combos: 'list[dict]',
-    algorithm: 'AlgorithmFile',
-    combinations: 'Combinations',
-    asset_service: 'AssetService',
-    calendar: 'ExchangeCalendar',
-    bundle: 'DataBundle',
-    panel: 'PricePanel',
-    in_run: 'np.ndarray',
-    universe: 'dict[str, ExchangeAsset]',
-    columns: 'list[str]',
+    params: SweepParams,
+    base: Path,
+    say: Callable[[str], None],
+    stages: Stages,
+    combos: list[dict],
+    algorithm: AlgorithmFile,
+    combinations: Combinations,
+    asset_service: AssetService,
+    calendar: ExchangeCalendar,
+    bundle: DataBundle,
+    panel: PricePanel,
+    in_run: np.ndarray,
+    universe: dict[str, ExchangeAsset],
+    columns: list[str],
     found,
-    first: 'Initialized',
+    first: Initialized,
     rank_only: bool = False,
 ):
     configs_all = None
@@ -721,26 +721,26 @@ async def _sweep_signals(
 
 async def _finish(
     *,
-    params: 'SweepParams',
-    base: 'Path',
-    say: 'Callable[[str], None]',
-    stages: 'Stages',
-    table: 'pd.DataFrame',
-    combos: 'list[dict]',
-    combinations: 'Combinations',
-    simulate: 'Callable',
-    columns: 'list[str]',
-    market: 'Market | None',
-    calendar: 'ExchangeCalendar',
-    bundle: 'DataBundle',
-    universe: 'dict[str, ExchangeAsset]',
-    asset_service: 'AssetService',
+    params: SweepParams,
+    base: Path,
+    say: Callable[[str], None],
+    stages: Stages,
+    table: pd.DataFrame,
+    combos: list[dict],
+    combinations: Combinations,
+    simulate: Callable,
+    columns: list[str],
+    market: Market | None,
+    calendar: ExchangeCalendar,
+    bundle: DataBundle,
+    universe: dict[str, ExchangeAsset],
+    asset_service: AssetService,
     variants: int,
-    best_run: 'Callable',
-    check_best: 'Callable | None',
-    compiled: 'bool | None',
-    close: 'Callable | None' = None,
-    warnings: 'Iterable[str] | None' = (),
+    best_run: Callable,
+    check_best: Callable | None,
+    compiled: bool | None,
+    close: Callable | None = None,
+    warnings: Iterable[str] | None = (),
     rank_only: bool = False,
 ):
     table.index.name = "combo"

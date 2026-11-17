@@ -29,7 +29,7 @@ class SeededRandomLoader(PrecomputedLoader):
         Same as PrecomputedLoader
     """
 
-    def __init__(self, seed: int, columns: 'list[BoundColumn]', dates, sids) -> None:
+    def __init__(self, seed: int, columns: list[BoundColumn], dates, sids) -> None:
         self._seed = seed
         super(SeededRandomLoader, self).__init__(
             {c: self.values(c.dtype, dates, sids) for c in columns},
@@ -37,7 +37,7 @@ class SeededRandomLoader(PrecomputedLoader):
             sids,
         )
 
-    def values(self, dtype: 'np.dtype', dates: 'pd.DatetimeIndex', sids: 'pd.Index'):
+    def values(self, dtype: np.dtype, dates: pd.DatetimeIndex, sids: pd.Index):
         """Make a random array of shape (len(dates), len(sids)) with ``dtype``."""
         shape = (len(dates), len(sids))
         return {
@@ -57,11 +57,11 @@ class SeededRandomLoader(PrecomputedLoader):
         """
         return RandomState(self._seed)
 
-    def _float_values(self, shape: 'tuple[int, int]'):
+    def _float_values(self, shape: tuple[int, int]):
         """Return uniformly-distributed floats between -0.0 and 100.0."""
         return self.state.uniform(low=0.0, high=100.0, size=shape)
 
-    def _int_values(self, shape: 'tuple[int, int]'):
+    def _int_values(self, shape: tuple[int, int]):
         """
         Return uniformly-distributed integers between 0 and 100.
         """
@@ -69,7 +69,7 @@ class SeededRandomLoader(PrecomputedLoader):
             "int64"
         )  # default is system int
 
-    def _datetime_values(self, shape: 'tuple[int, int]'):
+    def _datetime_values(self, shape: tuple[int, int]):
         """Return uniformly-distributed dates in 2014."""
         start = Timestamp("2014", tz="UTC").asm8
         offsets = self.state.randint(
@@ -79,10 +79,10 @@ class SeededRandomLoader(PrecomputedLoader):
         ).astype("timedelta64[D]")
         return start + offsets
 
-    def _bool_values(self, shape: 'tuple[int, int]'):
+    def _bool_values(self, shape: tuple[int, int]):
         """Return uniformly-distributed True/False values."""
         return self.state.randn(*shape) < 0
 
-    def _object_values(self, shape: 'tuple[int, int]'):
+    def _object_values(self, shape: tuple[int, int]):
         res = self._int_values(shape).astype(str).astype(object)
         return res

@@ -44,11 +44,11 @@ class RollingPearson(RollingCorrelation):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        base_data: 'np.ndarray',
-        target_data: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        base_data: np.ndarray,
+        target_data: np.ndarray,
     ) -> None:
         vectorized_pearson_r(
             base_data,

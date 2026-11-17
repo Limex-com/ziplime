@@ -1,3 +1,4 @@
+from typing import Self
 from toolz import first
 from numpy.typing import DTypeLike
 from ziplime.pipeline.data.currency_conversion import CurrencyConversion
@@ -49,13 +50,13 @@ class BoundColumn(LoadableTerm):
 
     def __new__(
             cls,
-            dtype: 'DTypeLike',
+            dtype: DTypeLike,
             missing_value,
             dataset: DataSetMeta,
             name: str,
-            doc: 'str | None',
+            doc: str | None,
             metadata,
-            currency_conversion: 'CurrencyConversion | None',
+            currency_conversion: CurrencyConversion | None,
             currency_aware: bool,
     ):
         if currency_aware and dtype != float64_dtype:
@@ -88,9 +89,9 @@ class BoundColumn(LoadableTerm):
             self,
             dataset: DataSetMeta,
             name: str,
-            doc: 'str | None',
+            doc: str | None,
             metadata,
-            currency_conversion: 'CurrencyConversion | None',
+            currency_conversion: CurrencyConversion | None,
             currency_aware: bool,
             *args,
             **kwargs,
@@ -108,9 +109,9 @@ class BoundColumn(LoadableTerm):
             cls,
             dataset: DataSetMeta,
             name: str,
-            doc: 'str | None',
+            doc: str | None,
             metadata,
-            currency_conversion: 'CurrencyConversion | None',
+            currency_conversion: CurrencyConversion | None,
             currency_aware: bool,
             *args,
             **kwargs,
@@ -146,14 +147,14 @@ class BoundColumn(LoadableTerm):
 
         return type(self)(**kw)
 
-    def specialize(self, domain: Domain) -> "BoundColumn":
+    def specialize(self, domain: Domain) -> Self:
         """Specialize ``self`` to a concrete domain."""
         if domain == self.domain:
             return self
 
         return self._replace(dataset=self._dataset.specialize(domain))
 
-    def unspecialize(self) -> "BoundColumn":
+    def unspecialize(self) -> Self:
         """
         Unspecialize a column to its generic form.
 
@@ -161,7 +162,7 @@ class BoundColumn(LoadableTerm):
         """
         return self.specialize(GENERIC)
 
-    def fx(self, currency: str | Currency) -> "BoundColumn":
+    def fx(self, currency: str | Currency) -> Self:
         """
         Construct a currency-converted version of this column.
 

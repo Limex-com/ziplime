@@ -80,12 +80,12 @@ def _describe(key, columns) -> str:
 
 def conversion(
     *,
-    hooks: 'Hooks',
-    windows: 'Windows',
+    hooks: Hooks,
+    windows: Windows,
     backend: str,
     compiled: bool,
-    reasons: 'Iterable[str] | None',
-    columns: 'list[str]',
+    reasons: Iterable[str] | None,
+    columns: list[str],
 ) -> list[str]:
     """How the strategy ran: lines for the sweep's output."""
     lines = ["How the strategy runs in the sweep:"]
@@ -122,7 +122,7 @@ def conversion(
     return lines
 
 
-def warnings(windows: 'Windows', columns: 'list[str]') -> list[str]:
+def warnings(windows: Windows, columns: list[str]) -> list[str]:
     """Computations on history that are NaN at every bar."""
     registry, found = windows.lazy, []
     for key, (name, _, _) in registry.records.items():
@@ -156,7 +156,7 @@ def influence(table: pd.DataFrame, parameters: list[str]) -> list[str]:
     return found
 
 
-def _where(location: 'str | None') -> str:
+def _where(location: str | None) -> str:
     if not location or location == "the strategy":
         return ""
     filename, _, line = location.rpartition(", line ")

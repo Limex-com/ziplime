@@ -26,7 +26,7 @@ RESTRICTION_STATES = IntEnum(
 )
 
 
-def _is_one_asset(assets: 'Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset]') -> bool:
+def _is_one_asset(assets: Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset]) -> bool:
     """Whether ``assets`` is a single instrument rather than an iterable of them.
 
     Orders in this fork carry an :class:`ExchangeAsset` -- a listing, wrapping an
@@ -44,7 +44,7 @@ class Restrictions(metaclass=abc.ABCMeta):
     """
 
     @abc.abstractmethod
-    def is_restricted(self, assets: 'Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset]', dt: 'datetime.datetime'):
+    def is_restricted(self, assets: Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset], dt: datetime.datetime):
         """Is the asset restricted (RestrictionStates.FROZEN) on the given dt?
 
         Parameters
@@ -86,7 +86,7 @@ class _UnionRestrictions(Restrictions):
       instead use the `|` operator to combine restrictions
     """
 
-    def __new__(cls, sub_restrictions: 'Iterable[Restrictions]'):
+    def __new__(cls, sub_restrictions: Iterable[Restrictions]):
         # Filter out NoRestrictions and deal with resulting cases involving
         # one or zero sub_restrictions
         sub_restrictions = [
@@ -101,7 +101,7 @@ class _UnionRestrictions(Restrictions):
         new_instance.sub_restrictions = sub_restrictions
         return new_instance
 
-    def __or__(self, other_restriction: 'Restrictions') -> '_UnionRestrictions':
+    def __or__(self, other_restriction: Restrictions) -> '_UnionRestrictions':
         """Overrides the base implementation for combining two restrictions, of
         which the left side is a _UnionRestrictions.
         """
@@ -115,7 +115,7 @@ class _UnionRestrictions(Restrictions):
 
         return _UnionRestrictions(new_sub_restrictions)
 
-    def is_restricted(self, assets: 'Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset]', dt: 'datetime.datetime'):
+    def is_restricted(self, assets: Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset], dt: datetime.datetime):
         if _is_one_asset(assets):
             return any(r.is_restricted(assets, dt) for r in self.sub_restrictions)
 
@@ -128,7 +128,7 @@ class _UnionRestrictions(Restrictions):
 class NoRestrictions(Restrictions):
     """A no-op restrictions that contains no restrictions."""
 
-    def is_restricted(self, assets: 'Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset]', dt: 'datetime.datetime'):
+    def is_restricted(self, assets: Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset], dt: datetime.datetime):
         if _is_one_asset(assets):
             return False
         return pd.Series(index=pd.Index(assets), data=False)
@@ -144,10 +144,10 @@ class StaticRestrictions(Restrictions):
         The assets to be restricted
     """
 
-    def __init__(self, restricted_list: 'Iterable[Asset | ExchangeAsset]') -> None:
+    def __init__(self, restricted_list: Iterable[Asset | ExchangeAsset]) -> None:
         self._restricted_set = frozenset(restricted_list)
 
-    def is_restricted(self, assets: 'Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset]', dt: 'datetime.datetime'):
+    def is_restricted(self, assets: Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset], dt: datetime.datetime):
         """An asset is restricted for all dts if it is in the static list."""
         if _is_one_asset(assets):
             return assets in self._restricted_set
@@ -167,7 +167,7 @@ class HistoricalRestrictions(Restrictions):
         The restrictions, each defined by an asset, effective date and state
     """
 
-    def __init__(self, restrictions: 'Iterable[Restriction]') -> None:
+    def __init__(self, restrictions: Iterable[Restriction]) -> None:
         # A dict mapping each asset to its restrictions, which are sorted by
         # ascending order of effective_date
         self._restrictions_by_asset = {
@@ -177,7 +177,7 @@ class HistoricalRestrictions(Restrictions):
             ).items()
         }
 
-    def is_restricted(self, assets: 'Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset]', dt: 'datetime.datetime'):
+    def is_restricted(self, assets: Asset | ExchangeAsset | Iterable[Asset | ExchangeAsset], dt: datetime.datetime):
         """Returns whether or not an asset or iterable of assets is restricted
         on a dt.
         """
@@ -190,7 +190,7 @@ class HistoricalRestrictions(Restrictions):
             data=vectorize(is_restricted, otypes=[bool])(assets),
         )
 
-    def _is_restricted_for_asset(self, asset: 'Asset | ExchangeAsset', dt: 'datetime.datetime'):
+    def _is_restricted_for_asset(self, asset: Asset | ExchangeAsset, dt: datetime.datetime):
         state = RESTRICTION_STATES.ALLOWED
         for r in self._restrictions_by_asset.get(asset, ()):
             r_effective_date = r.effective_date

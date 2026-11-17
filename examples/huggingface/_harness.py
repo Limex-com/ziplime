@@ -116,7 +116,7 @@ async def load_listings(asset_service, universe: list[tuple[str, str]]):
 #: One bundle per (universe, window), for the life of the process. Eleven strategies share a
 #: universe of 125 names over ten years, and fetching those bars eleven times from Yahoo would
 #: dominate the run.
-_BUNDLE_CACHE: dict[tuple, "DataBundle"] = {}
+_BUNDLE_CACHE: dict[tuple, DataBundle] = {}
 
 #: How long a cached price frame stays usable. A day, because price history is **not** immutable:
 #: a split or a dividend restates every bar before it once the source adjusts, so a frame cached

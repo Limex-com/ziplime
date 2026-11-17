@@ -154,9 +154,7 @@ class NoBenchmark(ValueError):
 
 def _named_universe(
     universe: (
-        'dict[str, ExchangeAsset | ContinuousFuture] | list[ExchangeAsset | ContinuousFuture] | tupl'
-        'e[ExchangeAsset | ContinuousFuture, ...] | set[ExchangeAsset | ContinuousFuture] | frozense'
-        't[ExchangeAsset | ContinuousFuture]'
+        dict[str, ExchangeAsset | ContinuousFuture] | list[ExchangeAsset | ContinuousFuture] | tuple[ExchangeAsset | ContinuousFuture, ...] | set[ExchangeAsset | ContinuousFuture] | frozenset[ExchangeAsset | ContinuousFuture]
     ),
 ) -> dict:
     """Accept either shape a strategy already writes its universe in.
@@ -191,7 +189,7 @@ def _named_universe(
     return named
 
 
-def _as_datetime(value: 'datetime.date | None', tz: 'datetime.tzinfo', default: datetime.date) -> datetime.datetime:
+def _as_datetime(value: datetime.date | None, tz: datetime.tzinfo, default: datetime.date) -> datetime.datetime:
     """A source's start bound as an aware datetime, however it was stored."""
     if isinstance(value, datetime.datetime):
         return value if value.tzinfo else value.replace(tzinfo=tz)
@@ -201,7 +199,7 @@ def _as_datetime(value: 'datetime.date | None', tz: 'datetime.tzinfo', default: 
 
 
 
-def _resolves_continuous_future(method: 'Callable'):
+def _resolves_continuous_future(method: Callable):
     """Let an order method take a continuous future: it is placed in the contract held right now.
 
     The specifier itself is a data request, not a listing, so the order goes to the contract the
@@ -317,8 +315,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             clock: TradingClock,
             custom_data_sources: list[DataSource],
             capital_changes=None,
-            get_pipeline_loader: 'Callable[[LoadableTerm], PipelineLoader] | None' = None,
-            create_event_context: 'Callable | None' = None,
+            get_pipeline_loader: Callable[[LoadableTerm], PipelineLoader] | None = None,
+            create_event_context: Callable | None = None,
             stop_on_error: bool = False,
             same_bar_execution: bool = True,
             futures_margin_model: FuturesMarginModel | None = None,
@@ -474,7 +472,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             self._logger.warning(
                 "You are NOT running same day execution. Submitted orders in handle_data will be executed in the NEXT bar after handle_data is finished.")
 
-    def init_engine(self, get_loader: 'Callable[[LoadableTerm], PipelineLoader] | None') -> None:
+    def init_engine(self, get_loader: Callable[[LoadableTerm], PipelineLoader] | None) -> None:
         """Construct and store a PipelineEngine from loader.
 
         If get_loader is None, constructs an ExplodingPipelineEngine
@@ -488,7 +486,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         else:
             self.engine = ExplodingPipelineEngine()
 
-    def indicators(self, **expressions: 'pl.Expr') -> None:
+    def indicators(self, **expressions: pl.Expr) -> None:
         """Declare indicators as polars expressions, read in handle_data as ``context.signals``.
 
         The alternative to ``compute_signals``: see :mod:`ziplime.vectorized.indicators`.
@@ -502,7 +500,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         with ZiplineAPI(self):
             await self._initialize(self, *args, **kwargs)
 
-    async def before_trading_start(self, data: 'BarData') -> None:
+    async def before_trading_start(self, data: BarData) -> None:
         """Run the algorithm's daily preparation hook.
 
         Awaits the hook when it is `async def`. It is the one place zipline expects the day's data
@@ -530,7 +528,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
         self._in_before_trading_start = False
 
-    async def handle_data(self, data: 'BarData') -> None:
+    async def handle_data(self, data: BarData) -> None:
         if self._handle_data:
             await self._handle_data(self, data)
 
@@ -1915,7 +1913,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     @api_method
     async def user_dataset(self, name: str, fields: list[str] | None = None,
-                           resolution: 'Resolution | None' = None):
+                           resolution: Resolution | None = None):
         """Mount one of the requesting user's private datasets: the explicit ``dataset://<name>``.
 
         The same as ``data.history(..., data_source="dataset://my-signals")``, for an author who
@@ -2581,9 +2579,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
     @api_method
     def set_slippage(
         self,
-        us_equities: 'SlippageModel | None' = None,
-        us_futures: 'SlippageModel | None' = None,
-        bonds: 'SlippageModel | None' = None,
+        us_equities: SlippageModel | None = None,
+        us_futures: SlippageModel | None = None,
+        bonds: SlippageModel | None = None,
     ) -> None:
         """Set the slippage models for the simulation.
 
@@ -2636,9 +2634,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
     @api_method
     def set_commission(
         self,
-        us_equities: 'CommissionModel | None' = None,
-        us_futures: 'CommissionModel | None' = None,
-        bonds: 'CommissionModel | None' = None,
+        us_equities: CommissionModel | None = None,
+        us_futures: CommissionModel | None = None,
+        bonds: CommissionModel | None = None,
     ) -> None:
         """Sets the commission models for the simulation.
 
@@ -2691,7 +2689,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             self.blotter.commission_models[Bond] = bonds
 
     @api_method
-    def set_cancel_policy(self, cancel_policy: 'CancelPolicy') -> None:
+    def set_cancel_policy(self, cancel_policy: CancelPolicy) -> None:
         """Sets the order cancellation policy for the simulation.
 
         Parameters
@@ -3054,7 +3052,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         )
 
     @api_method
-    def get_open_orders(self, asset: 'ExchangeAsset | None' = None):
+    def get_open_orders(self, asset: ExchangeAsset | None = None):
         """Retrieve all of the current open orders.
 
         Parameters
@@ -3184,7 +3182,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
     # Account Controls #
     ####################
 
-    def register_account_control(self, control: 'AccountControl') -> None:
+    def register_account_control(self, control: AccountControl) -> None:
         """
         Register a new AccountControl to be checked on each bar.
         """
@@ -3215,7 +3213,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.register_account_control(control)
 
     @api_method
-    def set_min_leverage(self, min_leverage: float, grace_period: 'pd.Timedelta') -> None:
+    def set_min_leverage(self, min_leverage: float, grace_period: pd.Timedelta) -> None:
         """Set a limit on the minimum leverage of the algorithm.
 
         Parameters
@@ -3233,7 +3231,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
     # Trading Controls #
     ####################
 
-    def register_trading_control(self, control: 'TradingControl') -> None:
+    def register_trading_control(self, control: TradingControl) -> None:
         """
         Register a new TradingControl to be checked prior to order calls.
         """
@@ -3244,9 +3242,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
     @api_method
     def set_max_position_size(
         self,
-        asset: 'ExchangeAsset | None' = None,
-        max_shares: 'int | None' = None,
-        max_notional: 'float | None' = None,
+        asset: ExchangeAsset | None = None,
+        max_shares: int | None = None,
+        max_notional: float | None = None,
         on_error: str = "fail",
     ) -> None:
         """Set a limit on the number of shares and/or dollar value held for the
@@ -3281,9 +3279,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
     @api_method
     def set_max_order_size(
         self,
-        asset: 'ExchangeAsset | None' = None,
-        max_shares: 'int | None' = None,
-        max_notional: 'float | None' = None,
+        asset: ExchangeAsset | None = None,
+        max_shares: int | None = None,
+        max_notional: float | None = None,
         on_error: str = "fail",
     ) -> None:
         """Set a limit on the number of shares and/or dollar value of any single
@@ -3355,9 +3353,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
     @require_not_initialized(AttachPipelineAfterInitialize())
     def attach_pipeline(
         self,
-        pipeline: 'Pipeline',
+        pipeline: Pipeline,
         name: str,
-        chunks: 'int | Iterator[int] | None' = None,
+        chunks: int | Iterator[int] | None = None,
         eager: bool = True,
     ):
         """Register a pipeline to be computed at the start of each day.
@@ -3438,7 +3436,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             ) from exc
         return self._pipeline_output(pipe, chunks, name)
 
-    def _pipeline_output(self, pipeline: 'Pipeline', chunks: 'Iterator[int]', name: str):
+    def _pipeline_output(self, pipeline: Pipeline, chunks: Iterator[int], name: str):
         """Internal implementation of `pipeline_output`."""
         # TODO FIXME TZ MESS
         today = self.simulation_dt
@@ -3461,7 +3459,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             # day.
             return pd.DataFrame(index=[], columns=data.columns)
 
-    def run_pipeline(self, pipeline: 'Pipeline', start_session: 'pd.Timestamp', chunksize: int):
+    def run_pipeline(self, pipeline: Pipeline, start_session: pd.Timestamp, chunksize: int):
         """Compute `pipeline`, providing values for at least `start_date`.
 
         Produces a DataFrame containing data for days between `start_date` and
@@ -3497,7 +3495,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         )
 
     @staticmethod
-    def default_pipeline_domain(calendar: 'ExchangeCalendar'):
+    def default_pipeline_domain(calendar: ExchangeCalendar):
         """Get a default pipeline domain for algorithms running on ``calendar``.
 
         This will be used to infer a domain for pipelines that only use generic
@@ -3523,8 +3521,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     def _process_execution_batch(
         self,
-        transactions: 'Iterable[Transaction]',
-        commissions: 'Iterable[Commission]',
+        transactions: Iterable[Transaction],
+        commissions: Iterable[Commission],
     ) -> None:
         for transaction in transactions:
             self._ledger.process_transaction(transaction=transaction)
@@ -3541,7 +3539,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             self,
             dt_to_use: datetime.datetime,
             current_data: BarData,
-            handle_data: 'Callable',
+            handle_data: Callable,
     ):
         # print(f"dt_to_use: in every_bar: {dt_to_use}")
         async for capital_change in self.calculate_minute_capital_changes(dt_to_use):
@@ -3596,9 +3594,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
     async def once_a_day(
             self,
-            midnight_dt: 'datetime.date | datetime.datetime',
-            current_data: 'BarData',
-            asset_service: 'AssetService',
+            midnight_dt: datetime.date | datetime.datetime,
+            current_data: BarData,
+            asset_service: AssetService,
     ):
         # process any capital changes that came overnight
         async for capital_change in self.calculate_capital_changes(
@@ -3889,7 +3887,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         value = rows[field][-1]
         return None if value is None else float(value)
 
-    async def _cleanup_expired_assets(self, dt: datetime.datetime, position_assets: 'list[ExchangeAsset]') -> None:
+    async def _cleanup_expired_assets(self, dt: datetime.datetime, position_assets: list[ExchangeAsset]) -> None:
         """
         Clear out any assets that have expired before starting a new sim day.
 

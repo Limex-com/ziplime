@@ -4,11 +4,11 @@ import numpy as np
 
 
 def naive_grouped_rowwise_apply(
-    data: 'np.ndarray',
-    group_labels: 'np.ndarray',
-    func: 'Callable',
+    data: np.ndarray,
+    group_labels: np.ndarray,
+    func: Callable,
     func_args=(),
-    out: 'np.ndarray | None' = None,
+    out: np.ndarray | None = None,
 ):
     """
     Simple implementation of grouped row-wise function application.

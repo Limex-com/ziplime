@@ -53,11 +53,11 @@ class SimpleBeta(CustomFactor, StandardOutputs):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        all_returns: 'np.ndarray',
-        target_returns: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        all_returns: np.ndarray,
+        target_returns: np.ndarray,
         allowed_missing_count: int,
     ) -> None:
         vectorized_beta(

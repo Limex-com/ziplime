@@ -1,5 +1,6 @@
 """Events on a bond's life: what the issuer pays, and when the terms change."""
 import enum
+from typing import Self
 
 
 class BondEventType(enum.Enum):
@@ -45,7 +46,7 @@ class BondEventType(enum.Enum):
                         BondEventType.DIVIDEND)
 
     @classmethod
-    def from_api(cls, value: str | None) -> "BondEventType":
+    def from_api(cls, value: str | None) -> Self:
         """Parse a vendor's event type, tolerating names we do not know.
 
         Vendors send bare names (``COUPON``) and prefixed ones (``BOND_EVENT_TYPE_COUPON``), and an

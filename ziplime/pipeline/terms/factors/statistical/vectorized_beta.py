@@ -3,10 +3,10 @@ from ziplime.utils.math_utils import nanmean
 
 
 def vectorized_beta(
-    dependents: 'np.ndarray',
-    independent: 'np.ndarray',
+    dependents: np.ndarray,
+    independent: np.ndarray,
     allowed_missing: int,
-    out: 'np.ndarray | None' = None,
+    out: np.ndarray | None = None,
 ):
     """Compute slopes of linear regressions between columns of ``dependents`` and
     ``independent``.

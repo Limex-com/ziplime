@@ -13,15 +13,15 @@ class NextEarningsEstimatesLoader(EarningsEstimatesLoader):
 
     def create_overwrite_for_estimate(
         self,
-        column: 'BoundColumn',
+        column: BoundColumn,
         column_name: str,
-        last_per_qtr: 'pd.DataFrame',
+        last_per_qtr: pd.DataFrame,
         next_qtr_start_idx: int,
         requested_quarter: float,
         sid: int,
         sid_idx: int,
         col_to_split_adjustments=None,
-        split_adjusted_asof_idx: 'int | None' = None,
+        split_adjusted_asof_idx: int | None = None,
     ):
         return [
             self.array_overwrites_dict[column.dtype](
@@ -37,10 +37,10 @@ class NextEarningsEstimatesLoader(EarningsEstimatesLoader):
             )
         ]
 
-    def get_shifted_qtrs(self, zero_qtrs: 'pd.Index', num_announcements: int):
+    def get_shifted_qtrs(self, zero_qtrs: pd.Index, num_announcements: int):
         return zero_qtrs + (num_announcements - 1)
 
-    def get_zeroth_quarter_idx(self, stacked_last_per_qtr: 'pd.DataFrame'):
+    def get_zeroth_quarter_idx(self, stacked_last_per_qtr: pd.DataFrame):
         """Filters for releases that are on or after each simulation date and
         determines the next quarter by picking out the upcoming release for
         each date in the index.

@@ -75,7 +75,7 @@ class SlippageModel(metaclass=FinancialModelMeta):
         return self._volume_for_bar
 
     @abstractmethod
-    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: 'Order', price: float = None):
+    async def process_order(self, exchange: Exchange, dt: datetime.datetime, order: Order, price: float = None):
         """Compute the number of shares and price to fill for ``order`` in the
         current minute.
 
@@ -113,8 +113,8 @@ class SlippageModel(metaclass=FinancialModelMeta):
         """
         raise NotImplementedError("process_order")
 
-    async def simulate(self, exchange: 'Exchange',
-                       assets: frozenset[Asset], orders_for_asset: 'Iterable[Order]', current_dt: datetime.datetime,
+    async def simulate(self, exchange: Exchange,
+                       assets: frozenset[Asset], orders_for_asset: Iterable[Order], current_dt: datetime.datetime,
                        same_bar_execution: bool,
                        price_used_in_order_execution: Literal["open", "close", "low", "high"]):
         self._volume_for_bar = 0
@@ -191,7 +191,7 @@ class SlippageModel(metaclass=FinancialModelMeta):
                 self._volume_by_asset[order.asset] = self._volume_for_bar
                 yield order, txn
 
-    def volume_filled(self, asset: 'ExchangeAsset', dt: 'datetime.datetime') -> int:
+    def volume_filled(self, asset: ExchangeAsset, dt: datetime.datetime) -> int:
         """Shares of ``asset`` already filled in the bar at ``dt``."""
         if getattr(self, "_volume_dt", None) != dt:
             return 0

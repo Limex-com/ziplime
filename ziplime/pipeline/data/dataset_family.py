@@ -98,7 +98,7 @@ class DataSetFamily(metaclass=DataSetFamilyMeta):
             return []
 
     @classmethod
-    def _canonical_key(cls, args: 'tuple[Hashable, ...]', kwargs: 'dict[str, Hashable]'):
+    def _canonical_key(cls, args: tuple[Hashable, ...], kwargs: dict[str, Hashable]):
         extra_dims = cls.extra_dims
         dimensions_set = set(extra_dims)
         if not set(kwargs) <= dimensions_set:
@@ -172,7 +172,7 @@ class DataSetFamily(metaclass=DataSetFamilyMeta):
         return coords, tuple(coords.items())
 
     @classmethod
-    def _make_dataset(cls, coords: 'Mapping[str, Hashable]'):
+    def _make_dataset(cls, coords: Mapping[str, Hashable]):
         """Construct a new dataset given the coordinates."""
 
         class Slice(cls._SliceType):
@@ -185,7 +185,7 @@ class DataSetFamily(metaclass=DataSetFamilyMeta):
         return Slice
 
     @classmethod
-    def slice(cls, *args: 'Hashable', **kwargs: 'Hashable'):
+    def slice(cls, *args: Hashable, **kwargs: Hashable):
         """Take a slice of a DataSetFamily to produce a dataset
         indexed by asset and date.
 

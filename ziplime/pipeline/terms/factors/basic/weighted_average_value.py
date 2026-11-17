@@ -16,10 +16,10 @@ class WeightedAverageValue(CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        base: 'np.ndarray',
-        weight: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        base: np.ndarray,
+        weight: np.ndarray,
     ) -> None:
         out[:] = nansum(base * weight, axis=0) / nansum(weight, axis=0)

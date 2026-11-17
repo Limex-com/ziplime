@@ -10,7 +10,7 @@ from ziplime.pipeline.terms.loadable_term import LoadableTerm
 PIPELINE_HOOKS_CONTEXT_MANAGERS = set()
 
 
-def contextmanager(f: 'Callable'):
+def contextmanager(f: Callable):
     """
     Wrapper for contextlib.contextmanager that tracks which methods of
     PipelineHooks are contextmanagers in CONTEXT_MANAGER_METHODS.
@@ -71,7 +71,7 @@ class PipelineHooks:
         """
 
     @contextmanager
-    def loading_terms(self, terms: 'list[LoadableTerm]'):
+    def loading_terms(self, terms: list[LoadableTerm]):
         """Contextmanager entered when loading a batch of LoadableTerms.
 
         Parameters
@@ -81,7 +81,7 @@ class PipelineHooks:
         """
 
     @contextmanager
-    def computing_term(self, term: 'ComputableTerm'):
+    def computing_term(self, term: ComputableTerm):
         """Contextmanager entered when computing a ComputableTerm.
 
         Parameters

@@ -27,7 +27,7 @@ class StartOfPeriodLedgerField:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-    def __init__(self, ledger_field: str, packet_field: 'str | None' = None) -> None:
+    def __init__(self, ledger_field: str, packet_field: str | None = None) -> None:
         self._get_ledger_field = op.attrgetter(ledger_field)
         if packet_field is None:
             self._packet_field = ledger_field.rsplit(".", 1)[-1]
@@ -41,10 +41,10 @@ class StartOfPeriodLedgerField:
     ) -> None:
         self._start_of_simulation = self._get_ledger_field(ledger)
 
-    def start_of_session(self, ledger: 'Ledger', session: 'datetime.datetime', exchanges: dict[str, Exchange]) -> None:
+    def start_of_session(self, ledger: Ledger, session: datetime.datetime, exchanges: dict[str, Exchange]) -> None:
         self._previous_day = self._get_ledger_field(ledger)
 
-    def _end_of_period(self, sub_field: str, packet, ledger: 'Ledger') -> None:
+    def _end_of_period(self, sub_field: str, packet, ledger: Ledger) -> None:
         # if not hasattr(self, "_previous_day"):
         #     self._previous_day = self._get_ledger_field(ledger)
         packet_field = self._packet_field

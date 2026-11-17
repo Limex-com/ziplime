@@ -106,7 +106,7 @@ async def build_option_bundle(
         underlying_bars: pl.DataFrame,
         sessions: list[datetime.date],
         timestamps: pl.Series,
-        trading_calendar: 'ExchangeCalendar',
+        trading_calendar: ExchangeCalendar,
         emission_rate: datetime.timedelta,
         bundle_name: str | None = None,
 ) -> tuple[DataBundle, list[ExchangeAsset]]:

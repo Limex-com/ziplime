@@ -42,47 +42,47 @@ quote = partial(delimit, '""')
 bracket = partial(delimit, "[]")
 
 
-def begin_graph(f: 'BinaryIO', name: str, **attrs: str) -> None:
+def begin_graph(f: BinaryIO, name: str, **attrs: str) -> None:
     writeln(f, "strict digraph %s {" % name)
     writeln(f, "graph {}".format(format_attrs(attrs)))
 
 
-def begin_cluster(f: 'BinaryIO', name: str, **attrs: str) -> None:
+def begin_cluster(f: BinaryIO, name: str, **attrs: str) -> None:
     attrs.setdefault("label", quote(name))
     writeln(f, "subgraph cluster_%s {" % name)
     writeln(f, "graph {}".format(format_attrs(attrs)))
 
 
-def end_graph(f: 'BinaryIO') -> None:
+def end_graph(f: BinaryIO) -> None:
     writeln(f, "}")
 
 
 @contextmanager
-def graph(f: 'BinaryIO', name: str, **attrs: str):
+def graph(f: BinaryIO, name: str, **attrs: str):
     begin_graph(f, name, **attrs)
     yield
     end_graph(f)
 
 
 @contextmanager
-def cluster(f: 'BinaryIO', name: str, **attrs: str):
+def cluster(f: BinaryIO, name: str, **attrs: str):
     begin_cluster(f, name, **attrs)
     yield
     end_graph(f)
 
 
-def roots(g: 'nx.DiGraph'):
+def roots(g: nx.DiGraph):
     "Get nodes from graph G with indegree 0"
     return set(n for n, d in g.in_degree().items() if d == 0)
 
 
-def filter_nodes(include_asset_exists: bool, nodes: 'Iterable[Term]'):
+def filter_nodes(include_asset_exists: bool, nodes: Iterable[Term]):
     if include_asset_exists:
         return nodes
     return filter(lambda n: n is not AssetExists(), nodes)
 
 
-def _render(g: 'TermGraph', out: 'BinaryIO', format_: str, include_asset_exists: bool = False) -> None:
+def _render(g: TermGraph, out: BinaryIO, format_: str, include_asset_exists: bool = False) -> None:
     """
     Draw `g` as a graph to `out`, in format `format`.
 
@@ -149,7 +149,7 @@ def _render(g: 'TermGraph', out: 'BinaryIO', format_: str, include_asset_exists:
     out.write(proc_stdout)
 
 
-def display_graph(g: 'TermGraph', format: str = "svg", include_asset_exists: bool = False):
+def display_graph(g: TermGraph, format: str = "svg", include_asset_exists: bool = False):
     """
     Display a TermGraph interactively from within IPython.
     """
@@ -168,11 +168,11 @@ def display_graph(g: 'TermGraph', format: str = "svg", include_asset_exists: boo
     return display_cls(data=out.getvalue())
 
 
-def writeln(f: 'BinaryIO', s: str) -> None:
+def writeln(f: BinaryIO, s: str) -> None:
     f.write((s + "\n").encode("utf-8"))
 
 
-def fmt(obj: 'Term | str'):
+def fmt(obj: Term | str):
     if isinstance(obj, Term):
         r = obj.graph_repr()
     else:
@@ -180,19 +180,19 @@ def fmt(obj: 'Term | str'):
     return '"%s"' % r
 
 
-def add_term_node(f: 'BinaryIO', term: 'Term') -> None:
+def add_term_node(f: BinaryIO, term: Term) -> None:
     declare_node(f, id(term), attrs_for_node(term))
 
 
-def declare_node(f: 'BinaryIO', name: 'str | int', attributes: 'Mapping[str, str]') -> None:
+def declare_node(f: BinaryIO, name: str | int, attributes: Mapping[str, str]) -> None:
     writeln(f, "{0} {1};".format(name, format_attrs(attributes)))
 
 
-def add_edge(f: 'BinaryIO', source: int, dest: int) -> None:
+def add_edge(f: BinaryIO, source: int, dest: int) -> None:
     writeln(f, "{0} -> {1};".format(source, dest))
 
 
-def attrs_for_node(term: 'Term', **overrides: str):
+def attrs_for_node(term: Term, **overrides: str):
     attrs = {
         "shape": "box",
         "colorscheme": "pastel19",
@@ -212,7 +212,7 @@ def attrs_for_node(term: 'Term', **overrides: str):
     return attrs
 
 
-def format_attrs(attrs: 'Mapping[str, str]'):
+def format_attrs(attrs: Mapping[str, str]):
     """
     Format key, value pairs from attrs into graphviz attrs format
 

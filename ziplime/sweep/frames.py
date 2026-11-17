@@ -130,13 +130,13 @@ class Statistic:
     """An aggregation in ``agg(...)``: its output name and how to compute it from the windows.
     ``compute(read)`` with ``read(field, op)`` -> (combinations × instruments)."""
 
-    def __init__(self, name: str, compute: 'Callable', field: str) -> None:
+    def __init__(self, name: str, compute: Callable, field: str) -> None:
         self.name, self.compute, self.field = name, compute, field
 
     def alias(self, name: str) -> 'Statistic':
         return Statistic(name, self.compute, self.field)
 
-    def _combine(self, other: 'Statistic | int | float', op: 'Callable', reflected: bool = False) -> 'Statistic':
+    def _combine(self, other: 'Statistic | int | float', op: Callable, reflected: bool = False) -> 'Statistic':
         if isinstance(other, Statistic):
             right = other.compute
         elif isinstance(other, (int, float)) and not isinstance(other, bool):
@@ -196,7 +196,7 @@ class History:
     """``data.history`` over several instruments. ``assets``: [ALL] for the whole universe, or
     the instruments asked for."""
 
-    def __init__(self, data: 'Data', assets: list, length, fields: 'list[str] | None', frequency) -> None:
+    def __init__(self, data: Data, assets: list, length, fields: list[str] | None, frequency) -> None:
         self._data, self._assets, self._length = data, assets, length
         self._fields, self._frequency = fields, frequency
 
@@ -219,7 +219,7 @@ class History:
             chosen = here if chosen is None else xp.logical_or(chosen, here)
         return chosen
 
-    def _present(self, field: 'str | None' = None):
+    def _present(self, field: str | None = None):
         """Which instruments have rows in the frame: a group_by gives them a row."""
         field = field or (self._fields[0] if self._fields else "close")
         present = self._read(field, "count") >= 1

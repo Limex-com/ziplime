@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 from numpy import (
     float64,
     nan,
@@ -14,11 +12,8 @@ from ziplime.errors import (
 from ziplime.pipeline.mixins import (
     SingleInputMixin,
 )
-from ziplime.pipeline.terms.filters import Filter
-
-# Factor imports the filter package during initialization.
-if TYPE_CHECKING:
-    from ziplime.pipeline.terms.factors.factor import Factor
+from ziplime.pipeline.terms.factors.factor import Factor
+from ziplime.pipeline.terms.filters.filter import Filter
 
 
 class PercentileFilter(SingleInputMixin, Filter):
@@ -37,7 +32,7 @@ class PercentileFilter(SingleInputMixin, Filter):
 
     window_length = 0
 
-    def __new__(cls, factor: 'Factor', min_percentile: float, max_percentile: float, mask: 'Filter | None'):
+    def __new__(cls, factor: Factor, min_percentile: float, max_percentile: float, mask: Filter | None):
         return super(PercentileFilter, cls).__new__(
             cls,
             inputs=(factor,),
@@ -71,7 +66,7 @@ class PercentileFilter(SingleInputMixin, Filter):
             )
         return super(PercentileFilter, self)._validate()
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         """
         For each row in the input, compute a mask of all values falling between
         the given percentiles.

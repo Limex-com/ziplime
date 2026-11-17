@@ -30,12 +30,12 @@ class TrueRange(CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        highs: 'np.ndarray',
-        lows: 'np.ndarray',
-        closes: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        highs: np.ndarray,
+        lows: np.ndarray,
+        closes: np.ndarray,
     ) -> None:
         high_to_low = highs[1:] - lows[1:]
         high_to_prev_close = abs(highs[1:] - closes[:-1])

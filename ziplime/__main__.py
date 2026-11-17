@@ -56,20 +56,20 @@ DATE_FORMATS = ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S")
 FREQUENCIES = [frequency.value for frequency in DataFrequency]
 
 
-def storage_option(function: 'Callable'):
+def storage_option(function: Callable):
     return click.option(
         "--bundle-storage-path", default=str(DEFAULT_STORAGE), show_default=True,
         help="Where bundles are stored.")(function)
 
 
-def asset_db_option(function: 'Callable'):
+def asset_db_option(function: Callable):
     return click.option(
         "--asset-db", default=str(DEFAULT_ASSET_DB), show_default=True,
         help="Asset database. Instruments have to be ingested into it before any bundle can "
              "reference them.")(function)
 
 
-async def _resolve(asset_service: 'AssetService', symbols: str, asset_type: AssetType) -> list:
+async def _resolve(asset_service: AssetService, symbols: str, asset_type: AssetType) -> list:
     """Turn ``TICKER`` or ``TICKER@MIC`` into stored listings, or fail saying which one is missing.
 
     Resolving up front matters for more than error messages. A ticker is unique only within an
@@ -113,7 +113,7 @@ def _fail(message: str, hint: str | None = None) -> None:
                       prog_name="ziplime")
 @click.option("-v", "--verbose", is_flag=True, help="Log at DEBUG rather than INFO.")
 @click.pass_context
-async def main(ctx: 'click.Context', verbose: bool) -> None:
+async def main(ctx: click.Context, verbose: bool) -> None:
     """Ingest market data and run backtests.
 
     Start with `ziplime providers` to see what this install can read, then `ziplime ingest-assets`
@@ -218,8 +218,8 @@ async def ingest(
     bundle: str,
     symbols: str,
     trading_calendar: str,
-    start_date: 'datetime.datetime',
-    end_date: 'datetime.datetime',
+    start_date: datetime.datetime,
+    end_date: datetime.datetime,
     frequency: str,
     provider: str,
     asset_type: str,
@@ -314,9 +314,9 @@ async def bundles(bundle_storage_path: str) -> None:
 @storage_option
 async def clean(
     bundle: str,
-    before: 'datetime.datetime | None',
-    after: 'datetime.datetime | None',
-    keep_last: 'int | None',
+    before: datetime.datetime | None,
+    after: datetime.datetime | None,
+    keep_last: int | None,
     bundle_storage_path: str,
 ) -> None:
     """Delete stored versions of a bundle.
@@ -397,17 +397,17 @@ async def clean(
 @asset_db_option
 async def run(
     algofile: str,
-    config_file: 'str | None',
+    config_file: str | None,
     bundle: str,
-    bundle_version: 'str | None',
+    bundle_version: str | None,
     symbols: str,
-    start_date: 'datetime.datetime',
-    end_date: 'datetime.datetime',
+    start_date: datetime.datetime,
+    end_date: datetime.datetime,
     trading_calendar: str,
     emission_rate: str,
     capital_base: float,
     asset_type: str,
-    benchmark_symbol: 'str | None',
+    benchmark_symbol: str | None,
     max_leverage: float,
     same_bar_execution: bool,
     fill_price: str,
@@ -415,7 +415,7 @@ async def run(
     slippage_bps: float,
     stop_on_error: bool,
     print_algo: bool,
-    output: 'str | None',
+    output: str | None,
     bundle_storage_path: str,
     asset_db: str,
 ):
@@ -474,7 +474,7 @@ async def run(
 class _SweepCommands(click.Group):
     """``ziplime sweep FILE`` runs FILE, as it did before ``sweep`` had subcommands."""
 
-    def resolve_command(self, ctx: 'click.Context', args: 'list[str]'):
+    def resolve_command(self, ctx: click.Context, args: list[str]):
         if args and args[0] not in self.commands and not args[0].startswith("-"):
             args = ["run", *args]
         return super().resolve_command(ctx, args)
@@ -520,18 +520,18 @@ async def sweep():
               help="A family of synthetic paths: stationary:20, block:10, circular:10, meboot, "
                    "garch, gbm, student_t, iid, shuffle. Repeatable; replaces the file's families.")
 async def sweep_run(
-    sweep_file: 'Path',
-    backend: 'str | None',
-    grid: 'tuple[str, ...]',
-    assignments: 'tuple[str, ...]',
-    compile_: 'bool | None',
-    batch_size: 'int | None',
-    workers: 'int | None',
-    output_dir: 'str | None',
+    sweep_file: Path,
+    backend: str | None,
+    grid: tuple[str, ...],
+    assignments: tuple[str, ...],
+    compile_: bool | None,
+    batch_size: int | None,
+    workers: int | None,
+    output_dir: str | None,
     refuse: bool,
     no_verify: bool,
-    paths: 'int | None',
-    families: 'tuple[str, ...]',
+    paths: int | None,
+    families: tuple[str, ...],
 ) -> None:
     """Run the sweep SWEEP_FILE describes.
 
@@ -560,7 +560,7 @@ async def sweep_run(
               show_default=True, help="Where to run the few combinations.")
 @click.option("--set", "assignments", multiple=True, metavar="FIELD=VALUE",
               help="Override a field of the sweep file, as for run.")
-async def sweep_check(sweep_file: 'Path', backend: str, assignments: 'tuple[str, ...]') -> None:
+async def sweep_check(sweep_file: Path, backend: str, assignments: tuple[str, ...]) -> None:
     """How the strategy converts: a few combinations, the grid's corners, in seconds.
 
     Says whether every combination can run at once and how each part of the strategy is computed,
@@ -599,11 +599,11 @@ async def sweep_check(sweep_file: 'Path', backend: str, assignments: 'tuple[str,
 @click.option("-c", "--trading-calendar", default="XNYS", show_default=True)
 @click.option("--force", is_flag=True, help="Overwrite the output file.")
 async def sweep_init(
-    algorithm_file: 'Path',
-    output: 'Path',
-    bundle: 'str | None',
-    start_date: 'datetime.datetime | None',
-    end_date: 'datetime.datetime | None',
+    algorithm_file: Path,
+    output: Path,
+    bundle: str | None,
+    start_date: datetime.datetime | None,
+    end_date: datetime.datetime | None,
     trading_calendar: str,
     force: bool,
 ) -> None:
@@ -646,10 +646,10 @@ async def sweep_doctor() -> None:
 
 def _sweep_params(
     sweep_file: Path,
-    grid: 'tuple[str, ...]',
-    assignments: 'tuple[str, ...]',
-    paths: 'int | None' = None,
-    families: 'tuple[str, ...]' = (),
+    grid: tuple[str, ...],
+    assignments: tuple[str, ...],
+    paths: int | None = None,
+    families: tuple[str, ...] = (),
     **overrides,
 ):
     """The sweep file, with the command line's --grid, --set and options over it."""
@@ -706,7 +706,7 @@ async def mcp() -> None:
     await serve_stdio()
 
 
-def _report(result: 'TradingAlgorithmExecutionResult', output: str | None) -> None:
+def _report(result: TradingAlgorithmExecutionResult, output: str | None) -> None:
     """Print what the run did, and write the table if asked.
 
     ``str(result)`` used to be the whole output, which is a dataclass repr -- several screens of

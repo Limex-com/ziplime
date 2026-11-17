@@ -84,7 +84,7 @@ class CurrencyBenchmarkSource(BenchmarkSource):
         )
         self._initial_rate = reporting.conversion.rate(base=self.base_currency, quote=currency, dt=initial_dt)
 
-    def daily_returns_by_session(self, sessions: 'Iterable[datetime.date]') -> pl.DataFrame:
+    def daily_returns_by_session(self, sessions: Iterable[datetime.date]) -> pl.DataFrame:
         """Return translated daily returns in the requested session order.
 
         Parameters

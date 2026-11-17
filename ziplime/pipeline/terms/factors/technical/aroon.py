@@ -27,11 +27,11 @@ class Aroon(CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        lows: 'np.ndarray',
-        highs: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        lows: np.ndarray,
+        highs: np.ndarray,
     ) -> None:
         wl = self.window_length
         high_date_index = nanargmax(highs, axis=0)

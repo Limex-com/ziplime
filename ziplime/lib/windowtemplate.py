@@ -52,7 +52,7 @@ class AdjustedArrayWindow:
                  offset: int,
                  window_length: int,
                  perspective_offset: int,
-                 rounding_places: 'int | None') -> None:
+                 rounding_places: int | None) -> None:
         self.data = data
         self.view_kwargs = view_kwargs
         self.adjustments = adjustments

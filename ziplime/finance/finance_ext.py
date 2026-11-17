@@ -109,7 +109,7 @@ class PositionStats:
         return self
 
 
-def _bond_unit_value(bond_book: 'BondBook | None', bond: 'Bond', position: 'Position') -> float:
+def _bond_unit_value(bond_book: BondBook | None, bond: Bond, position: Position) -> float:
     """Money one bond of ``position`` is worth at its current mark.
 
     Falls back to the bare quote when no schedule is loaded and the bond quotes in money; for a
@@ -124,10 +124,10 @@ def _bond_unit_value(bond_book: 'BondBook | None', bond: 'Bond', position: 'Posi
 
 
 def calculate_position_tracker_stats(
-    positions: 'Iterable[Position]',
+    positions: Iterable[Position],
     position_count: int,
-    stats: 'PositionStats',
-    bond_book: 'BondBook | None' = None,
+    stats: PositionStats,
+    bond_book: BondBook | None = None,
 ):
     """Calculate various stats about the current positions.
 
@@ -273,9 +273,9 @@ def calculate_position_tracker_stats(
     stats.shorts_count = shorts_count
 
 
-def minute_annual_volatility(date_labels: 'pl.Series | np.ndarray',
-                             minute_returns: 'pl.Series | np.ndarray',
-                             daily_returns: 'pl.Series | np.ndarray'):
+def minute_annual_volatility(date_labels: pl.Series | np.ndarray,
+                             minute_returns: pl.Series | np.ndarray,
+                             daily_returns: pl.Series | np.ndarray):
     """Pre-compute the minute cumulative volatility field.
     """
     out = np.empty_like(minute_returns)

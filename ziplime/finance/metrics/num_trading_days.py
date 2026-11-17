@@ -20,7 +20,7 @@ class NumTradingDays:
                             sessions: pd.DatetimeIndex, benchmark_source: BenchmarkSource) -> None:
         self._num_trading_days = 0
 
-    def start_of_session(self, ledger: 'Ledger', session: 'datetime.datetime', exchanges: dict[str, Exchange]) -> None:
+    def start_of_session(self, ledger: Ledger, session: datetime.datetime, exchanges: dict[str, Exchange]) -> None:
         self._num_trading_days += 1
 
     def end_of_bar(self, packet: dict[str, Any], ledger: Ledger, session: datetime.datetime, session_ix: int,

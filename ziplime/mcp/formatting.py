@@ -27,7 +27,7 @@ def _finite(value):
     return None if math.isnan(number) or math.isinf(number) else round(number, 6)
 
 
-def summarise(perf: 'pd.DataFrame') -> dict:
+def summarise(perf: pd.DataFrame) -> dict:
     """The end state of a run: what it returned, how bumpy, how much it traded.
 
     Read off the **last row**, which is how these cumulative columns are
@@ -65,7 +65,7 @@ def summarise(perf: 'pd.DataFrame') -> dict:
     return summary
 
 
-def equity_curve(perf: 'pd.DataFrame', limit: int = 100) -> dict:
+def equity_curve(perf: pd.DataFrame, limit: int = 100) -> dict:
     """The portfolio value over time, thinned evenly so its shape survives.
 
     Every k-th row, not the first k — a head-truncated curve of a three-year

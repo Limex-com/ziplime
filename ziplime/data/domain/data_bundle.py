@@ -32,7 +32,7 @@ class DataBundle(DataSource):
                  timestamp: datetime.datetime,
                  data: pl.DataFrame = None,
                  sid_indexes: dict[int, tuple[int, int]] = None,
-                 asset_service: 'AssetService | None' = None,
+                 asset_service: AssetService | None = None,
                  roll_finder_settings: dict[str, dict] | None = None) -> None:
         super().__init__(name=name,
                          start_date=start_date,
@@ -525,7 +525,7 @@ class DataBundle(DataSource):
             return False
         return not df.filter(pl.col("sid") == sid).limit(1).is_empty()
 
-    def _as_datetime(self, value: 'datetime.date') -> datetime.datetime:
+    def _as_datetime(self, value: datetime.date) -> datetime.datetime:
         """Normalise a date or datetime to a tz-aware datetime in the calendar's timezone."""
         if isinstance(value, datetime.datetime):
             return value if value.tzinfo else value.replace(tzinfo=self.trading_calendar.tz)

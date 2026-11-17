@@ -1,7 +1,7 @@
 from ziplime.finance.domain.order import Order
 
 
-def fill_price_worse_than_limit_price(fill_price: float, order: 'Order') -> bool:
+def fill_price_worse_than_limit_price(fill_price: float, order: Order) -> bool:
     """Checks whether the fill price is worse than the order's limit price.
 
     Parameters

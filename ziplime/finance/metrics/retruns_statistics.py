@@ -25,7 +25,7 @@ class ReturnsStatistic:
     #: See :class:`~ziplime.finance.metrics_tracker.MetricsTracker`.
     packet_only = True
 
-    def __init__(self, function: 'Callable', field_name: 'str | None' = None) -> None:
+    def __init__(self, function: Callable, field_name: str | None = None) -> None:
         if field_name is None:
             field_name = function.__name__
 

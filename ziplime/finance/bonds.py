@@ -34,7 +34,7 @@ from ziplime.assets.entities.bond_event import BondEvent
 from ziplime.assets.services.asset_service import AssetService
 
 
-def _as_date(value: 'datetime.date | datetime.datetime') -> datetime.date | None:
+def _as_date(value: datetime.date | datetime.datetime) -> datetime.date | None:
     """Normalise a date-or-datetime to a date. Callers pass whatever the simulation clock holds."""
     if value is None:
         return None
@@ -135,7 +135,7 @@ class BondBook:
         self._amortizations[bond_id] = [e for e in ordered
                                         if e.event_type is BondEventType.AMORTIZATION]
 
-    async def load(self, asset_service: 'AssetService', bonds: 'Iterable[Bond]') -> None:
+    async def load(self, asset_service: AssetService, bonds: Iterable[Bond]) -> None:
         """Fetch and cache the schedules of ``bonds`` that are not loaded yet.
 
         Silently does nothing for a service that cannot serve bond events, so a simulation driven
@@ -178,7 +178,7 @@ class BondBook:
 
     # -- valuation ----------------------------------------------------------------------------
 
-    def face_value(self, bond: Bond, dt: 'datetime.date | datetime.datetime') -> float:
+    def face_value(self, bond: Bond, dt: datetime.date | datetime.datetime) -> float:
         """Principal outstanding on ``dt``, after every instalment repaid up to and including it.
 
         Computed as the nominal at issue minus everything repaid, rather than read from an
@@ -199,7 +199,7 @@ class BondBook:
         repaid = sum(event.value for event in amortizations if event.date <= as_of)
         return max(0.0, bond.face_value - repaid)
 
-    def accrued_interest(self, bond: Bond, dt: 'datetime.date | datetime.datetime') -> float:
+    def accrued_interest(self, bond: Bond, dt: datetime.date | datetime.datetime) -> float:
         """Coupon accrued on one bond by ``dt``, in the bond's currency.
 
         Zero on a coupon payment date -- the coupon has just been paid and a new period begins --
@@ -258,7 +258,7 @@ class BondBook:
         return bond.annual_coupon_amount * bond.day_count.year_fraction(start, as_of)
 
     @staticmethod
-    def valuation_date(bond: Bond, dt: 'datetime.date | datetime.datetime'):
+    def valuation_date(bond: Bond, dt: datetime.date | datetime.datetime):
         """The date a quote should be valued against, never later than maturity.
 
         :meth:`face_value` reports nothing outstanding after maturity, which is the truth about the
@@ -271,16 +271,16 @@ class BondBook:
             return bond.maturity_date
         return as_of
 
-    def clean_value(self, bond: Bond, quoted_price: float, dt: 'datetime.date | datetime.datetime') -> float:
+    def clean_value(self, bond: Bond, quoted_price: float, dt: datetime.date | datetime.datetime) -> float:
         """Money one bond is worth at ``quoted_price``, excluding accrued interest."""
         as_of = self.valuation_date(bond, dt)
         return bond.price_quotation.money_price(quoted_price, self.face_value(bond, as_of))
 
-    def dirty_value(self, bond: Bond, quoted_price: float, dt: 'datetime.date | datetime.datetime') -> float:
+    def dirty_value(self, bond: Bond, quoted_price: float, dt: datetime.date | datetime.datetime) -> float:
         """Money one bond changes hands for: clean value plus accrued interest."""
         return self.clean_value(bond, quoted_price, dt) + self.accrued_interest(bond, dt)
 
-    def money_per_quote_unit(self, bond: Bond, dt: 'datetime.date | datetime.datetime') -> float:
+    def money_per_quote_unit(self, bond: Bond, dt: datetime.date | datetime.datetime) -> float:
         """Money a one-point move in the quote is worth, for one bond.
 
         The bond analogue of a futures multiplier: it converts a commission or a price difference
@@ -295,8 +295,8 @@ class BondBook:
     def payments_entitled_between(
         self,
         bond: Bond,
-        after: 'datetime.date | datetime.datetime',
-        through: 'datetime.date | datetime.datetime',
+        after: datetime.date | datetime.datetime,
+        through: datetime.date | datetime.datetime,
     ) -> list[BondEvent]:
         """Cash-paying events whose entitlement falls in ``(after, through]``.
 
@@ -309,12 +309,12 @@ class BondBook:
         return [event for event in self._events.get(bond.id, [])
                 if event.pays_cash and lower < event.entitlement_date <= upper]
 
-    def events_on(self, bond: Bond, date: 'datetime.date | datetime.datetime') -> list[BondEvent]:
+    def events_on(self, bond: Bond, date: datetime.date | datetime.datetime) -> list[BondEvent]:
         """Every stored event dated ``date``, cash-paying or not."""
         as_of = _as_date(date)
         return [event for event in self._events.get(bond.id, []) if event.date == as_of]
 
-    def next_offer(self, bond: Bond, date: 'datetime.date | datetime.datetime') -> BondEvent | None:
+    def next_offer(self, bond: Bond, date: datetime.date | datetime.datetime) -> BondEvent | None:
         """The next put/call window at or after ``date``, if the schedule carries one."""
         as_of = _as_date(date)
         for event in self._events.get(bond.id, []):
@@ -323,7 +323,7 @@ class BondBook:
         return None
 
 
-def current_yield(bond: Bond, book: BondBook, quoted_price: float, dt: 'datetime.date | datetime.datetime') -> float:
+def current_yield(bond: Bond, book: BondBook, quoted_price: float, dt: datetime.date | datetime.datetime) -> float:
     """Annual coupon income as a fraction of what the bond costs to buy today.
 
     The simplest of the yield measures and the only one that needs no assumption about
@@ -339,7 +339,7 @@ def simple_yield_to_maturity(
     bond: Bond,
     book: BondBook,
     quoted_price: float,
-    dt: 'datetime.date | datetime.datetime',
+    dt: datetime.date | datetime.datetime,
 ) -> float:
     """Annualised return of buying at ``quoted_price`` and holding to maturity, without compounding.
 

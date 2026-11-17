@@ -19,6 +19,6 @@ class StaticAssets(StaticSids):
         An iterable of assets for which to filter.
     """
 
-    def __new__(cls, assets: 'Iterable[ExchangeAsset | ContinuousFuture]'):
+    def __new__(cls, assets: Iterable[ExchangeAsset | ContinuousFuture]):
         sids = frozenset(asset.sid for asset in assets)
         return super(StaticAssets, cls).__new__(cls, sids)

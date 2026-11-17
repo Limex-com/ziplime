@@ -22,7 +22,7 @@ class Quantiles(SingleInputMixin, Classifier):
     window_length = 0
     missing_value = -1
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         data = arrays[0]
         bins = self.params["bins"]
         to_bin = where(mask, data, nan)

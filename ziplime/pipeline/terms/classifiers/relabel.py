@@ -30,7 +30,7 @@ class Relabel(SingleInputMixin, Classifier):
     params = ("relabeler",)
 
     # TODO: Support relabeling for integer dtypes.
-    def __new__(cls, term: categorical_dtype, relabeler: 'Callable'):
+    def __new__(cls, term: categorical_dtype, relabeler: Callable):
         return super(Relabel, cls).__new__(
             cls,
             inputs=(term,),
@@ -39,7 +39,7 @@ class Relabel(SingleInputMixin, Classifier):
             relabeler=relabeler,
         )
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         relabeler = self.params["relabeler"]
         data = arrays[0]
 

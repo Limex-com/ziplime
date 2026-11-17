@@ -32,7 +32,7 @@ class RollFinder:
         mic: Restrict chains to a single exchange, if given.
     """
 
-    def __init__(self, asset_service: 'AssetService', mic: str | None = None, logger=None) -> None:
+    def __init__(self, asset_service: AssetService, mic: str | None = None, logger=None) -> None:
         self._asset_service = asset_service
         self._mic = mic
         self._ordered_contracts: dict[str, OrderedContracts] = {}
@@ -98,11 +98,11 @@ class CalendarRollFinder(RollFinder):
 
     def __init__(
         self,
-        asset_service: 'AssetService',
+        asset_service: AssetService,
         mic: str | None = None,
         roll_offset_days: int = 0,
         roll_offset_sessions: int | None = None,
-        trading_calendar: 'ExchangeCalendar | None' = None,
+        trading_calendar: ExchangeCalendar | None = None,
         logger=None,
     ) -> None:
         super().__init__(asset_service=asset_service, mic=mic, logger=logger)
@@ -161,7 +161,7 @@ class VolumeRollFinder(RollFinder):
     #: which keeps a single illiquid print from triggering a roll.
     THRESHOLD = 1.0
 
-    def __init__(self, asset_service: 'AssetService', data_source: 'DataSource', mic: str | None = None,
+    def __init__(self, asset_service: AssetService, data_source: DataSource, mic: str | None = None,
                  grace_period_days: int = 1, logger=None) -> None:
         super().__init__(asset_service=asset_service, mic=mic, logger=logger)
         self._data_source = data_source

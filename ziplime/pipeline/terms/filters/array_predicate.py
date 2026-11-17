@@ -24,7 +24,7 @@ class ArrayPredicate(SingleInputMixin, Filter):
     params = ("op", "opargs")
     window_length = 0
 
-    def __new__(cls, term: Term, op: 'Callable', opargs: tuple):
+    def __new__(cls, term: Term, op: Callable, opargs: tuple):
         hash(opargs)  # fail fast if opargs isn't hashable.
         return super(ArrayPredicate, cls).__new__(
             ArrayPredicate,
@@ -34,7 +34,7 @@ class ArrayPredicate(SingleInputMixin, Filter):
             mask=term.mask,
         )
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         params = self.params
         data = arrays[0]
         return params["op"](data, *params["opargs"]) & mask

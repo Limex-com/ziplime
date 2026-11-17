@@ -39,10 +39,10 @@ class RollingSpearmanOfReturns(RollingSpearman):
 
     def __new__(
         cls,
-        target: 'ExchangeAsset | ContinuousFuture',
+        target: ExchangeAsset | ContinuousFuture,
         returns_length: int,
         correlation_length: int,
-        mask: 'Filter | None' = None,
+        mask: Filter | None = None,
     ):
         # Use the `SingleAsset` filter here because it protects against
         # inputting a non-existent target asset.

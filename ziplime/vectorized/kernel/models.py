@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
+from typing import Self
 from typing import Literal
 
 import pandas as pd
@@ -87,15 +88,15 @@ class ExecutionTiming:
 
     # Named constructors, so a caller reads as a sentence rather than as two keyword arguments.
     @classmethod
-    def same_close(cls) -> "ExecutionTiming":
+    def same_close(cls) -> Self:
         return cls(execute_at="same_close")
 
     @classmethod
-    def next_open(cls) -> "ExecutionTiming":
+    def next_open(cls) -> Self:
         return cls(execute_at="next_open")
 
     @classmethod
-    def next_close(cls) -> "ExecutionTiming":
+    def next_close(cls) -> Self:
         return cls(execute_at="next_close")
 
 
@@ -206,7 +207,7 @@ class VectorSimulationResult:
                 "signal_timestamp", "detail"])
         return pd.DataFrame([dataclasses.asdict(reject) for reject in self.rejects])
 
-    def as_portfolio(self) -> "VectorPortfolio":
+    def as_portfolio(self) -> VectorPortfolio:
         """The compatibility view. See :class:`VectorPortfolio` before reaching for it."""
         return VectorPortfolio(self)
 

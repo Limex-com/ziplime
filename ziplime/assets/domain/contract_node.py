@@ -3,7 +3,7 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 
 class ContractNode:
 
-    def __init__(self, contract: 'ExchangeAsset') -> None:
+    def __init__(self, contract: ExchangeAsset) -> None:
         self.contract = contract
         self.prev = None
         self.next = None

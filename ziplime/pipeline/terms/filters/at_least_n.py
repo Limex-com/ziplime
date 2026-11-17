@@ -16,5 +16,5 @@ class AtLeastN(CustomFilter):
 
     params = ("N",)
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', arg: 'np.ndarray', N: int) -> None:
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, arg: np.ndarray, N: int) -> None:
         out[:] = arg.sum(axis=0) >= N

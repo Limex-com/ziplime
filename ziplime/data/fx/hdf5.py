@@ -127,7 +127,7 @@ class HDF5FXRateReader(FXRateReader):
         Rate to use when ``get_rates`` is called requesting the default rate.
     """
 
-    def __init__(self, group: 'h5py.Group', default_rate: str) -> None:
+    def __init__(self, group: h5py.Group, default_rate: str) -> None:
         self._group = group
         self._default_rate = default_rate
 
@@ -179,7 +179,7 @@ class HDF5FXRateReader(FXRateReader):
         objects = bytes_array_to_native_str_object_array(bytes_array)
         return pd.Index(objects)
 
-    def get_rates(self, rate: str, quote: str, bases: 'np.ndarray', dts: 'pd.DatetimeIndex'):
+    def get_rates(self, rate: str, quote: str, bases: np.ndarray, dts: pd.DatetimeIndex):
         """Get rates to convert ``bases`` into ``quote``.
 
         See :class:`ziplime.data.fx.base.FXRateReader` for details.
@@ -245,15 +245,15 @@ class HDF5FXRateReader(FXRateReader):
 class HDF5FXRateWriter:
     """Writer class for HDF5 files consumed by HDF5FXRateReader."""
 
-    def __init__(self, group: 'h5py.Group', date_chunk_size: int = HDF5_FX_DEFAULT_CHUNK_SIZE) -> None:
+    def __init__(self, group: h5py.Group, date_chunk_size: int = HDF5_FX_DEFAULT_CHUNK_SIZE) -> None:
         self._group = group
         self._date_chunk_size = date_chunk_size
 
     def write(
         self,
-        dts: 'pd.DatetimeIndex',
-        currencies: 'np.ndarray',
-        data: 'Iterable[tuple[str, str, np.ndarray]]',
+        dts: pd.DatetimeIndex,
+        currencies: np.ndarray,
+        data: Iterable[tuple[str, str, np.ndarray]],
     ) -> None:
         """Write data to the file.
 
@@ -284,7 +284,7 @@ class HDF5FXRateWriter:
         self._group.attrs["version"] = HDF5_FX_VERSION
         self._group.attrs["last_updated_utc"] = str(pd.Timestamp.utcnow())
 
-    def _write_index_group(self, dts: 'pd.DatetimeIndex', currencies: 'np.ndarray') -> None:
+    def _write_index_group(self, dts: pd.DatetimeIndex, currencies: np.ndarray) -> None:
         """Write content of /index."""
         if not is_sorted_ascending(dts):
             raise ValueError("dts is not sorted")
@@ -303,10 +303,10 @@ class HDF5FXRateWriter:
 
     def _write_data_group(
         self,
-        dts: 'pd.DatetimeIndex',
-        currencies: 'np.ndarray',
-        data: 'Iterable[tuple[str, str, np.ndarray]]',
-        chunks: 'tuple[int, int] | None',
+        dts: pd.DatetimeIndex,
+        currencies: np.ndarray,
+        data: Iterable[tuple[str, str, np.ndarray]],
+        chunks: tuple[int, int] | None,
     ) -> None:
         """Write content of /data."""
         data_group = self._group.create_group(DATA)

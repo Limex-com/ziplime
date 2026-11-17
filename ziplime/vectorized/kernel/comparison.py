@@ -85,7 +85,7 @@ class ExecutionComparison:
         return "\n".join(lines)
 
 
-def _transactions(result: 'TradingAlgorithmExecutionResult') -> list[tuple]:
+def _transactions(result: TradingAlgorithmExecutionResult) -> list[tuple]:
     """Every fill in a `TradingAlgorithmExecutionResult`, as comparable tuples.
 
     Rounded, because the two engines reach the same price by different arithmetic and an
@@ -100,14 +100,14 @@ def _transactions(result: 'TradingAlgorithmExecutionResult') -> list[tuple]:
     return sorted(out, key=lambda item: (str(item[0]), str(item[1])))
 
 
-def _equity(result: 'TradingAlgorithmExecutionResult') -> pd.Series:
+def _equity(result: TradingAlgorithmExecutionResult) -> pd.Series:
     return pd.Series(result.perf["portfolio_value"].to_numpy(dtype=float),
                      index=result.perf.index)
 
 
 def compare_execution_results(
-    vector_result: 'TradingAlgorithmExecutionResult',
-    event_result: 'TradingAlgorithmExecutionResult',
+    vector_result: TradingAlgorithmExecutionResult,
+    event_result: TradingAlgorithmExecutionResult,
 ) -> ExecutionComparison:
     """Compare a vectorised run against an event-driven one.
 
@@ -135,7 +135,7 @@ def compare_execution_results(
     else:
         max_gap, gap_at = float("nan"), None
 
-    def last(series: 'TradingAlgorithmExecutionResult', column: str):
+    def last(series: TradingAlgorithmExecutionResult, column: str):
         frame = series.perf
         return float(frame[column].iloc[-1]) if column in frame.columns and len(frame) else float("nan")
 

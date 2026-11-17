@@ -1,7 +1,7 @@
 from collections.abc import Sized
 
 
-def s(word: str, seq: 'Sized', suffix: str = "s"):
+def s(word: str, seq: Sized, suffix: str = "s"):
     """Adds a suffix to ``word`` if some sequence has anything other than
     exactly one element.
 
@@ -25,7 +25,7 @@ def s(word: str, seq: 'Sized', suffix: str = "s"):
     return word + suffix
 
 
-def plural(singular: str, plural: str, seq: 'Sized'):
+def plural(singular: str, plural: str, seq: Sized):
     """Selects a singular or plural word based on the length of a sequence.
 
     Parameters

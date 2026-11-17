@@ -48,7 +48,7 @@ class CustomClassifier(
                 ) from exc
             raise
 
-    def _allocate_output(self, windows: 'list[AdjustedArrayWindow]', shape: 'tuple[int, int]'):
+    def _allocate_output(self, windows: list[AdjustedArrayWindow], shape: tuple[int, int]):
         """
         Override the default array allocation to produce a LabelArray when we
         have a string-like dtype.

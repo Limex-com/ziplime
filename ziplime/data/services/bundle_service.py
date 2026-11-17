@@ -26,7 +26,7 @@ from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.utils.calendar_utils import get_calendar
 
 
-def _asset_type_names(asset_type: "AssetType | Sequence[AssetType]") -> str:
+def _asset_type_names(asset_type: AssetType | Sequence[AssetType]) -> str:
     """Render one or several asset types for an error message."""
     if isinstance(asset_type, AssetType):
         return asset_type.value

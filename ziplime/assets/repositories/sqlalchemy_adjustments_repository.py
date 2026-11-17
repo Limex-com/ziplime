@@ -108,9 +108,9 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
     ) -> tuple[list[Any], list[Any], list[Any]]:
 
         async def fetch(
-            model: 'type[SplitModel] | type[MergerModel] | type[DividendPayoutModel]',
-            date_column: 'InstrumentedAttribute[datetime.date]',
-            selected_ids: 'set[int]',
+            model: type[SplitModel] | type[MergerModel] | type[DividendPayoutModel],
+            date_column: InstrumentedAttribute[datetime.date],
+            selected_ids: set[int],
         ):
             if not selected_ids:
                 return []
@@ -383,7 +383,7 @@ class SqlAlchemyAdjustmentRepository(AdjustmentRepository):
         # Stock dividends are not supported yet, so a position never receives one.
         return []
 
-    def calc_dividend_ratios(self, dividends: 'pd.DataFrame | None'):
+    def calc_dividend_ratios(self, dividends: pd.DataFrame | None):
         """Calculate the ratios to apply to equities when looking back at pricing
         history so that the price is smoothed over the ex_date, when the market
         adjusts to the change in equity value due to upcoming dividend.

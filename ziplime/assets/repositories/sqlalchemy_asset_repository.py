@@ -77,7 +77,7 @@ from ziplime.assets.repositories.asset_repository import AssetRepository
 from ziplime.assets.utils import _encode_continuous_future_sid, Lifetimes
 
 
-def _asset_identity(asset: 'Asset') -> tuple:
+def _asset_identity(asset: Asset) -> tuple:
     """What tells two stored assets apart before either has an id: type, ISIN and name -- and, for
     a contract, its expiry.
 
@@ -110,7 +110,7 @@ class SqlAlchemyAssetRepository(AssetRepository):
     :class:`ziplime.assets.repositories.AssetsRepository`
     """
 
-    def __init__(self, db_url: str, future_chain_predicates: 'dict[str, Callable[[ExchangeAsset], bool]]') -> None:
+    def __init__(self, db_url: str, future_chain_predicates: dict[str, Callable[[ExchangeAsset], bool]]) -> None:
         self.db_url = db_url
         self._asset_cache = {}
         self._asset_type_cache = {}

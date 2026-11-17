@@ -297,7 +297,7 @@ def covers(wide: str, narrow: str) -> bool:
     return True
 
 
-def clock_calendar_name(mics: 'Iterable[str]') -> str | None:
+def clock_calendar_name(mics: Iterable[str]) -> str | None:
     """What to clock a run on, given the venues its instruments listed on.
 
     One venue, or several that keep the same schedule, answers with that schedule -- a Moscow

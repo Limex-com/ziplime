@@ -459,10 +459,10 @@ class ExpiredAwareFeed:
 
     async def get_data(
         self,
-        symbols: 'list[str]',
-        frequency: 'datetime.timedelta',
-        date_from: 'datetime.datetime',
-        date_to: 'datetime.datetime',
+        symbols: list[str],
+        frequency: datetime.timedelta,
+        date_from: datetime.datetime,
+        date_to: datetime.datetime,
         **kwargs,
     ):
         """The wrapped source's `get_data`, with expired contracts resolved first."""

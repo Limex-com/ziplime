@@ -41,7 +41,7 @@ class Rank(SingleInputMixin, Factor):
     dtype = float64_dtype
     window_safe = True
 
-    def __new__(cls, factor: 'Factor', method: str, ascending: bool, mask: 'Filter | None'):
+    def __new__(cls, factor: Factor, method: str, ascending: bool, mask: Filter | None):
         return super(Rank, cls).__new__(
             cls,
             inputs=(factor,),
@@ -74,7 +74,7 @@ class Rank(SingleInputMixin, Factor):
             )
         return super(Rank, self)._validate()
 
-    def _compute(self, arrays: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, arrays: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         """
         For each row in the input, compute a like-shaped array of per-row
         ranks.

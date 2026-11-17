@@ -5,9 +5,7 @@ The mixin classes inherit from Term to ensure they appear before
 Term in the MRO of any class using the mixin
 """
 
-from abc import abstractmethod
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
 
 from numpy import (
     array,
@@ -30,7 +28,6 @@ from ziplime.errors import (
 )
 from ziplime.lib.labelarray import LabelArray, labelarray_where
 from ziplime.utils.context_tricks import nop_context
-from ziplime.utils.numpy_utils import bool_dtype
 from ziplime.utils.pandas_utils import nearest_unequal_elements
 
 from ziplime.pipeline.downsample_helpers import (
@@ -41,10 +38,8 @@ from ziplime.assets.domain.continuous_future import ContinuousFuture
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.lib.windowtemplate import AdjustedArrayWindow
 from ziplime.pipeline.terms.computable_term import ComputableTerm
-
-# Filter imports these mixins while defining itself.
-if TYPE_CHECKING:
-    from ziplime.pipeline.terms.filters.filter import Filter
+from ziplime.pipeline.terms.boolean_term import BooleanTerm
+from ziplime.pipeline.universal_mixin import UniversalMixin
 
 
 class PositiveWindowLengthMixin(Term):
@@ -127,13 +122,13 @@ class CustomTermMixin(Term):
 
     def __new__(
             cls,
-            inputs: 'Iterable[Term] | None' = None,
-            outputs: 'Iterable[str] | None' = None,
-            window_length: 'int | None' = None,
-            mask: 'Filter | None' = None,
-            dtype: 'DTypeLike | None' = None,
+            inputs: Iterable[Term] | None = None,
+            outputs: Iterable[str] | None = None,
+            window_length: int | None = None,
+            mask: BooleanTerm | None = None,
+            dtype: DTypeLike | None = None,
             missing_value=None,
-            ndim: 'int | None' = None,
+            ndim: int | None = None,
             **kwargs,
     ):
 
@@ -159,7 +154,7 @@ class CustomTermMixin(Term):
             **kwargs,
         )
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', *arrays: 'np.ndarray'):
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, *arrays: np.ndarray):
         """
         Override this method with a function that writes a value into `out`.
         """
@@ -167,7 +162,7 @@ class CustomTermMixin(Term):
             "{name} must define a compute method".format(name=type(self).__name__)
         )
 
-    def _allocate_output(self, windows: 'list[AdjustedArrayWindow]', shape: 'tuple[int, int]'):
+    def _allocate_output(self, windows: list[AdjustedArrayWindow], shape: tuple[int, int]):
         """
         Allocate an output array whose rows should be passed to `self.compute`.
 
@@ -196,7 +191,7 @@ class CustomTermMixin(Term):
             out = full(shape, missing_value, dtype=self.dtype)
         return out
 
-    def _format_inputs(self, windows: 'list[AdjustedArrayWindow]', column_mask: 'np.ndarray'):
+    def _format_inputs(self, windows: list[AdjustedArrayWindow], column_mask: np.ndarray):
         inputs = []
         for input_ in windows:
             window = next(input_)
@@ -211,10 +206,10 @@ class CustomTermMixin(Term):
 
     def _compute(
         self,
-        windows: 'list[AdjustedArrayWindow]',
-        dates: 'pd.DatetimeIndex',
-        assets: 'pd.Index',
-        mask: 'np.ndarray',
+        windows: list[AdjustedArrayWindow],
+        dates: pd.DatetimeIndex,
+        assets: pd.Index,
+        mask: np.ndarray,
     ):
         """
         Call the user's `compute` function on each window with a pre-built
@@ -282,7 +277,7 @@ class LatestMixin(SingleInputMixin):
 
     window_length = 1
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', data: 'np.ndarray') -> None:
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, data: np.ndarray) -> None:
         out[:] = data[-1]
 
     def _validate(self) -> None:
@@ -301,59 +296,12 @@ class LatestMixin(SingleInputMixin):
         return "Latest"
 
 
-class UniversalMixin(Term):
-    """
-    Base class for "universal" mixins.
-
-    Universal mixins are used to implement expressions that need separate
-    subclasses for each of the ComputableTerm subclasses (Factor, Filter, and
-    Classifier). Such expressions are usually return types of methods of
-    ComputableTerm, such as `downsample()`, `alias()`, or `fillna()`.
-
-    A type may only inherit from one UniversalMixin.
-    """
-
-    # Memo dict mapping pairs of (mixin_type, principal_type) to subtypes.
-    _UNIVERSAL_MIXIN_SUBTYPES = {}
-
-    @staticmethod
-    @abstractmethod
-    def _universal_mixin_type():
-        raise NotImplementedError("_universal_mixin_type")
-
-    @staticmethod
-    @abstractmethod
-    def _universal_mixin_specialization_name(principal_type: 'type[ComputableTerm]'):
-        raise NotImplementedError("_universal_mixin_specialization_name")
-
-    @classmethod
-    def universal_mixin_specialization(cls, principal_type: 'type[ComputableTerm]'):
-        """
-        Create a new subtype of `principal_type` that adds this mixin to
-        ``principal_type``. ``principal_type`` will be one of Factor, Filter,
-        or Classifier.
-        """
-        mixin = cls._universal_mixin_type()
-        memo_key = (mixin, principal_type)
-
-        try:
-            return cls._UNIVERSAL_MIXIN_SUBTYPES[memo_key]
-        except KeyError:
-            new_type = type(
-                mixin._universal_mixin_specialization_name(principal_type),
-                (mixin, principal_type),
-                {"__module__": principal_type.__module__},
-            )
-            cls._UNIVERSAL_MIXIN_SUBTYPES[memo_key] = new_type
-            return new_type
-
-
 class AliasedMixin(SingleInputMixin, UniversalMixin):
     """
     Mixin for aliased terms.
     """
 
-    def __new__(cls, term: 'ComputableTerm', name: str):
+    def __new__(cls, term: ComputableTerm, name: str):
         return super(AliasedMixin, cls).__new__(
             cls,
             inputs=(term,),
@@ -377,7 +325,7 @@ class AliasedMixin(SingleInputMixin, UniversalMixin):
             name,
         )
 
-    def _compute(self, inputs: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, inputs: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         return inputs[0]
 
     def __repr__(self) -> str:
@@ -396,7 +344,7 @@ class AliasedMixin(SingleInputMixin, UniversalMixin):
         return AliasedMixin
 
     @staticmethod
-    def _universal_mixin_specialization_name(principal_type: 'type[ComputableTerm]'):
+    def _universal_mixin_specialization_name(principal_type: type[Term]):
         return "Aliased" + principal_type.__name__
 
 
@@ -434,13 +382,13 @@ class DownsampledMixin(StandardOutputs, UniversalMixin):
             ndim=term.ndim,
         )
 
-    def _init(self, frequency: str, wrapped_term: 'ComputableTerm', *args, **kwargs):
+    def _init(self, frequency: str, wrapped_term: ComputableTerm, *args, **kwargs):
         self._frequency = frequency
         self._wrapped_term = wrapped_term
         return super(DownsampledMixin, self)._init(*args, **kwargs)
 
     @classmethod
-    def _static_identity(cls, frequency: str, wrapped_term: 'ComputableTerm', *args, **kwargs):
+    def _static_identity(cls, frequency: str, wrapped_term: ComputableTerm, *args, **kwargs):
         return (
             super(DownsampledMixin, cls)._static_identity(*args, **kwargs),
             frequency,
@@ -449,9 +397,9 @@ class DownsampledMixin(StandardOutputs, UniversalMixin):
 
     def compute_extra_rows(
         self,
-        all_dates: 'pd.DatetimeIndex',
-        start_date: 'pd.Timestamp',
-        end_date: 'pd.Timestamp',
+        all_dates: pd.DatetimeIndex,
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
         min_extra_rows: int,
     ):
         """
@@ -519,10 +467,10 @@ class DownsampledMixin(StandardOutputs, UniversalMixin):
 
     def _compute(
         self,
-        inputs: 'list[np.ndarray | AdjustedArrayWindow]',
-        dates: 'pd.DatetimeIndex',
-        assets: 'pd.Index',
-        mask: 'np.ndarray',
+        inputs: list[np.ndarray | AdjustedArrayWindow],
+        dates: pd.DatetimeIndex,
+        assets: pd.Index,
+        mask: np.ndarray,
     ):
         """
         Compute by delegating to self._wrapped_term._compute on sample dates.
@@ -609,7 +557,7 @@ class DownsampledMixin(StandardOutputs, UniversalMixin):
         return DownsampledMixin
 
     @staticmethod
-    def _universal_mixin_specialization_name(principal_type: 'type[ComputableTerm]'):
+    def _universal_mixin_specialization_name(principal_type: type[Term]):
         return "Downsampled" + principal_type.__name__
 
 
@@ -629,7 +577,7 @@ class SliceMixin(UniversalMixin):
     should construct instances via indexing, e.g. `MyFactor()[Asset(24)]`.
     """
 
-    def __new__(cls, term: 'ComputableTerm', asset: 'ExchangeAsset | ContinuousFuture'):
+    def __new__(cls, term: ComputableTerm, asset: ExchangeAsset | ContinuousFuture):
         return super(SliceMixin, cls).__new__(
             cls,
             asset=asset,
@@ -648,18 +596,18 @@ class SliceMixin(UniversalMixin):
             asset=self._asset,
         )
 
-    def _init(self, asset: 'ExchangeAsset | ContinuousFuture', *args, **kwargs):
+    def _init(self, asset: ExchangeAsset | ContinuousFuture, *args, **kwargs):
         self._asset = asset
         return super(SliceMixin, self)._init(*args, **kwargs)
 
     @classmethod
-    def _static_identity(cls, asset: 'ExchangeAsset | ContinuousFuture', *args, **kwargs):
+    def _static_identity(cls, asset: ExchangeAsset | ContinuousFuture, *args, **kwargs):
         return (
             super(SliceMixin, cls)._static_identity(*args, **kwargs),
             asset,
         )
 
-    def _compute(self, windows: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, windows: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         asset = self._asset
         asset_column = searchsorted(assets.values, asset.sid)
         if assets[asset_column] != asset.sid:
@@ -683,7 +631,7 @@ class SliceMixin(UniversalMixin):
         return SliceMixin
 
     @staticmethod
-    def _universal_mixin_specialization_name(principal_type: 'type[ComputableTerm]'):
+    def _universal_mixin_specialization_name(principal_type: type[Term]):
         return principal_type.__name__ + "Slice"
 
 
@@ -692,7 +640,7 @@ class IfElseMixin(UniversalMixin):
 
     window_length = 0
 
-    def __new__(cls, condition: bool_dtype, if_true: 'ComputableTerm', if_false: 'ComputableTerm'):
+    def __new__(cls, condition: BooleanTerm, if_true: ComputableTerm, if_false: ComputableTerm):
         return super(IfElseMixin, cls).__new__(
             cls,
             inputs=[condition, if_true, if_false],
@@ -709,7 +657,7 @@ class IfElseMixin(UniversalMixin):
             outputs=if_true.outputs,
         )
 
-    def _compute(self, inputs: 'list[np.ndarray]', assets: 'pd.Index', dates: 'pd.DatetimeIndex', mask: 'np.ndarray'):
+    def _compute(self, inputs: list[np.ndarray], assets: pd.Index, dates: pd.DatetimeIndex, mask: np.ndarray):
         if self.dtype == object:
             return labelarray_where(inputs[0], inputs[1], inputs[2])
         return where(inputs[0], inputs[1], inputs[2])
@@ -719,7 +667,7 @@ class IfElseMixin(UniversalMixin):
         return IfElseMixin
 
     @staticmethod
-    def _universal_mixin_specialization_name(principal_type: 'type[ComputableTerm]'):
+    def _universal_mixin_specialization_name(principal_type: type[Term]):
         return "IfElse" + principal_type.__name__
 
 
@@ -730,7 +678,7 @@ class ConstantMixin(StandardOutputs, UniversalMixin):
     inputs = ()
     params = ("const",)
 
-    def _compute(self, inputs: 'list[np.ndarray]', assets: 'pd.Index', dates: 'pd.DatetimeIndex', mask: 'np.ndarray'):
+    def _compute(self, inputs: list[np.ndarray], assets: pd.Index, dates: pd.DatetimeIndex, mask: np.ndarray):
         constant = self.params["const"]
         out = full(mask.shape, constant, dtype=self.dtype)
         if self.dtype == object:
@@ -746,5 +694,5 @@ class ConstantMixin(StandardOutputs, UniversalMixin):
         return ConstantMixin
 
     @staticmethod
-    def _universal_mixin_specialization_name(principal_type: 'type[ComputableTerm]'):
+    def _universal_mixin_specialization_name(principal_type: type[Term]):
         return "Constant" + principal_type.__name__

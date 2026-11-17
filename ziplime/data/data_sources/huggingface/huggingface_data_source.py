@@ -182,7 +182,7 @@ class HuggingFaceDataSource(DataSource):
 
     def __init__(self, name: str, revision: hub.RepoRevision, manifest: DatasetManifest,
                  config: str, repo_files: tuple[str, ...], knowledge_column: str,
-                 entity_column: str, event_column: str | None, asset_service: 'AssetService',
+                 entity_column: str, event_column: str | None, asset_service: AssetService,
                  start_date: datetime.date,
                  end_date: datetime.date, trading_calendar: ExchangeCalendar,
                  fields: frozenset[str] | None = None,
@@ -220,7 +220,7 @@ class HuggingFaceDataSource(DataSource):
 
     @classmethod
     def from_frame(cls, frame: pl.DataFrame, name: str, knowledge_column: str,
-                   entity_column: str, asset_service: 'AssetService', start_date: datetime.date,
+                   entity_column: str, asset_service: AssetService, start_date: datetime.date,
                    end_date: datetime.date, trading_calendar: ExchangeCalendar,
                    event_column: str | None = None,
                    fields: list[str] | frozenset[str] | None = None,
@@ -259,7 +259,7 @@ class HuggingFaceDataSource(DataSource):
     @classmethod
     async def mount(cls, address: str, trading_calendar: ExchangeCalendar,
                     config: str | None = None, revision: str | None = None,
-                    asset_service: 'AssetService | None' = None, start_date: datetime.date | None = None,
+                    asset_service: AssetService | None = None, start_date: datetime.date | None = None,
                     end_date: datetime.date | None = None,
                     fields: list[str] | frozenset[str] | None = None,
                     name: str | None = None,
@@ -508,7 +508,7 @@ class HuggingFaceDataSource(DataSource):
         assets: frozenset[ExchangeAsset],
         fields: frozenset[str] | None,
         dt: datetime.datetime,
-        frequency: 'datetime.timedelta | Period | None' = None,
+        frequency: datetime.timedelta | Period | None = None,
         **kwargs,
     ) -> pl.DataFrame:
         """The current state per instrument, resolved the way this source's data requires.

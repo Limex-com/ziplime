@@ -81,7 +81,7 @@ def config_class(algorithm_file: Path):
     return found
 
 
-def suggested_grid(config: 'BaseAlgorithmConfig') -> dict[str, list]:
+def suggested_grid(config: BaseAlgorithmConfig) -> dict[str, list]:
     """A starting grid around each number's default: half, the default and twice it."""
     grid = {}
     for name, field in config.model_fields.items():

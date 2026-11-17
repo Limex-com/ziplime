@@ -19,10 +19,10 @@ class AverageDollarVolume(CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        close: 'np.ndarray',
-        volume: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        close: np.ndarray,
+        volume: np.ndarray,
     ) -> None:
         out[:] = nansum(close * volume, axis=0) / len(close)

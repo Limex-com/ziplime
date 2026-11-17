@@ -692,8 +692,8 @@ class NoFurtherDataError(ZiplineError):
     def from_lookback_window(
         cls,
         initial_message: str,
-        first_date: 'pd.Timestamp',
-        lookback_start: 'datetime.datetime',
+        first_date: pd.Timestamp,
+        lookback_start: datetime.datetime,
         lookback_length: int,
     ):
         return cls(

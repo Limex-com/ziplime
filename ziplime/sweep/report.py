@@ -78,19 +78,19 @@ class Stages:
 
 async def verify_with_engine(
     *,
-    params: 'SweepParams',
+    params: SweepParams,
     algorithm_file: Path,
     config_path: Path,
-    calendar: 'ExchangeCalendar',
-    asset_service: 'AssetService',
-    bundle: 'DataBundle',
-    universe: 'dict[str, ExchangeAsset]',
+    calendar: ExchangeCalendar,
+    asset_service: AssetService,
+    bundle: DataBundle,
+    universe: dict[str, ExchangeAsset],
     exact,
     close,
-    commission: 'CommissionModel',
-    slippage: 'SlippageModel',
-    future_commission: 'CommissionModel | None' = None,
-    future_slippage: 'SlippageModel | None' = None,
+    commission: CommissionModel,
+    slippage: SlippageModel,
+    future_commission: CommissionModel | None = None,
+    future_slippage: SlippageModel | None = None,
     say: Callable[[str], None],
 ):
     """The best combination through run_simulation -- the event-driven engine -- and the trades
@@ -150,7 +150,7 @@ async def verify_with_engine(
     return comparison.agrees or split
 
 
-def write_best_config(output: Path, config: 'BaseAlgorithmConfig') -> Path:
+def write_best_config(output: Path, config: BaseAlgorithmConfig) -> Path:
     path = output / "best_config.json"
     path.write_text(json.dumps(config.model_dump(), indent=2) + "\n", encoding="utf-8")
     return path

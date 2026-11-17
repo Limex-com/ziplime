@@ -120,7 +120,7 @@ def parse_rate(value) -> datetime.timedelta:
         raise SweepError(f"Not a bar frequency: {value!r} (use 1m, 5m, 1h, 1d).") from None
 
 
-def run_sessions(calendar: 'ExchangeCalendar', start: datetime.date, end: datetime.date) -> pd.DatetimeIndex:
+def run_sessions(calendar: ExchangeCalendar, start: datetime.date, end: datetime.date) -> pd.DatetimeIndex:
     return calendar.sessions_in_range(start, end)
 
 
@@ -128,7 +128,7 @@ def _positions(stamps: np.ndarray, moments: np.ndarray, side: str) -> np.ndarray
     return np.searchsorted(stamps, moments, side=side)
 
 
-def bar_grid(calendar: 'ExchangeCalendar', sessions: pd.DatetimeIndex, rate: datetime.timedelta):
+def bar_grid(calendar: ExchangeCalendar, sessions: pd.DatetimeIndex, rate: datetime.timedelta):
     """The engine's bars: one per session at its close, or, intraday, from the session's first
     minute to its close every ``rate`` -- both ends included, as SimulationClock lays them out
     (a 5-minute run's bars are 09:31, 09:36, ..., 15:56)."""
@@ -148,8 +148,8 @@ def bar_grid(calendar: 'ExchangeCalendar', sessions: pd.DatetimeIndex, rate: dat
     return (pd.DatetimeIndex(stamps), np.array(starts), np.array(ends), np.array(session_of))
 
 
-async def build_market(bundle_rows: pl.DataFrame, universe: dict, calendar: 'ExchangeCalendar',
-                       start: datetime.date, end: datetime.date, asset_service: 'AssetService',
+async def build_market(bundle_rows: pl.DataFrame, universe: dict, calendar: ExchangeCalendar,
+                       start: datetime.date, end: datetime.date, asset_service: AssetService,
                        rate: datetime.timedelta = datetime.timedelta(days=1)) -> Market:
     """The run's bars from ``start`` to ``end`` and everything the engine reads at each."""
     sessions = run_sessions(calendar, start, end)
@@ -239,7 +239,7 @@ async def build_market(bundle_rows: pl.DataFrame, universe: dict, calendar: 'Exc
                   session_end=session_end, rate=rate, row_days=row_days)
 
 
-async def corporate_actions(asset_service: 'AssetService', listings: list, sessions: pd.DatetimeIndex):
+async def corporate_actions(asset_service: AssetService, listings: list, sessions: pd.DatetimeIndex):
     """Splits and cash dividends of the universe over the run, from the asset database the engine
     reads them from, placed on the run's sessions the way the engine matches them: a split on its
     effective date, a dividend earned on its ex date and paid on its pay date -- each only if that
@@ -277,7 +277,7 @@ async def corporate_actions(asset_service: 'AssetService', listings: list, sessi
     return splits, dividends
 
 
-def _date(value: 'datetime.date | datetime.datetime'):
+def _date(value: datetime.date | datetime.datetime):
     return value.date() if isinstance(value, datetime.datetime) else value
 
 

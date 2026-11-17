@@ -28,7 +28,7 @@ class ProgressHooks(PipelineHooks):
         a ``ProgressModel`` and publishes progress to a consumer.
     """
 
-    def __init__(self, publisher_factory: 'Callable') -> None:
+    def __init__(self, publisher_factory: Callable) -> None:
         self._publisher_factory = publisher_factory
         self._reset_transient_state()
 
@@ -55,7 +55,7 @@ class ProgressHooks(PipelineHooks):
         self._publisher.publish(self._model)
 
     @contextmanager
-    def running_pipeline(self, pipeline: 'Pipeline', start_date: 'datetime.date', end_date: 'datetime.date'):
+    def running_pipeline(self, pipeline: Pipeline, start_date: datetime.date, end_date: datetime.date):
         self._start_date = start_date
         self._end_date = end_date
 
@@ -236,22 +236,22 @@ class ProgressModel:
             self._completed_term_increment = 0.0
             self._completed_chunk_increment = chunk_percent
 
-    def finish_chunk(self, terms: 'list[Term]', start_date: 'datetime.date', end_date: 'datetime.date') -> None:
+    def finish_chunk(self, terms: list[Term], start_date: datetime.date, end_date: datetime.date) -> None:
         self._days_completed += self._current_chunk_size
         self._progress += self._completed_chunk_increment
 
-    def start_load_terms(self, terms: 'list[LoadableTerm]') -> None:
+    def start_load_terms(self, terms: list[LoadableTerm]) -> None:
         self._state = "loading"
         self._current_work = terms
 
-    def finish_load_terms(self, terms: 'list[LoadableTerm]') -> None:
+    def finish_load_terms(self, terms: list[LoadableTerm]) -> None:
         self._finish_terms(nterms=len(terms))
 
-    def start_compute_term(self, term: 'ComputableTerm') -> None:
+    def start_compute_term(self, term: ComputableTerm) -> None:
         self._state = "computing"
         self._current_work = [term]
 
-    def finish_compute_term(self, term: 'ComputableTerm') -> None:
+    def finish_compute_term(self, term: ComputableTerm) -> None:
         self._finish_terms(nterms=1)
 
     def finish(self, success: bool) -> None:
@@ -355,7 +355,7 @@ class IPythonWidgetProgressPublisher:
 
         self._displayed = False
 
-    def publish(self, model: 'ProgressModel') -> None:
+    def publish(self, model: ProgressModel) -> None:
         if model.state == "init":
             self._heading.value = "<b>Analyzing Pipeline...</b>"
             self._set_progress(0.0)
@@ -408,7 +408,7 @@ class IPythonWidgetProgressPublisher:
         self._layout.close()
 
     @staticmethod
-    def _render_term_list(terms: 'Iterable[Term]') -> str:
+    def _render_term_list(terms: Iterable[Term]) -> str:
         list_elements = "".join(
             ["<li><pre>{}</pre></li>".format(repr_htmlsafe(t)) for t in terms]
         )
@@ -480,7 +480,7 @@ class TestingProgressPublisher:
     def __init__(self) -> None:
         self.trace = []
 
-    def publish(self, model: 'ProgressModel') -> None:
+    def publish(self, model: ProgressModel) -> None:
         self.trace.append(
             self.TraceState(
                 state=model.state,

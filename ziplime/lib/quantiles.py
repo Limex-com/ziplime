@@ -10,7 +10,7 @@ from pandas import qcut
 import numpy as np
 
 
-def quantiles(data: 'np.ndarray', nbins_or_partition_bounds: 'int | Sequence[float]'):
+def quantiles(data: np.ndarray, nbins_or_partition_bounds: int | Sequence[float]):
     """
     Compute rowwise array quantiles on an input.
     """

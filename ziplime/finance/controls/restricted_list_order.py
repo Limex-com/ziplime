@@ -22,7 +22,7 @@ class RestrictedListOrder(TradingControl):
         self.restrictions = restrictions
 
     async def validate(self, asset: ExchangeAsset, amount: int, portfolio: Portfolio,
-                       algo_datetime: 'datetime.datetime', algo_current_data: 'BarData') -> None:
+                       algo_datetime: datetime.datetime, algo_current_data: BarData) -> None:
         """
         Fail if the asset is in the restricted_list.
         """

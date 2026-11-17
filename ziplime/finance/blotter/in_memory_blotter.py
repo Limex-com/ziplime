@@ -18,7 +18,7 @@ class InMemoryBlotter(Blotter):
     def __init__(
             self,
             exchanges: list[Exchange],
-            cancel_policy: 'CancelPolicy',
+            cancel_policy: CancelPolicy,
             new_orders: dict = None
     ) -> None:
         super().__init__(cancel_policy=cancel_policy)
@@ -112,7 +112,7 @@ class InMemoryBlotter(Blotter):
         self.open_orders.get(exchange_name, {}).pop(asset, None)
 
     # End of day cancel for daily frequency
-    def execute_daily_cancel_policy(self, event: 'SimulationEvent') -> None:
+    def execute_daily_cancel_policy(self, event: SimulationEvent) -> None:
         if self.cancel_policy.should_cancel(event):
             warn = self.cancel_policy.warn_on_cancel
             for asset in copy(self.open_orders):
@@ -146,7 +146,7 @@ class InMemoryBlotter(Blotter):
                                 f"and was canceled."
                             )
 
-    def execute_cancel_policy(self, event: 'SimulationEvent') -> None:
+    def execute_cancel_policy(self, event: SimulationEvent) -> None:
         if self.cancel_policy.should_cancel(event):
             # warn = self.cancel_policy.warn_on_cancel # TODO: check if needed
             # Over copies: cancelling pops from the dict being walked, which raised "dictionary
@@ -167,7 +167,7 @@ class InMemoryBlotter(Blotter):
 
         self.new_orders[order.id] = order
 
-    def process_splits(self, splits: 'Iterable[Split]'):
+    def process_splits(self, splits: Iterable[Split]):
         """
         Processes a list of splits by modifying any open orders as needed.
 
@@ -259,7 +259,7 @@ class InMemoryBlotter(Blotter):
     #
     #     return transactions, commissions, closed_orders
 
-    def prune_orders(self, closed_orders: 'Iterable[Order]'):
+    def prune_orders(self, closed_orders: Iterable[Order]):
         """
         Removes all given orders from the blotter's open_orders list.
 

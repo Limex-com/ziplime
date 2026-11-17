@@ -169,10 +169,10 @@ class Pipeline:
 
     def to_execution_plan(
         self,
-        domain: 'Domain',
-        default_screen: 'Filter',
-        start_date: 'pd.Timestamp',
-        end_date: 'pd.Timestamp',
+        domain: Domain,
+        default_screen: Filter,
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
     ):
         """
         Compile into an ExecutionPlan.
@@ -210,7 +210,7 @@ class Pipeline:
             end_date=end_date,
         )
 
-    def to_simple_graph(self, default_screen: 'Filter'):
+    def to_simple_graph(self, default_screen: Filter):
         """
         Compile into a simple TermGraph with no extra row metadata.
 
@@ -226,7 +226,7 @@ class Pipeline:
         """
         return TermGraph(self._prepare_graph_terms(default_screen))
 
-    def _prepare_graph_terms(self, default_screen: 'Filter'):
+    def _prepare_graph_terms(self, default_screen: Filter):
         """Helper for to_graph and to_execution_plan."""
         columns = self.columns.copy()
         screen = self.screen

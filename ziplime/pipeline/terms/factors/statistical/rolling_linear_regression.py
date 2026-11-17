@@ -46,7 +46,7 @@ class RollingLinearRegression(CustomFactor):
     outputs = ["alpha", "beta", "r_value", "p_value", "stderr"]
 
     def __new__(cls, dependent: np.float64 | np.int64, independent: np.float64 | np.int64,
-                regression_length: int, mask: 'Filter | None' = None):
+                regression_length: int, mask: Filter | None = None):
         if independent.ndim == 2 and dependent.mask is not independent.mask:
             raise IncompatibleTerms(term_1=dependent, term_2=independent)
         if regression_length < 2:
@@ -60,11 +60,11 @@ class RollingLinearRegression(CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        dependent: 'np.ndarray',
-        independent: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        dependent: np.ndarray,
+        independent: np.ndarray,
     ) -> None:
         alpha = out.alpha
         beta = out.beta
@@ -72,7 +72,7 @@ class RollingLinearRegression(CustomFactor):
         p_value = out.p_value
         stderr = out.stderr
 
-        def regress(y: 'np.ndarray', x: 'np.ndarray') -> None:
+        def regress(y: np.ndarray, x: np.ndarray) -> None:
             regr_results = linregress(y=y, x=x)
             # `linregress` returns its results in the following order:
             # slope, intercept, r-value, p-value, stderr

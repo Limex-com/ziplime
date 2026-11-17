@@ -31,17 +31,17 @@ async def sweep_simulation(
         start_date: datetime.date | datetime.datetime,
         end_date: datetime.date | datetime.datetime,
         algorithm_file: str | Path,
-        market_data_source: 'DataBundle | None' = None,
-        asset_service: 'AssetService | None' = None,
+        market_data_source: DataBundle | None = None,
+        asset_service: AssetService | None = None,
         custom_data_sources: list | None = None,
         trading_calendar: str = "XNYS",
         emission_rate: datetime.timedelta | str = datetime.timedelta(days=1),
         total_cash: float = 100_000.0,
         config_file: str | Path | None = None,
-        equity_commission: 'CommissionModel | None' = None,
-        equity_slippage: 'SlippageModel | None' = None,
-        future_commission: 'CommissionModel | None' = None,
-        future_slippage: 'SlippageModel | None' = None,
+        equity_commission: CommissionModel | None = None,
+        equity_slippage: SlippageModel | None = None,
+        future_commission: CommissionModel | None = None,
+        future_slippage: SlippageModel | None = None,
         same_bar_execution: bool = True,
         price_used_in_order_execution: Literal["open", "close"] = "close",
         say: Callable[[str], None] = print,
@@ -81,11 +81,11 @@ async def sweep_simulation(
                            asset_service=asset_service, custom_data_sources=custom_data_sources)
 
 
-def _date(value: 'datetime.date | datetime.datetime') -> datetime.date:
+def _date(value: datetime.date | datetime.datetime) -> datetime.date:
     return value.date() if isinstance(value, datetime.datetime) else value
 
 
-def _rate(value: 'datetime.timedelta') -> str:
+def _rate(value: datetime.timedelta) -> str:
     """run_simulation's emission_rate as a sweep file writes it: 1d, 1h, 5m."""
     if isinstance(value, str):
         return value

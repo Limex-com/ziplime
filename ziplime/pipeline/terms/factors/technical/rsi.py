@@ -27,7 +27,7 @@ class RSI(SingleInputMixin, CustomFactor):
     inputs = (EquityPricing.close,)
     window_safe = True
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', closes: 'np.ndarray'):
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, closes: np.ndarray):
         diffs = diff(closes, axis=0)
         ups = nanmean(clip(diffs, 0, inf), axis=0)
         downs = abs(nanmean(clip(diffs, -inf, 0), axis=0))

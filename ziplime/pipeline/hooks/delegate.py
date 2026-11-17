@@ -13,7 +13,7 @@ class DelegatingHooks(PipelineHooks):
         Sequence of hooks to delegate to.
     """
 
-    def __new__(cls, hooks: 'Sequence[PipelineHooks]'):
+    def __new__(cls, hooks: Sequence[PipelineHooks]):
         if len(hooks) == 0:
             # OPTIMIZATION: Short-circuit to a NoHooks if we don't have any
             # sub-hooks.

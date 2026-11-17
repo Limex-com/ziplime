@@ -26,7 +26,7 @@ US_EQUITY_PRICING_BCOLZ_COLUMNS = (
 UINT_32_MAX = np.iinfo(np.uint32).max
 
 
-def nanos_to_seconds(nanos: 'np.ndarray'):
+def nanos_to_seconds(nanos: np.ndarray):
     return nanos / (1000 * 1000 * 1000)
 
 
@@ -39,7 +39,7 @@ PSEUDO_EPOCH_NAIVE = Timestamp("2000-01-01")
 # TODO FIX TZ MESS
 
 
-def asset_start(asset_info: 'pd.DataFrame', asset: int, tz: 'datetime.tzinfo | str | None' = None):
+def asset_start(asset_info: pd.DataFrame, asset: int, tz: datetime.tzinfo | str | None = None):
     ret = asset_info.loc[asset]["start_date"]
     if tz is not None:
         ret = ret.tz_localize(tz)
@@ -47,7 +47,7 @@ def asset_start(asset_info: 'pd.DataFrame', asset: int, tz: 'datetime.tzinfo | s
     return ret
 
 
-def asset_end(asset_info: 'pd.DataFrame', asset: int, tz: 'datetime.tzinfo | str | None' = None):
+def asset_end(asset_info: pd.DataFrame, asset: int, tz: datetime.tzinfo | str | None = None):
     ret = asset_info.loc[asset]["end_date"]
     if tz is not None:
         ret = ret.tz_localize(tz)
@@ -58,9 +58,9 @@ def asset_end(asset_info: 'pd.DataFrame', asset: int, tz: 'datetime.tzinfo | str
 
 
 def make_bar_data(
-    asset_info: 'pd.DataFrame',
-    calendar: 'pd.DatetimeIndex',
-    holes: 'dict[int, Sequence[pd.Timestamp]] | None' = None,
+    asset_info: pd.DataFrame,
+    calendar: pd.DatetimeIndex,
+    holes: dict[int, Sequence[pd.Timestamp]] | None = None,
 ):
     """For a given asset/date/column combination, we generate a corresponding raw
     value using the following formula for OHLCV columns:
@@ -161,7 +161,7 @@ def make_bar_data(
         yield asset, _raw_data_for_asset(asset)
 
 
-def expected_bar_value(asset_id: int, date: 'pd.Timestamp', colname: str):
+def expected_bar_value(asset_id: int, date: pd.Timestamp, colname: str):
     """Check that the raw value for an asset/date/column triple is as
     expected.
 
@@ -175,9 +175,9 @@ def expected_bar_value(asset_id: int, date: 'pd.Timestamp', colname: str):
 
 def expected_bar_value_with_holes(
     asset_id: int,
-    date: 'pd.Timestamp',
+    date: pd.Timestamp,
     colname: str,
-    holes: 'dict[int, Sequence[pd.Timestamp]] | None',
+    holes: dict[int, Sequence[pd.Timestamp]] | None,
     missing_value,
 ):
     # Explicit holes are filled with the missing value.
@@ -188,11 +188,11 @@ def expected_bar_value_with_holes(
 
 
 def expected_bar_values_2d(
-    dates: 'pd.DatetimeIndex',
-    assets: 'pd.Index | np.ndarray',
-    asset_info: 'pd.DataFrame',
+    dates: pd.DatetimeIndex,
+    assets: pd.Index | np.ndarray,
+    asset_info: pd.DataFrame,
     colname: str,
-    holes: 'dict[int, Sequence[pd.Timestamp]] | None' = None,
+    holes: dict[int, Sequence[pd.Timestamp]] | None = None,
 ):
     """Return an 2D array containing cls.expected_value(asset_id, date,
     colname) for each date/asset pair in the inputs.

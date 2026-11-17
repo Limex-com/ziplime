@@ -57,12 +57,12 @@ class IchimokuKinkoHyo(CustomFactor):
 
     def compute(
         self,
-        today: 'pd.Timestamp',
-        assets: 'pd.Index',
-        out: 'np.ndarray',
-        high: 'np.ndarray',
-        low: 'np.ndarray',
-        close: 'np.ndarray',
+        today: pd.Timestamp,
+        assets: pd.Index,
+        out: np.ndarray,
+        high: np.ndarray,
+        low: np.ndarray,
+        close: np.ndarray,
         tenkan_sen_length: int,
         kijun_sen_length: int,
         chikou_span_length: int,

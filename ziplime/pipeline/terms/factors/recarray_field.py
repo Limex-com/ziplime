@@ -10,7 +10,7 @@ class RecarrayField(SingleInputMixin, Factor):
     A single field from a multi-output factor.
     """
 
-    def __new__(cls, factor: 'Factor', attribute: str):
+    def __new__(cls, factor: Factor, attribute: str):
         return super(RecarrayField, cls).__new__(
             cls,
             attribute=attribute,
@@ -33,7 +33,7 @@ class RecarrayField(SingleInputMixin, Factor):
             attribute,
         )
 
-    def _compute(self, windows: 'list[np.ndarray]', dates: 'pd.DatetimeIndex', assets: 'pd.Index', mask: 'np.ndarray'):
+    def _compute(self, windows: list[np.ndarray], dates: pd.DatetimeIndex, assets: pd.Index, mask: np.ndarray):
         return windows[0][self._attribute]
 
     def graph_repr(self) -> str:

@@ -17,10 +17,10 @@ class BoundColumnDescr:
 
     def __init__(
         self,
-        dtype: 'DTypeLike',
+        dtype: DTypeLike,
         missing_value,
         name: str,
-        doc: 'str | None',
+        doc: str | None,
         metadata,
         currency_aware: bool,
     ) -> None:

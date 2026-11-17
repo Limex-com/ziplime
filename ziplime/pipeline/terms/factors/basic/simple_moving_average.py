@@ -21,5 +21,5 @@ class SimpleMovingAverage(SingleInputMixin, CustomFactor):
     # warning.
     # ctx = ignore_nanwarnings()
 
-    def compute(self, today: 'pd.Timestamp', assets: 'pd.Index', out: 'np.ndarray', data: 'np.ndarray') -> None:
+    def compute(self, today: pd.Timestamp, assets: pd.Index, out: np.ndarray, data: np.ndarray) -> None:
         out[:] = nanmean(data, axis=0)

@@ -10,5 +10,5 @@ class ExplodingFXRateReader(FXRateReader):
     This is useful for testing contexts where FX rates aren't actually needed.
     """
 
-    def get_rates(self, rate: str, quote: str, bases: 'np.ndarray', dts: 'pd.DatetimeIndex'):
+    def get_rates(self, rate: str, quote: str, bases: np.ndarray, dts: pd.DatetimeIndex):
         raise AssertionError("FX rates requested unexpectedly!")
