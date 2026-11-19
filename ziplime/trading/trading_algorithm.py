@@ -140,6 +140,8 @@ from ziplime.finance.domain.transaction import Transaction
 from ziplime.finance.slippage.slippage_model import SlippageModel
 from ziplime.pipeline.loaders.pipeline_loader import PipelineLoader
 from ziplime.pipeline.terms.loadable_term import LoadableTerm
+from ziplime.meta.mixin import StrategiesMixin
+from ziplime.meta.exchange import is_strategy_listing
 
 # For creating and storing pipeline instances
 AttachedPipeline = namedtuple("AttachedPipeline", "pipe chunks eager")
@@ -199,6 +201,15 @@ def _as_datetime(value: datetime.date | None, tz: datetime.tzinfo, default: date
 
 
 
+def _ordered_strategy(algorithm, asset):
+    """The strategy an order method was handed in place of an asset, or None.
+
+    Through ``getattr`` because the order methods are also called on stand-ins for an algorithm.
+    """
+    resolve = getattr(algorithm, "_strategy_of", None)
+    return resolve(asset) if resolve is not None else None
+
+
 def _resolves_continuous_future(method: Callable):
     """Let an order method take a continuous future: it is placed in the contract held right now.
 
@@ -222,7 +233,7 @@ def _resolves_continuous_future(method: Callable):
         return await method(self, *args, **kwargs)
     return wrapper
 
-class TradingAlgorithm(BaseTradingAlgorithm):
+class TradingAlgorithm(StrategiesMixin, BaseTradingAlgorithm):
     """A class that represents a trading strategy and parameters to execute
     the strategy.
 
@@ -358,6 +369,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self._metrics_set = metrics_set
 
         # Initialize Pipeline API data.
+        self._get_pipeline_loader = get_pipeline_loader
         self.init_engine(get_pipeline_loader)
         self._pipelines = {}
 
@@ -381,6 +393,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
 
         self._handle_data = None
 
+        self._futures_margin_model = futures_margin_model
         self._ledger = Ledger(futures_margin_model=futures_margin_model,
                               trading_sessions=clock.sessions,
                               data_frequency=clock.emission_rate)
@@ -421,6 +434,11 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         self.capital_change_deltas = {}
 
         self.restrictions = NoRestrictions()
+        #: What a strategy run by this one (``context.strategy``) is built from: the same data.
+        self._custom_data_sources = list(custom_data_sources)
+        #: Whether a session has started and not yet ended -- today's return is then partial.
+        self._in_session = False
+        self._init_strategies()
         for ds in custom_data_sources:
             data_sources[ds.name] = ds
         # The run's address context (the requesting user, for dataset://), copied now: it belongs
@@ -1660,8 +1678,12 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         checked against 1.0, because a futures book is levered by construction.
         """
         style = make_execution_style(style=style)
+        # Strategies run by this one are part of the book: named ones go to their weight in NAV
+        # units, unnamed ones are closed, exactly as listings are below.
+        if getattr(self, "_strategies", None):
+            weights = await self._rebalance_strategies(weights or {})
         wanted = {}
-        for listing, weight in (weights or {}).items():
+        for listing, weight in weights.items():
             if isinstance(listing, ContinuousFuture):
                 listing = await self._contract_for(listing)
                 if listing is None:
@@ -1669,7 +1691,7 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             wanted[listing] = weight
 
         held = {position.asset for position in self.portfolio.positions.values()
-                if position.amount}
+                if position.amount and not is_strategy_listing(position.asset)}
         for listing in held - set(wanted):
             wanted[listing] = 0.0
 
@@ -2260,6 +2282,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         :func:`ziplime.api.order_value`
         :func:`ziplime.api.order_percent`
         """
+        # A strategy run by this one (`context.strategy`) is ordered in units of its NAV.
+        if (strategy := _ordered_strategy(self, asset)) is not None:
+            return await self._order_strategy(strategy, amount=amount)
         if isinstance(asset, ContinuousFuture):
             raise ValueError(
                 f"Cannot place an order for {asset}: a continuous future is a data specifier, "
@@ -2469,6 +2494,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         :func:`ziplime.api.order`
         :func:`ziplime.api.order_percent`
         """
+        # A strategy run by this one (`context.strategy`) is ordered in units of its NAV.
+        if (strategy := _ordered_strategy(self, asset)) is not None:
+            return await self._order_strategy(strategy, value=value)
         if not self._can_order_asset(asset):
             return None
         exchange = await self.exchange_repository.get_exchange_by_mic(exchange_name) if exchange_name else (
@@ -2775,6 +2803,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         :func:`ziplime.api.order`
         :func:`ziplime.api.order_value`
         """
+        # A strategy run by this one (`context.strategy`) is ordered in units of its NAV.
+        if (strategy := _ordered_strategy(self, asset)) is not None:
+            return await self._order_strategy(strategy, percent=percent)
         if not self._can_order_asset(asset=asset):
             return None
         exchange = await self.exchange_repository.get_exchange_by_mic(exchange_name) if exchange_name else (
@@ -2874,6 +2905,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         :func:`ziplime.api.order_target_percent`
         :func:`ziplime.api.order_target_value`
         """
+        # A strategy run by this one (`context.strategy`) is ordered in units of its NAV.
+        if (strategy := _ordered_strategy(self, asset)) is not None:
+            return await self._order_strategy(strategy, target=target)
         if not self._can_order_asset(asset=asset):
             return None
         exchange = await self.exchange_repository.get_exchange_by_mic(exchange_name) if exchange_name else (
@@ -2952,6 +2986,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         :func:`ziplime.api.order_target`
         :func:`ziplime.api.order_target_percent`
         """
+        # A strategy run by this one (`context.strategy`) is ordered in units of its NAV.
+        if (strategy := _ordered_strategy(self, asset)) is not None:
+            return await self._order_strategy(strategy, target_value=target)
         if not self._can_order_asset(asset):
             return None
 
@@ -3027,6 +3064,9 @@ class TradingAlgorithm(BaseTradingAlgorithm):
         :func:`ziplime.api.order_target`
         :func:`ziplime.api.order_target_value`
         """
+        # A strategy run by this one (`context.strategy`) is ordered in units of its NAV.
+        if (strategy := _ordered_strategy(self, asset)) is not None:
+            return await self._order_strategy(strategy, target_percent=target)
         if not (-1 <= target <= 1):
             raise ValueError("target must be between -1 and 1")
         if not self._can_order_asset(asset):
@@ -3694,75 +3734,8 @@ class TradingAlgorithm(BaseTradingAlgorithm):
             errors = []
             for dt, action in self.clock:
                 try:
-                    self._ledger.set_reporting_datetime(
-                        dt=_as_datetime(value=dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session))
-                    if action == SimulationEvent.BAR:
-                        await self._sync_last_sale_prices(dt=dt)
-                        await self._ledger.update_portfolio()
-                        self._ledger.update_account()
-
-                        async for capital_change_packet in self.every_bar(dt_to_use=dt, current_data=self.current_data,
-                                                                          handle_data=self.event_manager.handle_data):
-                            yield capital_change_packet, []
-
-                    elif action == SimulationEvent.SESSION_START:
-                        # TODO: add also portfolio update
-                        async for capital_change_packet in self.once_a_day(midnight_dt=dt,
-                                                                           current_data=self.current_data,
-                                                                           asset_service=self.asset_service):
-                            yield capital_change_packet, []
-                    elif action == SimulationEvent.SESSION_END:
-                        # End of the session.
-                        positions = self._ledger.position_tracker.positions
-                        position_assets = [p.asset for p in self._ledger.position_tracker.get_position_list()]
-
-                        # await self.asset_service.retrieve_all(
-                        #     sids=[a.sid for a in positions]
-                        # )
-                        await self._sync_last_sale_prices(dt=dt)
-                        await self._ledger.update_portfolio()
-                        self._ledger.update_account()
-                        await self._cleanup_expired_assets(dt=dt, position_assets=position_assets)
-
-                        self.execute_order_cancellation_policy()
-                        await self.validate_account_controls()
-
-                        if self.clock.emission_rate == datetime.timedelta(days=1):
-                            # this method is called for both minutely and daily emissions, but
-                            # this chunk of code here only applies for daily emissions. (since
-                            # it's done every minute, elsewhere, for minutely emission).
-                            await self.sync_last_sale_prices_to_ledger(dt=dt,
-                                                                       handle_non_market_minutes=False)  # TODO : remove
-                            await self._sync_last_sale_prices(dt=dt)
-                            await self._ledger.update_portfolio()
-                            self._ledger.update_account()
-
-                        session_ix = self._session_count
-                        # increment the day counter before we move markers forward.
-                        self._session_count += 1
-                        self._ledger.end_of_session(session_ix=session_ix)
-
-                        yield self._get_daily_message(dt=dt), []
-                    elif action == SimulationEvent.BEFORE_TRADING_START_BAR:
-                        self.simulation_dt = dt
-                        # self.datetime = dt
-                        # self.on_dt_changed(dt=dt)
-                        await self.before_trading_start(data=self.current_data)
-                    elif (action == SimulationEvent.EMISSION_RATE_END
-                          and self.clock.emission_rate < datetime.timedelta(days=1)):
-                        # Syncing sale prices to the ledger happens here for intraday rates and in
-                        # the session-end branch for daily ones. Testing for exactly one minute
-                        # meant a five-minute run did neither, and carried a portfolio value that
-                        # never moved between sessions.
-                        # await self._ledger.sync_last_sale_prices(dt=dt, handle_non_market_minutes=False)
-                        await self.sync_last_sale_prices_to_ledger(dt=dt,
-                                                                   handle_non_market_minutes=False)  # TODO : remove
-
-                        minute_msg = self._get_minute_message(
-                            dt=dt,
-                        )
-
-                        yield minute_msg, []
+                    async for packet in self.process_event(dt=dt, action=action):
+                        yield packet, []
                 except Exception as e:
                     errors.append(
                         BarSimulationError(
@@ -3775,9 +3748,83 @@ class TradingAlgorithm(BaseTradingAlgorithm):
                     if self.stop_on_error:
                         raise
 
+            # The strategies a metastrategy runs finish with it: their results are complete
+            # before the metastrategy's own risk report is, so `analyze` can read them.
+            await self._finish_strategies()
             errors.extend(self._end_of_run_warnings())
             risk_message = self.metrics_tracker.handle_simulation_end()
             yield risk_message, errors
+
+    async def process_event(self, dt: datetime.datetime, action: SimulationEvent):
+        """One clock event: everything ``transform`` does for it, yielding the packets it makes.
+
+        Separate from the loop so that one algorithm can drive another on the same clock -- a
+        metastrategy steps every strategy it runs through each event before it handles that
+        event itself, which is what lets its ``handle_data`` read their state as of this bar.
+        """
+        # Strategies first: by the time this algorithm's own bar runs, theirs has.
+        await self._step_strategies(dt=dt, action=action)
+
+        self._ledger.set_reporting_datetime(
+            dt=_as_datetime(value=dt, tz=self.clock.trading_calendar.tz, default=self.clock.start_session))
+        if action == SimulationEvent.BAR:
+            await self._sync_last_sale_prices(dt=dt)
+            await self._ledger.update_portfolio()
+            self._ledger.update_account()
+
+            async for capital_change_packet in self.every_bar(dt_to_use=dt, current_data=self.current_data,
+                                                              handle_data=self.event_manager.handle_data):
+                yield capital_change_packet
+
+        elif action == SimulationEvent.SESSION_START:
+            self._in_session = True
+            # TODO: add also portfolio update
+            async for capital_change_packet in self.once_a_day(midnight_dt=dt,
+                                                               current_data=self.current_data,
+                                                               asset_service=self.asset_service):
+                yield capital_change_packet
+        elif action == SimulationEvent.SESSION_END:
+            # End of the session.
+            position_assets = [p.asset for p in self._ledger.position_tracker.get_position_list()]
+
+            await self._sync_last_sale_prices(dt=dt)
+            await self._ledger.update_portfolio()
+            self._ledger.update_account()
+            await self._cleanup_expired_assets(dt=dt, position_assets=position_assets)
+
+            self.execute_order_cancellation_policy()
+            await self.validate_account_controls()
+
+            if self.clock.emission_rate == datetime.timedelta(days=1):
+                # this method is called for both minutely and daily emissions, but
+                # this chunk of code here only applies for daily emissions. (since
+                # it's done every minute, elsewhere, for minutely emission).
+                await self.sync_last_sale_prices_to_ledger(dt=dt,
+                                                           handle_non_market_minutes=False)  # TODO : remove
+                await self._sync_last_sale_prices(dt=dt)
+                await self._ledger.update_portfolio()
+                self._ledger.update_account()
+
+            session_ix = self._session_count
+            # increment the day counter before we move markers forward.
+            self._session_count += 1
+            self._ledger.end_of_session(session_ix=session_ix)
+            self._in_session = False
+
+            yield self._get_daily_message(dt=dt)
+        elif action == SimulationEvent.BEFORE_TRADING_START_BAR:
+            self.simulation_dt = dt
+            await self.before_trading_start(data=self.current_data)
+        elif (action == SimulationEvent.EMISSION_RATE_END
+              and self.clock.emission_rate < datetime.timedelta(days=1)):
+            # Syncing sale prices to the ledger happens here for intraday rates and in
+            # the session-end branch for daily ones. Testing for exactly one minute
+            # meant a five-minute run did neither, and carried a portfolio value that
+            # never moved between sessions.
+            await self.sync_last_sale_prices_to_ledger(dt=dt,
+                                                       handle_non_market_minutes=False)  # TODO : remove
+
+            yield self._get_minute_message(dt=dt)
 
     def _end_of_run_warnings(self) -> list[BarSimulationError]:
         """Facts about the run that a table of metrics cannot show, reported where they are read.
