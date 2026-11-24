@@ -1,4 +1,4 @@
-import datetime as datetime
+import datetime
 
 from ziplime.utils.compat import contextmanager
 

@@ -11,7 +11,8 @@ from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
-from ziplime.assets.entities.option_contract import OptionContract, format_occ_symbol
+from ziplime.assets.entities.option_contract import OptionContract
+from ziplime.assets.domain.option_symbols import format_occ_symbol
 from ziplime.finance.options.chain import OptionChain
 
 FAR_PAST = datetime.date(1900, 1, 1)

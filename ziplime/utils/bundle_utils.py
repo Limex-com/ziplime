@@ -1,10 +1,7 @@
 import os
 from pathlib import Path
 
-from ziplime.data.data_sources.registry import (  # re-exported for convenience
-    DataProvider, MissingProviderCredentials, UnknownDataProvider, get_provider, list_providers,
-    provider_names,
-)
+from ziplime.data.data_sources.registry import get_provider, list_providers
 from ziplime.data.services.bundle_service import BundleService
 from ziplime.data.services.file_system_bundle_registry import FileSystemBundleRegistry
 
@@ -13,7 +10,8 @@ def get_asset_data_source(provider: str, **kwargs):
     """Build the reference-data source of a registered connector.
 
     Args:
-        provider: Connector name, e.g. ``"yahoo"``; see :func:`provider_names`.
+        provider: Connector name, e.g. ``"yahoo"``; see
+            :func:`ziplime.data.data_sources.registry.provider_names`.
         **kwargs: Passed to the connector's factory.
     """
     return get_provider(provider).create_asset_data_source(**kwargs)
@@ -68,9 +66,4 @@ def get_bundle_service(bundle_storage_path: str = str(Path(Path.home(), ".ziplim
     return bundle_service
 
 
-__all__ = [
-    "DataProvider", "MissingProviderCredentials", "UnknownDataProvider",
-    "get_provider", "list_providers", "provider_names",
-    "get_asset_data_source", "get_market_data_source",
-    "get_data_source", "get_fundamental_data_provider", "get_exchange", "get_bundle_service",
-]
+__all__ = ['get_asset_data_source', 'get_market_data_source', 'get_data_source', 'get_fundamental_data_provider', 'get_exchange', 'get_bundle_service', 'list_providers']

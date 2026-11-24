@@ -24,13 +24,7 @@ from ziplime.utils.date_utils import normalize_datetime, period_to_timedelta
 from ziplime.utils.data_utils import _backfill_symbol_data, backfill_sid_data
 from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.utils.calendar_utils import get_calendar
-
-
-def _asset_type_names(asset_type: AssetType | Sequence[AssetType]) -> str:
-    """Render one or several asset types for an error message."""
-    if isinstance(asset_type, AssetType):
-        return asset_type.value
-    return " / ".join(candidate.value for candidate in asset_type)
+from ziplime.data.services.bundle_type_utils import _asset_type_names
 
 
 class BundleService:

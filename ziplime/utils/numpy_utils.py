@@ -7,6 +7,8 @@ from collections.abc import Container
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
 from toolz import flip
+from ziplime.utils.numpy_errors import NoDefaultMissingValue
+
 
 bool_dtype = np.dtype("bool")
 uint8_dtype = np.dtype("uint8")
@@ -102,10 +104,6 @@ def unsigned_int_dtype_with_size_in_bytes(size: int):
         raise ValueError(
             "No unsigned integral dtype whose size is %d bytes." % size
         ) from exc
-
-
-class NoDefaultMissingValue(Exception):
-    pass
 
 
 def make_kind_check(python_types: type | tuple[type, ...], numpy_kind: str):

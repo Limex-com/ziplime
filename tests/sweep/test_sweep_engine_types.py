@@ -48,7 +48,7 @@ def test_costs_copy_to_backend_and_round_trip_for_workers(costs: Costs) -> None:
     device = costs.on(Backend("numpy"))
     restored = pickle.loads(pickle.dumps(costs))
 
-    assert type(device) is type(restored) is engine.Costs
+    assert type(device) is type(restored) is Costs
     assert device is not costs
     for field in dataclasses.fields(Costs):
         host_values = getattr(costs, field.name)
@@ -59,9 +59,10 @@ def test_costs_copy_to_backend_and_round_trip_for_workers(costs: Costs) -> None:
 
 @pytest.mark.parametrize("daily", [False, True])
 def test_windows_rediscover_prepare_and_select_history(market: Market, daily: bool) -> None:
+    from ziplime.sweep.errors import Rediscover
     windows = Windows(market, Backend("numpy"))
 
-    with pytest.raises(engine.Rediscover):
+    with pytest.raises(Rediscover):
         windows.value("close", "mean", 2, False, daily)
     windows.request("close", "mean", False, [1], daily)
     windows.prepare()
@@ -75,11 +76,12 @@ def test_windows_rediscover_prepare_and_select_history(market: Market, daily: bo
 
 
 def test_lazy_history_raises_the_legacy_rediscovery_exception(market: Market) -> None:
+    from ziplime.sweep.errors import Rediscover
     windows = Windows(market, Backend("numpy"))
     rows = lazy.leaf(None, 0, "close", 2, False, False).to_numpy()
     value = lazy.record(np.mean, (rows,))
 
-    with pytest.raises(engine.Rediscover):
+    with pytest.raises(Rediscover):
         windows.lazy.value(value)
 
 

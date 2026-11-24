@@ -12,7 +12,6 @@ Either way the best combinations are recomputed exactly (float64) and the best o
 run_simulation, and its trades compared with the sweep's.
 """
 
-import asyncio
 import concurrent.futures
 import datetime
 import importlib.util
@@ -51,7 +50,6 @@ from ziplime.utils.events import make_eventrule, time_rules, date_rules
 from ziplime.vectorized.kernel import (
     ExecutionTiming, VectorKernelError, simulate_signals, simulate_signals_batch,
 )
-from ziplime.vectorized.kernel.costs import resolve_commission, resolve_slippage
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.core.algorithm_file import AlgorithmFile
@@ -60,7 +58,7 @@ from ziplime.data.services.data_source import DataSource
 from ziplime.sweep.initialize import Combinations
 from ziplime.sweep.initialize import Initialized
 from ziplime.sweep.market import Market
-from ziplime.sweep.report import Stages
+from ziplime.sweep.stages import Stages
 from ziplime.vectorized.signals import PricePanel
 
 #: Elements (combinations × instruments) per GPU call when batch_size is "auto": the size the
@@ -106,7 +104,7 @@ async def run_sweep(params: SweepParams, base: Path, say: Callable[[str], None] 
     ``custom_data_sources`` are the sources ``context.datasets`` may name, as for run_simulation. Whether the best
     combination's trades agreed with the engine is in ``table.attrs["verified"]``.
     """
-    stages = report.Stages()
+    stages = Stages()
     started = time.perf_counter()
     combos = expand_grid(params.grid, params.where)
     algorithm, combinations = load_algorithm(params, base, combos)
@@ -159,7 +157,7 @@ async def _sweep(
         """The sweep on these bars; ``rank_only`` -- every combination's metrics and nothing
         else: no printing, no refinement, no files, no verification (a synthetic path)."""
         quiet = (lambda message: None) if rank_only else say
-        timed = report.Stages() if rank_only else stages
+        timed = Stages() if rank_only else stages
         panel, in_run = price_panel(bundle, universe, params.start_date, algorithm.warmup, quiet)
         if first.datasets:
             from ziplime.sweep.data import attach_datasets

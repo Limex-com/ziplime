@@ -31,20 +31,18 @@ import asyncclick as click
 from ziplime.assets.domain.asset_type import AssetType
 from ziplime.core.ingest_data import get_asset_service, ingest_assets, ingest_market_data
 from ziplime.core.run_simulation import run_simulation
-from ziplime.data.data_sources.registry import (
-    MissingProviderCredentials, UnknownDataProvider, list_providers, provider_names,
-)
+from ziplime.data.data_sources.provider_errors import MissingProviderCredentials, UnknownDataProvider
+from ziplime.data.data_sources.registry import list_providers, provider_names
 from ziplime.domain.data_frequency import DataFrequency
 from ziplime.errors import IncompatibleAssetDatabase
 from ziplime.finance.commission import PerShare
 from ziplime.finance.slippage.fixed_basis_points_slippage import FixedBasisPointsSlippage
-from ziplime.utils.bundle_utils import (
-    get_asset_data_source, get_bundle_service, get_market_data_source,
-)
+from ziplime.utils.bundle_utils import get_asset_data_source, get_bundle_service, get_market_data_source
 from ziplime.utils.calendar_utils import get_calendar
 from ziplime.utils.date_utils import normalize_datetime
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
+from ziplime.utils.sweep_commands import _SweepCommands
 
 #: Where bundles and the asset database live unless told otherwise.
 DEFAULT_STORAGE = Path(Path.home(), ".ziplime", "data")
@@ -470,15 +468,6 @@ async def run(
 
 
 # -- sweep -------------------------------------------------------------------------------------
-
-class _SweepCommands(click.Group):
-    """``ziplime sweep FILE`` runs FILE, as it did before ``sweep`` had subcommands."""
-
-    def resolve_command(self, ctx: click.Context, args: list[str]):
-        if args and args[0] not in self.commands and not args[0].startswith("-"):
-            args = ["run", *args]
-        return super().resolve_command(ctx, args)
-
 
 @main.group(cls=_SweepCommands)
 async def sweep():

@@ -1,22 +1,9 @@
 import datetime
-from collections.abc import Callable
-from ziplime.utils.compat import contextmanager as _contextmanager
 from ziplime.pipeline.terms.term import Term
 from ziplime.pipeline.pipeline import Pipeline
 from ziplime.pipeline.terms.computable_term import ComputableTerm
 from ziplime.pipeline.terms.loadable_term import LoadableTerm
-# Keep track of which methods of PipelineHooks are contextmanagers. Used by
-# DelegatingHooks to properly delegate to sub-hooks.
-PIPELINE_HOOKS_CONTEXT_MANAGERS = set()
-
-
-def contextmanager(f: Callable):
-    """
-    Wrapper for contextlib.contextmanager that tracks which methods of
-    PipelineHooks are contextmanagers in CONTEXT_MANAGER_METHODS.
-    """
-    PIPELINE_HOOKS_CONTEXT_MANAGERS.add(f.__name__)
-    return _contextmanager(f)
+from ziplime.pipeline.hooks.context_utils import contextmanager
 
 
 class PipelineHooks:

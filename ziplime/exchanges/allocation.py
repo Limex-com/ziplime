@@ -14,15 +14,8 @@ Pure logic, free of broker and engine imports, so both are unit-testable alone.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Iterable
-
-
-@dataclass(frozen=True)
-class Holding:
-    symbol: str
-    quantity: float
-    average_price: float
+from ziplime.exchanges.holding import Holding
 
 
 def allocated_cash(*, capital: float, holdings: Iterable[Holding]) -> float:

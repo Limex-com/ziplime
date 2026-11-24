@@ -6,9 +6,9 @@ from zoneinfo import ZoneInfo
 import polars as pl
 
 from ziplime.data.data_sources import address_schemes
-from ziplime.data.data_sources.user_datasets import (
-    CACHE, UserDatasetError, mount_user_dataset, parse_address,
-)
+from ziplime.data.data_sources.user_datasets.frame_cache import CACHE
+from ziplime.data.data_sources.user_datasets.user_dataset_error import UserDatasetError
+from ziplime.data.data_sources.user_datasets.utils import mount_user_dataset, parse_address
 from ziplime.utils.calendar_utils import get_calendar
 from tests.data.test_huggingface_datasets import make_equity
 

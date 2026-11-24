@@ -20,11 +20,11 @@ from ziplime.assets.domain.exercise_style import ExerciseStyle
 from ziplime.assets.domain.option_type import OptionType
 from ziplime.assets.domain.premium_style import PremiumStyle
 from ziplime.assets.domain.settlement_type import SettlementType
-from ziplime.data.data_sources.options.grpc_chain import (
-    GrpcChainError, GrpcOptionChainSource, _date, _decimal,
-)
+from ziplime.data.data_sources.options.grpc_chain import GrpcChainError, GrpcOptionChainSource
+from ziplime.data.data_sources.options.grpc_chain.value_utils import _date, _decimal
 from ziplime.data.data_sources.options.source import BAR_COLUMNS
-from ziplime.data.data_sources.options.venues import OptionVenue, register_venue
+from ziplime.data.data_sources.options.option_venue import OptionVenue
+from ziplime.data.data_sources.options.venues import register_venue
 
 TZ = "America/New_York"
 

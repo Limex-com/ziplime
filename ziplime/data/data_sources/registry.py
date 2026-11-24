@@ -10,17 +10,14 @@ package may import it, and discovery tolerates a connector that is not installed
 connector's package leaves a build that still ships the others.
 Third parties can add their own by advertising a ``ziplime.data_providers`` entry point.
 """
-import dataclasses
 import importlib
 import importlib.util
-import os
 import sys
-from typing import Any, Callable
 
 import structlog
+from ziplime.data.data_sources.provider_errors import UnknownDataProvider
+from ziplime.data.data_sources.data_provider import DataProvider
 
-from ziplime.data.data_sources.asset_data_source import AssetDataSource
-from ziplime.data.services.data_bundle_source import DataBundleSource
 
 _logger = structlog.get_logger(__name__)
 
@@ -32,96 +29,6 @@ BUILTIN_PROVIDER_MODULES: tuple[str, ...] = (
 
 #: Entry point group third-party connectors advertise themselves under.
 ENTRY_POINT_GROUP = "ziplime.data_providers"
-
-
-class UnknownDataProvider(LookupError):
-    """Raised when a provider name is not registered."""
-
-    def __init__(self, name: str, known: list[str]) -> None:
-        super().__init__(
-            f"Unknown data provider {name!r}. Registered providers: {known or 'none'}. "
-            f"A provider is missing if its package was removed or its dependencies are not installed."
-        )
-        self.name = name
-        self.known = known
-
-
-class MissingProviderCredentials(RuntimeError):
-    """Raised when a provider is asked for but its credentials are not configured."""
-
-    def __init__(self, provider: str, missing: tuple[str, ...]):
-        super().__init__(
-            f"Data provider {provider!r} needs these environment variables: {', '.join(missing)}."
-        )
-        self.provider = provider
-        self.missing = missing
-
-
-@dataclasses.dataclass(frozen=True)
-class DataProvider:
-    """A named connector to a market data vendor.
-
-    Attributes:
-        name: Identifier used in code, CLI options and configuration, e.g. ``"yahoo"``.
-        description: One line describing what the connector covers.
-        asset_data_source_factory: Builds the reference-data source, or ``None`` if the vendor
-            offers no instrument metadata.
-        market_data_source_factory: Builds the bar source, or ``None`` if the vendor offers no bars.
-        required_env: Environment variables that must be set before the connector can be built.
-        default_mic: Exchange this connector serves by default, when it serves exactly one.
-        default_calendar: ``exchange_calendars`` name matching ``default_mic``.
-        asset_types: Asset types the connector can describe, as
-            :class:`~ziplime.assets.domain.asset_type.AssetType` values.
-    """
-
-    name: str
-    description: str
-    asset_data_source_factory: Callable[..., AssetDataSource] | None = None
-    market_data_source_factory: Callable[..., DataBundleSource] | None = None
-    required_env: tuple[str, ...] = ()
-    default_mic: str | None = None
-    default_calendar: str | None = None
-    asset_types: tuple[str, ...] = ()
-
-    @property
-    def supports_assets(self) -> bool:
-        return self.asset_data_source_factory is not None
-
-    @property
-    def supports_market_data(self) -> bool:
-        return self.market_data_source_factory is not None
-
-    def missing_env(self) -> tuple[str, ...]:
-        """Return the required environment variables that are not set."""
-        return tuple(name for name in self.required_env if not os.environ.get(name))
-
-    @property
-    def is_configured(self) -> bool:
-        return not self.missing_env()
-
-    def _check_configured(self) -> None:
-        missing = self.missing_env()
-        if missing:
-            raise MissingProviderCredentials(self.name, missing)
-
-    def create_asset_data_source(self, **kwargs: Any) -> AssetDataSource:
-        """Build this connector's reference-data source."""
-        if self.asset_data_source_factory is None:
-            raise NotImplementedError(f"Provider {self.name!r} has no asset data source.")
-        self._check_configured()
-        return self.asset_data_source_factory(**kwargs)
-
-    def create_market_data_source(self, **kwargs: Any) -> DataBundleSource:
-        """Build this connector's bar source.
-
-        Every connector accepts an optional ``assets=[ExchangeAsset, ...]``: the listings that are
-        about to be ingested. Connectors use it to avoid per-symbol metadata lookups and to keep
-        requests inside each listing's lifetime.
-        """
-        if self.market_data_source_factory is None:
-            raise NotImplementedError(f"Provider {self.name!r} has no market data source.")
-        self._check_configured()
-        return self.market_data_source_factory(**kwargs)
 
 
 _PROVIDERS: dict[str, DataProvider] = {}

@@ -103,7 +103,7 @@ def _load_extensions() -> None:
 def _builtin_mount(scheme: str) -> Mount | None:
     """Schemes ziplime serves itself, imported only when a strategy names one."""
     if scheme == "dataset":
-        from ziplime.data.data_sources.user_datasets import mount_user_dataset
+        from ziplime.data.data_sources.user_datasets.utils import mount_user_dataset
         return mount_user_dataset
     return None
 

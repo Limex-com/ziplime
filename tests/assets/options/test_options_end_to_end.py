@@ -101,7 +101,7 @@ class OptionEndToEndTests(unittest.IsolatedAsyncioTestCase):
 
     def listing(self, session: datetime.date, strike: float,
                 option_type: OptionType):
-        from ziplime.assets.entities.option_contract import format_occ_symbol
+        from ziplime.assets.domain.option_symbols import format_occ_symbol
         return self.listings[format_occ_symbol(UNDERLYING_SYMBOL, session, option_type, strike)]
 
     def build_bundle(self, option_price: float) -> DataBundle:

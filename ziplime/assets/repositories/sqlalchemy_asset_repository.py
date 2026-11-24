@@ -32,7 +32,8 @@ from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
 from ziplime.assets.entities.split import Split
-from ziplime.assets.entities.symbol_universe import SymbolsUniverse, universe_venue
+from ziplime.assets.entities.symbols_universe import SymbolsUniverse
+from ziplime.assets.entities.symbol_universe import universe_venue
 from ziplime.assets.entities.symbols_universe_asset import SymbolsUniverseAsset
 from ziplime.assets.models.asset_router import AssetRouter
 from ziplime.assets.entities.commodity import Commodity
@@ -52,12 +53,7 @@ from ziplime.assets.models.symbols_universe import SymbolsUniverseModel
 from ziplime.assets.models.symbols_universe_asset import SymbolsUniverseAssetModel
 from ziplime.trading.models.trading_pair import TradingPair
 from ziplime.core.db.base_model import BaseModel
-from ziplime.errors import (
-    AmbiguousRootSymbol,
-    IncompatibleAssetDatabase,
-    SidsNotFound,
-    RootSymbolNotFound,
-)
+from ziplime.errors import AmbiguousRootSymbol, IncompatibleAssetDatabase, SidsNotFound, RootSymbolNotFound
 from ziplime.utils.sqlite_utils import group_into_chunks
 
 from ziplime.assets.models.exchange_info_model import ExchangeInfoModel
@@ -75,17 +71,7 @@ from ziplime.assets.domain.ordered_contracts import CHAIN_PREDICATES, OrderedCon
 from ziplime.assets.domain.continuous_future import ROLL_STYLES
 from ziplime.assets.repositories.asset_repository import AssetRepository
 from ziplime.assets.utils import _encode_continuous_future_sid, Lifetimes
-
-
-def _asset_identity(asset: Asset) -> tuple:
-    """What tells two stored assets apart before either has an id: type, ISIN and name -- and, for
-    a contract, its expiry.
-
-    Exchanges reuse contract tickers (the Moscow Exchange's ``SiH4`` is the March 2014 and the
-    March 2024 delivery) and few contracts carry an ISIN, so without the expiry both deliveries
-    resolved to one asset and the second listing was filed under the first contract.
-    """
-    return type(asset), asset.isin, asset.asset_name, getattr(asset, "expiration_date", None)
+from ziplime.assets.repositories.asset_identity import _asset_identity
 
 
 class SqlAlchemyAssetRepository(AssetRepository):

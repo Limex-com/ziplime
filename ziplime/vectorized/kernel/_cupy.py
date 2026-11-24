@@ -9,7 +9,7 @@ reads CUDA's spelling as it is. The one thing that changes there is the block, w
 wavefront -- 64 threads on AMD's compute GPUs -- rather than half of one.
 
 CUDA has double precision and this still runs in float32: the point of the backend is the same
-ranking `mlx` gives, and :meth:`~ziplime.vectorized.kernel.batch.BatchSimulationResult.rerun` is
+ranking `mlx` gives, and :meth:`~ziplime.vectorized.kernel.batch_simulation_result.BatchSimulationResult.rerun` is
 where float64 comes from on either.
 """
 from __future__ import annotations
@@ -17,7 +17,8 @@ from __future__ import annotations
 import numpy as np
 
 from ziplime.vectorized.kernel import _gpu
-from ziplime.vectorized.kernel.costs import ResolvedCommission, ResolvedSlippage
+from ziplime.vectorized.kernel.resolved_commission import ResolvedCommission
+from ziplime.vectorized.kernel.resolved_slippage import ResolvedSlippage
 from ziplime.vectorized.kernel.models import VectorKernelError
 
 try:  # pragma: no cover - depends on the platform

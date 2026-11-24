@@ -3,7 +3,7 @@ from numpy.typing import DTypeLike
 from ziplime.pipeline.data.dataset_meta import DataSetMeta
 from ziplime.pipeline.terms.bound_column import BoundColumn
 from ziplime.pipeline.terms.utils import validate_dtype
-from ziplime.utils.numpy_utils import NoDefaultMissingValue
+from ziplime.utils.numpy_errors import NoDefaultMissingValue
 
 
 class BoundColumnDescr:

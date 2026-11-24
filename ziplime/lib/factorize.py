@@ -4,6 +4,7 @@ Factorization algorithms.
 import numpy as np
 
 from ziplime.utils.numpy_utils import unsigned_int_dtype_with_size_in_bytes
+from ziplime.lib.none_first_sort_key import _NoneFirstSortKey
 
 
 def log2(d: float) -> float:
@@ -31,37 +32,6 @@ def smallest_uint_that_can_hold(maxval: int):
 #     np.uint16_t
 #     np.uint32_t
 #     np.uint64_t
-
-
-class _NoneFirstSortKey:
-    """Box to sort ``None`` to the front of the categories list.
-    """
-
-    def __init__(self, value: str | bytes | None) -> None:
-        self.value = value
-
-    def __eq__(self, other: '_NoneFirstSortKey'):
-        return self.value == other.value
-
-    def __lt__(self, other: '_NoneFirstSortKey'):
-        if self.value is None:
-            return True
-        if other.value is None:
-            return False
-        return self.value < other.value
-
-    def __gt__(self, other: '_NoneFirstSortKey'):
-        if self.value is None:
-            return False
-        if other.value is None:
-            return True
-        return self.value > other.value
-
-    def __le__(self, other: '_NoneFirstSortKey'):
-        return self < other or self == other
-
-    def __ge__(self, other: '_NoneFirstSortKey'):
-        return self > other or self == other
 
 
 def factorize_strings_known_impl(values: np.ndarray,

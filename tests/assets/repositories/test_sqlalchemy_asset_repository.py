@@ -20,7 +20,7 @@ from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.futures_root import FuturesRoot
 from ziplime.assets.entities.split import Split
 from ziplime.assets.domain.settlement_type import SettlementType
-from ziplime.assets.entities.symbol_universe import SymbolsUniverse
+from ziplime.assets.entities.symbols_universe import SymbolsUniverse
 from ziplime.assets.entities.symbols_universe_asset import SymbolsUniverseAsset
 from ziplime.core.ingest_data import get_asset_service
 from ziplime.errors import AmbiguousRootSymbol, SidsNotFound

@@ -18,9 +18,7 @@ from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.futures_contract import FuturesContract
 from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.finance.bonds import BondBook
-from ziplime.finance.margin import (
-    FuturesMarginModel, NoFuturesMarginModel, margin_currency_of,
-)
+from ziplime.finance.margin import FuturesMarginModel, NoFuturesMarginModel, margin_currency_of
 from ziplime.domain.account import Account
 from ziplime.domain.position import Position
 from ziplime.domain.portfolio import Portfolio, Positions
@@ -44,16 +42,7 @@ from ziplime.finance.monetary_valuation_service import MonetaryValuationService
 from ziplime.assets.domain.bond_event_type import BondEventType
 from ziplime.assets.entities.split import Split
 from ziplime.assets.services.asset_service import AssetService
-
-
-def _is_margined_option(instrument: Asset) -> bool:
-    """Whether ``instrument`` is an option that settles variation margin rather than a premium.
-
-    A free function rather than a method because three separate places have to agree on it -- the
-    cash flow at a trade, the value of the position, and the margin it ties up -- and a
-    disagreement between any two of them double-counts or loses the position entirely.
-    """
-    return isinstance(instrument, OptionContract) and instrument.premium_style.is_margined
+from ziplime.finance.domain.option_margin_utils import _is_margined_option
 
 
 class Ledger:
@@ -295,8 +284,11 @@ class Ledger:
             matched = min(abs(quantity), abs(lot.quantity))
             direction = math.copysign(1.0, lot.quantity)
             fraction = matched / abs(lot.quantity)
-            self._add_total("realized", key, (transaction.dt, transaction.asset.quote.asset_name,
-                                            direction * matched * transaction.native_unit_value))
+            self._add_total(
+                "realized", key,
+                (transaction.dt, transaction.asset.quote.asset_name,
+                 direction * matched * transaction.native_unit_value),
+            )
             for stamp, currency, amount in lot.costs:
                 self._add_total("realized", key, (stamp, currency, -amount * fraction))
             lot.costs = [(stamp, currency, amount * (1 - fraction)) for stamp, currency, amount in lot.costs]
@@ -452,7 +444,9 @@ class Ledger:
         if self.position_tracker.get_position_list() and reporting.investment_history is None:
             raise ValueError("Opening positions require historical investment events; average cost is not enough.")
         candidate = Ledger(self.daily_returns_series.index, self._data_frequency, bond_book=self.bond_book)
-        candidate._monetary_valuation = MonetaryValuationService(conversion=reporting.conversion, bond_book=self.bond_book)
+        candidate._monetary_valuation = MonetaryValuationService(
+            conversion=reporting.conversion, bond_book=self.bond_book,
+        )
         candidate.enable_currency_reporting(reporting.base_currency, dt, reporting.conversion)
         candidate.native_currency_accounting = True
         candidate._investment_base = reporting.base_currency
@@ -467,7 +461,9 @@ class Ledger:
                 raise ValueError("Opening income entitlements must be historical income events.")
         else:
             for key, amount in opening_cash.items():
-                candidate.record_cash(CashEvent(id="opening", dt=dt, key=key, amount=amount, kind=CashEventKind.OPENING))
+                candidate.record_cash(CashEvent(
+                    id="opening", dt=dt, key=key, amount=amount, kind=CashEventKind.OPENING,
+                ))
         marks = self._position_marks()
         self._reconcile_quantities(candidate.investment_quantities)
         snapshot = candidate.investment_snapshot(reporting.base_currency, dt, marks=marks)
@@ -762,8 +758,12 @@ class Ledger:
             executions are excluded; deposits remain at historical contribution FX.
             Missing/stale event-time FX raises ``ValueError``.
         """
-        return sum(event.amount * self._monetary_valuation.conversion.rate(base=event.key[2], quote=currency, dt=event.dt)
-                   for event in self._cash_events.values() if event.dt <= dt and event.kind == CashEventKind.EXTERNAL)
+        return sum(
+            event.amount * self._monetary_valuation.conversion.rate(
+                base=event.key[2], quote=currency, dt=event.dt,
+            )
+            for event in self._cash_events.values() if event.dt <= dt and event.kind == CashEventKind.EXTERNAL
+        )
 
     def exchange_cash(
             self, identity: str, dt: datetime.datetime, exchange: str, account: str,
@@ -997,8 +997,10 @@ class Ledger:
         if self.native_currency_accounting:
             self._dirty_portfolio = True
             try:
-                rate = (self._currency_conversion.rate(base=currency, quote=self._investment_base, dt=self._reporting_dt)
-                        if currency is not None else 1.0)
+                rate = (
+                    self._currency_conversion.rate(base=currency, quote=self._investment_base, dt=self._reporting_dt)
+                    if currency is not None else 1.0
+                )
                 self._portfolio.cash += amount * rate
                 self._portfolio.cash_flow = self.reporting_cash_flow(self._investment_base)
             except ValueError:
@@ -1098,9 +1100,12 @@ class Ledger:
             # buyer additionally hands the seller the coupon accrued since the last payment. Both
             # corrections are needed -- the first is a factor of ten on a 1000 nominal, the second
             # averages half a coupon on every round trip.
-            self._cash_flow(amount=-(self.bond_price_in_money(asset=asset, quoted_price=transaction.price,
-                                                       dt=transaction.dt) * transaction.amount),
-                            currency=asset.quote.asset_name)
+            self._cash_flow(
+                amount=-(self.bond_price_in_money(
+                    asset=asset, quoted_price=transaction.price, dt=transaction.dt,
+                ) * transaction.amount),
+                currency=asset.quote.asset_name,
+            )
         elif isinstance(asset.asset, OptionContract):
             # A premium-paid option. The premium is quoted per unit of the underlying and one
             # contract covers `multiplier` of them, so buying one 1.20 call costs 120, not 1.20 --

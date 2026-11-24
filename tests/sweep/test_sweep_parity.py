@@ -406,6 +406,7 @@ class GpuAgreesWithExactTests(SweepParityCase):
         await self.assert_signals_kernel_agrees(GPU)
 
     async def test_gpu_matches_exact(self):
+        from ziplime.sweep.engine.simulation import _Simulation
         listings = [await self.listing(s) for s in ("JNJ@XNYS", "KO@XNYS", "PG@XNYS")]
         bundle = self.bundle(listings, seed=9)
         wide = self.bundle(listings + [await self.listing("XOM@XNYS")], seed=17)
@@ -429,7 +430,7 @@ class GpuAgreesWithExactTests(SweepParityCase):
         # notices and the batch runs plain
         from ziplime.sweep import engine
         plain_again = []
-        original = engine._Simulation.go
+        original = _Simulation.go
 
         def go(simulation, compiled):
             try:
@@ -437,13 +438,13 @@ class GpuAgreesWithExactTests(SweepParityCase):
             except engine.RunPlain:
                 plain_again.append(True)
                 raise
-        engine._Simulation.go = go
+        _Simulation.go = go
         try:
             grid = {"window": [5, 10]}
             exact = (await self.sweep("history_varying.py", grid, bundle)).sort_index()
             gpu = (await self.sweep("history_varying.py", grid, bundle, backend=GPU)).sort_index()
         finally:
-            engine._Simulation.go = original
+            _Simulation.go = original
         if compiles():
             self.assertTrue(plain_again, "the compiled run did not notice the changed parameter")
         np.testing.assert_array_equal(gpu["fills"].to_numpy(), exact["fills"].to_numpy())

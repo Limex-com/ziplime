@@ -14,7 +14,6 @@ import asyncio
 import datetime
 import hashlib
 import logging
-import math
 import os
 import re
 from collections import defaultdict
@@ -62,7 +61,8 @@ from ziplime.finance.execution import LimitOrder, MarketOrder
 from ziplime.finance.slippage.no_slippage import NoSlippage
 from ziplime.gens.domain.trading_clock import TradingClock
 
-from ziplime.exchanges.allocation import Holding, allocated_cash, round_to_lots
+from ziplime.exchanges.holding import Holding
+from ziplime.exchanges.allocation import allocated_cash, round_to_lots
 
 
 _DEFAULT_US_MICS = ("XNGS", "XNYS", "XNMS", "ARCX", "BATS", "_BNCC")

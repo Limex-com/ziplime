@@ -18,10 +18,7 @@ from ziplime.pipeline.data import BoundColumn
 from ziplime.pipeline import Filter, Factor, Classifier, Term
 from ziplime.pipeline.graph import TermGraph
 from ziplime.pipeline.terms.asset_exists import AssetExists
-
-
-class NoIPython(Exception):
-    pass
+from ziplime.pipeline.errors.no_ipython import NoIPython
 
 
 def delimit(delimiters: str, content: str) -> str:

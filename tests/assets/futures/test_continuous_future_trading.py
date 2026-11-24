@@ -13,7 +13,8 @@ import unittest
 from tests.futures_fixtures import make_bundle, make_future, session
 
 from ziplime.domain.portfolio import Portfolio
-from ziplime.trading.trading_algorithm import TradingAlgorithm, _resolves_continuous_future
+from ziplime.trading.trading_algorithm import TradingAlgorithm
+from ziplime.trading.algorithm_utils import _resolves_continuous_future
 
 SESSIONS = [datetime.date(2023, 6, d) for d in (5, 6, 7, 8, 9, 12, 13, 14, 15, 16)]
 

@@ -24,7 +24,7 @@ from tests.options_fixtures import (
 
 from ziplime.assets.domain.exercise_style import ExerciseStyle
 from ziplime.assets.domain.option_type import OptionType
-from ziplime.assets.entities.option_contract import format_occ_symbol, parse_occ_symbol
+from ziplime.assets.domain.option_symbols import format_occ_symbol, parse_occ_symbol
 from ziplime.finance.options import strategies as option_strategies
 from ziplime.finance.options.chain import OptionChain
 from ziplime.finance.options.greeks import (
@@ -733,7 +733,7 @@ def native_named_venue(name: str = "XTST"):
     """
     from ziplime.assets.domain.premium_style import PremiumStyle
     from ziplime.assets.domain.settlement_type import SettlementType
-    from ziplime.data.data_sources.options.venues import OptionVenue
+    from ziplime.data.data_sources.options.option_venue import OptionVenue
 
     def native_name(root: str, strike: float, option_type: OptionType,
                     expiration_date: datetime.date) -> str:

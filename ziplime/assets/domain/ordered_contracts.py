@@ -5,22 +5,11 @@ import datetime
 from functools import partial
 
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
+from ziplime.assets.domain.contract_predicates import delivery_predicate
+
 
 #: Adjustment styles a continuous future may use to splice prices across a roll.
 ADJUSTMENT_STYLES = {'add', 'mul', None}
-
-
-def delivery_predicate(codes: set[str], contract: ExchangeAsset) -> bool:
-    """True when the contract's delivery month code is one of ``codes``.
-
-    Venues encode the delivery month as the character before the
-    year digits, so the code is read from the end of the ticker rather than a fixed offset.
-    """
-    symbol = contract.symbol
-    for tail in (2, 3):
-        if len(symbol) > tail and symbol[-tail].isalpha() and symbol[-(tail - 1):].isdigit():
-            return symbol[-tail] in codes
-    return False
 
 
 march_cycle_delivery_predicate = partial(delivery_predicate, set(['H', 'M', 'U', 'Z']))

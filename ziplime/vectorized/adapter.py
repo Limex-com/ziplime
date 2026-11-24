@@ -59,6 +59,9 @@ from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmE
 from ziplime.trading.currency_results import currency_performance
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.exchanges.exchange import Exchange
+from ziplime.vectorized.reconciliation_error import ReconciliationError
+from ziplime.vectorized.vectorized_run import VectorizedRun
+
 
 _logger = structlog.get_logger(__name__)
 
@@ -66,60 +69,6 @@ _logger = structlog.get_logger(__name__)
 #: fraction of starting capital. A cent on a hundred thousand. Anything looser hides a systematic
 #: difference -- a fee convention, a missing trade -- inside what looks like rounding.
 DEFAULT_TOLERANCE = 1e-7
-
-
-class ReconciliationError(ValueError):
-    """The replayed ledger and the source's own value series disagree about the same trades.
-
-    One of the two is wrong, and which one is not knowable from here. Raised rather than warned:
-    a hybrid backtester whose two halves disagree silently is worse than one that only has a
-    single half, because it invites comparisons that mean nothing.
-    """
-
-    def __init__(
-        self,
-        session: datetime.date | datetime.datetime,
-        replayed: float,
-        reported: float,
-        tolerance: float,
-    ) -> None:
-        super().__init__(
-            f"On {session} the replayed ledger holds {replayed:,.6f} but the source reports "
-            f"{reported:,.6f} -- a difference of {abs(replayed - reported):,.6f}, beyond the "
-            f"{tolerance:g} tolerance.\n"
-            f"Three things cause this, in the order they are worth checking: the exchange's "
-            f"starting cash differs from the starting cash the fills were decided under; "
-            f"`prices` is not the series the source valued the book with, so the positions are "
-            f"marked at something else; or the source holds more than one book and the wrong one "
-            f"is being compared."
-        )
-        self.session = session
-        self.replayed = replayed
-        self.reported = reported
-
-
-@dataclasses.dataclass
-class VectorizedRun:
-    """Stands where a :class:`TradingAlgorithm` would, for a run that never had one.
-
-    A vectorised run has no algorithm object -- no ``initialize``, no ``handle_data``, no context.
-    What it does have is the ledger the replay built and the portfolio vectorbt produced, and this
-    carries both so that code reading ``result.trading_algorithm.portfolio`` keeps working.
-    """
-
-    ledger: Ledger
-    #: The ``vectorbt.Portfolio`` this was replayed from, kept so the vectorised side stays
-    #: reachable: its parameter sweep, its trade records, its plots.
-    source: object = None
-
-    @property
-    def portfolio(self):
-        return self.ledger.portfolio
-
-    @property
-    def _ledger(self) -> Ledger:
-        """The ledger, under the name :class:`TradingAlgorithm` exposes it by."""
-        return self.ledger
 
 
 def _orders_frame(portfolio) -> pd.DataFrame:

@@ -123,7 +123,7 @@ def test_an_algorithm_that_only_schedules_needs_no_handle_data(tmp_path: Path):
     and the run died on the first bar.
     """
     script = tmp_path / "algo.py"
-    script.write_text("from ziplime.utils.events import date_rules\n"
+    script.write_text("from ziplime.utils.events.date_rule_factories import date_rules\n"
                       "async def initialize(context):\n"
                       "    context.schedule_function(rebalance, date_rules.month_start())\n"
                       "async def rebalance(context, data):\n"

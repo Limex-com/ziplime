@@ -8,7 +8,9 @@ from pathlib import Path
 import numpy as np
 
 from ziplime.sweep.check import foreign_calls, problems
-from ziplime.sweep.convert import NotConvertible, VectorUniverse, context_writes, convert
+from ziplime.sweep.errors import NotConvertible
+from ziplime.sweep.vectorized_containers import VectorUniverse
+from ziplime.sweep.convert import context_writes, convert
 
 import importlib.util
 
@@ -29,7 +31,7 @@ YS = np.array([1.0, 0.0, 2.0, 1.0, 3.0, np.nan, 0.5])
 
 
 def run_converted(hook, x, y):
-    from ziplime.sweep.convert import ALL
+    from ziplime.sweep.all_assets import ALL
 
     call = convert(hook).bind(np)
     type(ALL)._columns = (["A", "B"], [1, 2], np.array)
@@ -148,7 +150,8 @@ class AnalysisTests(unittest.TestCase):
                 self.assertEqual(foreign_calls([getattr(CONSTRUCTS, name)], {}), [])
 
     def test_dict_comprehension_over_instruments_keeps_its_condition(self):
-        from ziplime.sweep.convert import ALL, Runtime
+        from ziplime.sweep.all_assets import ALL
+        from ziplime.sweep.convert import Runtime
 
         async def hook(context, data):
             values = {name: context.x for name, asset in context.universe.items()}

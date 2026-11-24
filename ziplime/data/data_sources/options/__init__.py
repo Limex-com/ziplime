@@ -20,9 +20,8 @@ from ziplime.data.data_sources.options.source import (
     BAR_COLUMNS, ContractSpec, OptionChainSource,
 )
 from ziplime.data.data_sources.options.surface import AtmVolatilityModel, VolatilitySurface
-from ziplime.data.data_sources.options.venues import (
-    OPRA, VENUES, OptionVenue, get_venue, register_venue,
-)
+from ziplime.data.data_sources.options.venues import OPRA, VENUES, get_venue, register_venue
+from ziplime.data.data_sources.options.option_venue import OptionVenue
 from ziplime.data.data_sources.options.synthetic import (
     SYNTHETIC_DATA_WARNING, ChainSpec, LiquidityModel, SyntheticDataPerformanceClaim,
     SyntheticOptionChainSource, refuse_performance_claims,

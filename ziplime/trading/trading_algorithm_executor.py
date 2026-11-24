@@ -7,7 +7,7 @@ from logging import Logger
 from ziplime.trading.trading_algorithm import TradingAlgorithm
 from ziplime.trading.trading_algorithm_execution_result import TradingAlgorithmExecutionResult
 from ziplime.trading.trading_algorithm_execution_status import TradingAlgorithmExecutionStatus
-from ziplime.utils.api_support import ZiplineAPI
+from ziplime.utils.zipline_api import ZiplineAPI
 from ziplime.trading.currency_results import currency_performance
 
 

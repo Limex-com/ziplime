@@ -10,7 +10,7 @@ import unittest
 import numpy as np
 
 from ziplime.sweep import lazy
-from ziplime.sweep.convert import ALL
+from ziplime.sweep.all_assets import ALL
 from ziplime.sweep.market import HistoryRows
 
 try:
@@ -53,6 +53,7 @@ def inputs_of(name):
 def last_value(function, length, k=None, column=ALL, output=None, **options):
     """``talib.<function>(rows..., **options)[-1]`` -- ``[output][-1]`` for one of several
     outputs -- over windows of the fields it reads, as a record's key and params."""
+    from ziplime.sweep.lazy.template import _Template
     windows = []
     for field in inputs_of(function.__name__):
         rows = lazy.leaf(None, column, field, length, False, False).to_numpy()
@@ -60,7 +61,7 @@ def last_value(function, length, k=None, column=ALL, output=None, **options):
     value = lazy.record(function, tuple(windows), options)
     if output is not None:
         value = value[output]
-    template = lazy._Template(value[-1])
+    template = _Template(value[-1])
     return template.key, tuple(template.params)
 
 
@@ -103,12 +104,13 @@ class WholeHistoryTests(unittest.TestCase):
             self.assertIsNone(lazy.fast_series(key, params, data, [0, 1]), function.__name__)
 
     def test_arithmetic_on_them(self):
+        from ziplime.sweep.lazy.template import _Template
         data = market()
         first = lazy.leaf(None, 0, "close", 60, False, False).to_numpy()
         second = lazy.leaf(None, 1, "close", 30, False, False).to_numpy()
         roc = lambda rows: lazy.record(talib.ROC, (rows,), {"timeperiod": 20})[-1]  # noqa: E731
         value = (roc(first) - roc(second) - 1.5) / abs(roc(second)) * 100
-        key = lazy._Template(value).key
+        key = _Template(value).key
         fast = lazy.fast_series(key, (), data, [0])
         np.testing.assert_allclose(fast, replayed(key, (), data)[:, :1], equal_nan=True)
 
@@ -117,10 +119,11 @@ class WholeHistoryTests(unittest.TestCase):
         self.assertIsNone(lazy.fast_series(key, params, market(gap_at=100), [0, 1]))
 
     def test_a_parameter_of_the_config(self):
+        from ziplime.sweep.lazy.template import _Template
         data = market()
         rows = lazy.leaf(None, ALL, "close", 90, False, False).to_numpy()
         period = np.array([[14.0], [30.0]])  # a config field: one value per combination
-        template = lazy._Template(lazy.record(talib.ROC, (rows,), {"timeperiod": period})[-1])
+        template = _Template(lazy.record(talib.ROC, (rows,), {"timeperiod": period})[-1])
         for value in (14, 30):
             fast = lazy.fast_series(template.key, (value,), data, [0, 1])
             np.testing.assert_allclose(fast, replayed(template.key, (value,), data),
@@ -129,6 +132,7 @@ class WholeHistoryTests(unittest.TestCase):
 
 class RowOfWindowTests(unittest.TestCase):
     def test_a_row_of_the_window_by_index(self):
+        from ziplime.sweep.lazy.template import _Template
         data = market(gap_at=100)  # a NaN row is read as it is, not carried
         for length, k, position in ((60, None, -1), (60, None, 0), (60, 20, 0), (60, 20, -3),
                                     (12, 40, 5), (12, None, 11), (12, None, 12), (8, None, -9)):
@@ -136,7 +140,7 @@ class RowOfWindowTests(unittest.TestCase):
                 rows = lazy.leaf(None, ALL, "close", length, False, False).to_numpy()
                 if k is not None:
                     rows = rows[-k:]
-                key = lazy._Template(rows[position]).key
+                key = _Template(rows[position]).key
                 fast = lazy.fast_series(key, (), data, [0, 1])
                 self.assertIsNotNone(fast)
                 np.testing.assert_array_equal(fast, replayed(key, (), data))
@@ -154,14 +158,15 @@ class ExplainTests(unittest.TestCase):
         self.assertIn("level changes nothing", found[0])
 
     def test_a_computation_that_is_nan_at_every_bar(self):
+        from ziplime.sweep.lazy.template import _Template
         from ziplime.sweep import explain
-        from ziplime.sweep.engine import Windows
+        from ziplime.sweep.windows import Windows
 
         data = market()
         windows = Windows(data, None)
         rows = lazy.leaf(None, 0, "close", 30, False, False).to_numpy()
-        dead = lazy._Template(lazy.record(np.mean, (rows[-31:],))).key   # fine
-        nan = lazy._Template(rows[40]).key                                # 30 rows: no [40]
+        dead = _Template(lazy.record(np.mean, (rows[-31:],))).key   # fine
+        nan = _Template(rows[40]).key                                # 30 rows: no [40]
         for n, key in enumerate((dead, nan)):
             windows.lazy.records[key] = (f"lazy{n}", None, False)
             windows.lazy.where[f"lazy{n}"] = f"strategy.py, line {10 + n}"
@@ -175,6 +180,8 @@ class ExplainTests(unittest.TestCase):
 @unittest.skipIf(talib is None, "needs TA-Lib")
 class ReplayTests(unittest.TestCase):
     def test_a_process_of_its_own_replays_the_same(self):
+        from ziplime.sweep.lazy.worker_utils import _start_worker
+        from ziplime.sweep.lazy.worker_utils import _replay_job
         data = market()
         key, params = last_value(talib.RSI, 60, timeperiod=14)
         # _start_worker marks its process as a worker; this one is not
@@ -183,22 +190,24 @@ class ReplayTests(unittest.TestCase):
                         if previous is None else
                         __import__("os").environ.__setitem__("ZIPLIME_SWEEP_REPLAY_WORKERS",
                                                              previous))
-        lazy._start_worker(dict(rows=data.rows, history_end=data.history_end,
+        _start_worker(dict(rows=data.rows, history_end=data.history_end,
                                 history_end_before=data.history_end_before,
                                 row_days=data.row_days, n_bars=data.n_bars))
-        np.testing.assert_array_equal(lazy._replay_job((key, params, [0, 1])),
+        np.testing.assert_array_equal(_replay_job((key, params, [0, 1])),
                                       replayed(key, params, data))
 
     def test_the_compiled_record_matches_the_walked_one(self):
+        from ziplime.sweep.lazy.template import _Template
+        from ziplime.sweep.lazy.replay_utils import _real
         data = market()
         rows = HistoryRows(data)
         p = lazy.leaf(None, 0, "close", 60, False, False).to_numpy()
         value = (lazy.record(np.std, (lazy.record(np.diff, (p[-20:],)) / p[-20:-1],)) * 100)
-        key = lazy._Template(value).key
+        key = _Template(value).key
         plan = lazy.compile_plan(key, rows)
         for t in (0, 5, 61, 200, BARS - 1):
             walked = lazy.replay(value, rows, t, 0, ())
-            compiled = lazy._real(plan(t, 0, ()))
+            compiled = _real(plan(t, 0, ()))
             if np.isnan(walked):
                 self.assertTrue(np.isnan(compiled))
             else:

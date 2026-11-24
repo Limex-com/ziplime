@@ -29,10 +29,16 @@ from ziplime.data.data_sources.huggingface.huggingface_data_source import (
     HuggingFaceDataSource, is_address, parse_address,
 )
 from ziplime.data.data_sources.huggingface.manifest import (
-    EVENT_DATE_COLUMNS, KNOWLEDGE_DATE_COLUMNS, ConfigSpec, ManifestError,
-    NoKnowledgeDateError, _glob_matches, parse_manifest, resolve_entity_column,
+    EVENT_DATE_COLUMNS,
+    KNOWLEDGE_DATE_COLUMNS,
+    ConfigSpec,
+    ManifestError,
+    NoKnowledgeDateError,
+    parse_manifest,
+    resolve_entity_column,
     resolve_knowledge_column,
 )
+from ziplime.data.data_sources.huggingface.manifest.matching_utils import _glob_matches
 from ziplime.utils.calendar_utils import get_calendar
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "huggingface"
@@ -356,9 +362,7 @@ class TimestampNormalisationTests(unittest.TestCase):
     """Whatever a publisher stamped, the mounted column is one comparable instant."""
 
     def normalise(self, frame: pl.DataFrame, zone: str = "UTC") -> pl.Series:
-        from ziplime.data.data_sources.huggingface.huggingface_data_source import (
-            _to_session_time,
-        )
+        from ziplime.data.data_sources.huggingface.huggingface_data_source.time_utils import _to_session_time
         return frame.select(_to_session_time("d", frame.schema["d"], zone).alias("x"))["x"]
 
     def test_a_plain_date_becomes_midnight(self):
@@ -388,9 +392,7 @@ class TimestampNormalisationTests(unittest.TestCase):
                          datetime.datetime(2024, 1, 2, 20, 30, tzinfo=datetime.timezone.utc))
 
     def test_a_column_that_is_not_a_time_is_refused(self):
-        from ziplime.data.data_sources.huggingface.huggingface_data_source import (
-            _to_session_time,
-        )
+        from ziplime.data.data_sources.huggingface.huggingface_data_source.time_utils import _to_session_time
         with self.assertRaises(ManifestError):
             _to_session_time("d", pl.Utf8, "UTC")
 

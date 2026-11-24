@@ -193,6 +193,7 @@ class MarginModelTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("MARGIN", NO_MARGIN_MODEL_WARNING)
 
     async def test_the_warning_fires_once_when_futures_are_traded(self):
+        from ziplime.finance.margin.support import _logger
         from ziplime.finance.margin import NoFuturesMarginModel
         model = NoFuturesMarginModel()
         ledger = make_ledger()
@@ -208,14 +209,13 @@ class MarginModelTests(unittest.IsolatedAsyncioTestCase):
         # And the real implementation only emits once.
         real = NoFuturesMarginModel()
         emitted = []
-        import ziplime.finance.margin as margin_module
-        original = margin_module._logger.warning
-        margin_module._logger.warning = lambda *a, **k: emitted.append(a)
+        original = _logger.warning
+        _logger.warning = lambda *a, **k: emitted.append(a)
         try:
             real.warn_once()
             real.warn_once()
         finally:
-            margin_module._logger.warning = original
+            _logger.warning = original
         self.assertEqual(len(emitted), 1)
 
     async def test_an_equity_only_backtest_does_not_warn(self):

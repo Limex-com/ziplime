@@ -362,7 +362,7 @@ class MinuteBarTests(VectorizedTestCase):
         """The replay revalues the book only where the result is read, which is most of its speed.
         The check that the two engines still agree has to survive that."""
         from ziplime.vectorized import to_execution_result
-        from ziplime.vectorized.adapter import ReconciliationError
+        from ziplime.vectorized.reconciliation_error import ReconciliationError
 
         with self.assertRaises(ReconciliationError):
             await to_execution_result(
@@ -381,7 +381,8 @@ class MinuteBarTests(VectorizedTestCase):
         where the two sides agree again -- which is exactly the hole this guards.
         """
         from ziplime.vectorized import adapter
-        from ziplime.vectorized.adapter import ReconciliationError, _session_boundaries
+        from ziplime.vectorized.reconciliation_error import ReconciliationError
+        from ziplime.vectorized.adapter import _session_boundaries
 
         portfolio = self.minute_portfolio()
         _, closing = _session_boundaries(self.minutes)
@@ -458,7 +459,7 @@ class InstrumentTests(VectorizedTestCase):
     async def test_it_is_refused_before_anything_is_replayed(self):
         """Not as a reconciliation failure several hundred bars in, where the message would name
         starting cash and price series and send the author somewhere else entirely."""
-        from ziplime.vectorized.adapter import ReconciliationError
+        from ziplime.vectorized.reconciliation_error import ReconciliationError
 
         with self.assertRaises(ValueError) as raised:
             await self.convert_listing(self.futures_listing())
