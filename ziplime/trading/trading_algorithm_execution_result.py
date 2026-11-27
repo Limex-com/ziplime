@@ -27,6 +27,9 @@ class TradingAlgorithmExecutionResult:
         totals; arbitrary recorded variables and raw execution units stay native.
     risk_report_by_currency : dict[str, dict[str, Any]]
         Independently computed risk packets by reporting currency, or an empty mapping.
+    strategies : dict[str, TradingAlgorithmExecutionResult]
+        For a metastrategy, the result of every strategy it ran (``context.strategy``), by label
+        -- each the result that strategy would have had run alone. Empty otherwise.
     """
 
     trading_algorithm: TradingAlgorithm
@@ -35,3 +38,4 @@ class TradingAlgorithmExecutionResult:
     errors: list[str]
     perf_by_currency: dict[str, pd.DataFrame] = field(default_factory=dict)
     risk_report_by_currency: dict[str, dict[str, Any]] = field(default_factory=dict)
+    strategies: dict[str, "TradingAlgorithmExecutionResult"] = field(default_factory=dict)

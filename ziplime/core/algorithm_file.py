@@ -10,7 +10,8 @@ from ziplime.config.base_algorithm_config import BaseAlgorithmConfig
 class AlgorithmFile:
 
     def __init__(self, algorithm_file: str, algorithm_config_file: str | None = None,
-                 logger: logging.Logger = structlog.get_logger(__name__)) -> None:
+                 logger: logging.Logger = structlog.get_logger(__name__),
+                 config: dict | None = None) -> None:
         """
         Initializes the algorithm environment by loading the specified algorithm script and its optional
         configuration file. The module is dynamically imported and expected functions are retrieved
@@ -19,6 +20,9 @@ class AlgorithmFile:
         Args:
             algorithm_file (str): Path to the file containing the algorithm script to be executed.
             algorithm_config_file (str | None): Path to the configuration file for the algorithm, optional.
+            config (dict | None): The configuration itself, validated by the script's config class --
+                what a metastrategy passes for each strategy it runs (``context.strategy``), one
+                dict per combination of a parameter grid. Takes the place of the file.
 
         Raises:
             Exception: If the specified module cannot be found or loaded.
@@ -59,6 +63,8 @@ class AlgorithmFile:
 
         with open(algorithm_file, "r", encoding="utf-8") as f:
             self.algorithm_text = f.read()
+        #: Where the script is: a metastrategy finds the strategies it names next to it.
+        self.algorithm_file = algorithm_file
 
         module_name = "ziplime.ziplime_algorithm"  # TODO: check if we need to modify this
         spec = importlib.util.spec_from_file_location(module_name, algorithm_file)
@@ -92,6 +98,11 @@ class AlgorithmFile:
                 if issubclass(obj, BaseAlgorithmConfig) and obj != BaseAlgorithmConfig:
                     custom_config_class = obj
                     break
+        #: The script's own config class, or None -- what ``config`` and grids are checked against.
+        self.config_class = custom_config_class
+        if config is not None:
+            self.config = (custom_config_class or BaseAlgorithmConfig).model_validate(config)
+            return
         if algorithm_config_file is None or custom_config_class is None:
             custom_config_class = BaseAlgorithmConfig
         if algorithm_config_file is None and custom_config_class is not None:

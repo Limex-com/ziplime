@@ -63,6 +63,7 @@ class TradingAlgorithmExecutor:
             errors=errors,
             perf_by_currency=perf_by_currency,
             risk_report_by_currency=risk_report.get("risk_report_by_currency", {}),
+            strategies=trading_algorithm.strategy_results(),
         )
 
     async def run_algorithm_iter(self, trading_algorithm: TradingAlgorithm) -> AsyncIterator[
@@ -109,6 +110,7 @@ class TradingAlgorithmExecutor:
             errors=errors,
             perf_by_currency=perf_by_currency,
             risk_report_by_currency=risk_report.get("risk_report_by_currency", {}),
+            strategies=trading_algorithm.strategy_results(),
         )
         yield status
 
