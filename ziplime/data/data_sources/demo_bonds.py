@@ -30,7 +30,6 @@ something to react to, and reproducible so a test can assert on the result.
 import datetime
 import math
 import zlib
-from dataclasses import dataclass
 
 import polars as pl
 
@@ -44,6 +43,8 @@ from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
 from ziplime.finance.bonds import coupon_schedule
+from ziplime.data.data_sources.demo_bond_spec import DemoBondSpec
+
 
 FAR_PAST = datetime.date(1900, 1, 1)
 FAR_FUTURE = datetime.date(2099, 1, 1)
@@ -56,26 +57,6 @@ DEMO_CURRENCY = "USD"
 
 #: Coupons are paid to whoever holds the bond at the close of this many days before payment.
 RECORD_DATE_LAG = datetime.timedelta(days=1)
-
-
-@dataclass(frozen=True)
-class DemoBondSpec:
-    """The terms of one demo issue, and what it is there to demonstrate."""
-
-    ticker: str
-    name: str
-    description: str
-    issue_date: datetime.date
-    maturity_date: datetime.date
-    face_value: float = 1000.0
-    coupon_rate: float = 0.0
-    coupon_frequency: int = 0
-    #: ``[(date, principal repaid per bond), ...]``, oldest first.
-    amortizations: tuple[tuple[datetime.date, float], ...] = ()
-    #: Date of a put window, if the issue has one.
-    offer_date: datetime.date | None = None
-    #: Clean price the generated series starts at, as a percentage of face value.
-    initial_price: float = 100.0
 
 
 #: The universe. Dates are chosen so that every issue is alive across 2023-2026 and at least one

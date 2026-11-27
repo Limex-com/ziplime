@@ -1,8 +1,7 @@
 import numpy as np
-import pytest
 
+from ziplime.lib.none_first_sort_key import _NoneFirstSortKey
 from ziplime.lib.factorize import (
-    _NoneFirstSortKey,
     factorize_strings,
     factorize_strings_known_categories,
     log2,

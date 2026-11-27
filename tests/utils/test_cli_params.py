@@ -3,7 +3,8 @@ from zoneinfo import ZoneInfo
 import pytest
 import asyncclick as click
 
-from ziplime.utils.cli import Date, Timestamp, _DatetimeParam
+from ziplime.utils.cli import Date, Timestamp
+from ziplime.utils.cli.datetime_param import _DatetimeParam
 
 
 def test_datetime_param_convert():

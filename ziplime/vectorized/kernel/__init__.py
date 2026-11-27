@@ -22,9 +22,12 @@ A parameter sweep runs many signal sets through the same decisions:
 float64 or all of them at once on a GPU: Apple through MLX (``backend="mlx"``), NVIDIA through
 CuPy (``backend="cupy"``), any other with an OpenCL driver through PyOpenCL (``backend="opencl"``).
 """
-from .batch import BatchSimulationResult, simulate_signals_batch
-from .comparison import ExecutionComparison, compare_execution_results
-from .costs import ResolvedSlippage, resolve_commission, resolve_slippage
+from ziplime.vectorized.kernel.batch_simulation_result import BatchSimulationResult
+from ziplime.vectorized.kernel.batch import simulate_signals_batch
+from ziplime.vectorized.kernel.execution_comparison import ExecutionComparison
+from ziplime.vectorized.kernel.comparison import compare_execution_results
+from ziplime.vectorized.kernel.resolved_slippage import ResolvedSlippage
+from ziplime.vectorized.kernel.costs import resolve_commission, resolve_slippage
 from .models import (
     VECTOR_KERNEL_VERSION, ExecutionTiming, VectorFill, VectorKernelError, VectorPortfolio,
     VectorReject, VectorSimulationResult,

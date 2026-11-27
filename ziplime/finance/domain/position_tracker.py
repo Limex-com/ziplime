@@ -24,10 +24,8 @@ from ziplime.finance.domain.investment_event import InvestmentEvent, InvestmentK
 from ziplime.finance.domain.investment_event_kind import InvestmentEventKind
 from ziplime.finance.domain.position import Position
 from ziplime.finance.domain.transaction import Transaction
-from ziplime.finance.finance_ext import (
-    PositionStats,
-    calculate_position_tracker_stats
-)
+from ziplime.finance.position_stats import PositionStats
+from ziplime.finance.finance_ext import calculate_position_tracker_stats
 from ziplime.assets.entities.split import Split
 from ziplime.assets.entities.stock_dividend_payout import StockDividendPayout
 

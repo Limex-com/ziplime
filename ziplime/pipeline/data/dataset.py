@@ -1,5 +1,4 @@
 from ziplime.pipeline.data.bound_column_descr import BoundColumnDescr
-from ziplime.pipeline.data.currency_conversion import CurrencyConversion  # noqa: F401 - public compatibility export
 from ziplime.pipeline.data.dataset_meta import DataSetMeta
 
 from ziplime.pipeline.domain import GENERIC

@@ -27,7 +27,8 @@ from ziplime.finance.domain.order_status import OrderStatus
 from ziplime.finance.execution import MarketOrder
 from ziplime.meta.exchange import StrategyExchange, is_strategy_listing, strategy_listing
 from ziplime.meta.handle import StrategyCluster, StrategyHandle
-from ziplime.utils.api_support import ZiplineAPI, api_method
+from ziplime.utils.api_support import api_method
+from ziplime.utils.zipline_api import ZiplineAPI
 from ziplime.utils.math_utils import round_if_near_integer
 
 

@@ -86,7 +86,7 @@ def _strategy_frame(exc: BaseException, algorithm_path: Path) -> tuple[int, str]
 
 def providers() -> list[dict]:
     """The data connectors this installation actually has."""
-    from ziplime.utils.bundle_utils import provider_names
+    from ziplime.data.data_sources.registry import provider_names
 
     known = {
         "yahoo": {

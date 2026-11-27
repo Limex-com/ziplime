@@ -1,4 +1,3 @@
-import dataclasses
 import datetime
 from collections.abc import Iterable
 from logging import Logger
@@ -27,11 +26,12 @@ from ziplime.assets.domain.continuous_future import ContinuousFuture
 from ziplime.assets.domain.ordered_contracts import OrderedContracts
 from ziplime.assets.entities.split import Split
 from ziplime.assets.entities.stock_dividend_payout import StockDividendPayout
-from ziplime.assets.entities.symbol_universe import SymbolsUniverse
+from ziplime.assets.entities.symbols_universe import SymbolsUniverse
 from ziplime.assets.repositories.adjustments_repository import AdjustmentRepository
 from ziplime.assets.repositories.asset_repository import AssetRepository
 from ziplime.errors import AmbiguousSymbol
 from ziplime.assets.entities.asset import Asset
+from ziplime.assets.services.bond_event_utils import _rebind_bond_events
 
 
 class AssetService:
@@ -375,13 +375,3 @@ class AssetService:
             date_from=date_from,
             date_to=date_to,
         )
-
-
-def _rebind_bond_events(bond_events: list[BondEvent], bonds: list[Bond]) -> list[BondEvent]:
-    """Point each event at the stored bond of the same identity, so it has a real asset id."""
-    stored = {(bond.isin, bond.asset_name): bond for bond in bonds}
-    rebound = []
-    for event in bond_events:
-        bond = stored.get((event.asset.isin, event.asset.asset_name))
-        rebound.append(event if bond is None else dataclasses.replace(event, asset=bond))
-    return rebound

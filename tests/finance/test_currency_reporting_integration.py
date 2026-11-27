@@ -94,7 +94,7 @@ async def test_delta_rates_event_vector_and_streaming_results_agree(tmp_path, in
             sid_indexes={equity.sid: (0, len(index))})
         algorithm = tmp_path / "algorithm.py"
         algorithm.write_text(
-            data="from ziplime.finance.execution import MarketOrder\n"
+            data="from ziplime.finance.execution.market_order import MarketOrder\n"
             "async def initialize(context):\n"
             "    context.asset = await context.symbol('TEST', mic='XNYS')\n"
             "    context.bought = False\n"

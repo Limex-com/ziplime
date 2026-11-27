@@ -12,7 +12,8 @@ from __future__ import annotations
 import numpy as np
 
 from ziplime.vectorized.kernel import _gpu
-from ziplime.vectorized.kernel.costs import ResolvedCommission, ResolvedSlippage
+from ziplime.vectorized.kernel.resolved_commission import ResolvedCommission
+from ziplime.vectorized.kernel.resolved_slippage import ResolvedSlippage
 from ziplime.vectorized.kernel.models import VectorKernelError
 
 try:  # pragma: no cover - depends on the platform

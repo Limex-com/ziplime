@@ -3,7 +3,8 @@ import unittest
 from types import SimpleNamespace
 
 from tests.exchanges.test_simulation_exchange import make_exchange
-from ziplime.exchanges.allocation import Holding, allocated_cash, round_to_lots
+from ziplime.exchanges.holding import Holding
+from ziplime.exchanges.allocation import allocated_cash, round_to_lots
 
 
 class LiveVenueDelistingTests(unittest.TestCase):

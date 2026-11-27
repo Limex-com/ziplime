@@ -8,13 +8,8 @@ from ziplime.pipeline.errors.bad_binary_operator import BadBinaryOperator
 from ziplime.pipeline.terms.term import Term
 from ziplime.utils.compat import wraps
 
-from ziplime.pipeline.expression import (
-    is_comparison,
-    method_name_for_op,
-    NumericalExpression,
-    NUMEXPR_MATH_FUNCS,
-    unary_op_name,
-)
+from ziplime.pipeline.expression_utils import is_comparison, method_name_for_op, NUMEXPR_MATH_FUNCS, unary_op_name
+from ziplime.pipeline.expression import NumericalExpression
 from ziplime.pipeline.terms.filters import NumExprFilter
 
 from ziplime.utils.functional import with_doc, with_name

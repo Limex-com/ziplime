@@ -6,10 +6,8 @@ import pandas as pd
 import polars as pl
 import pytest
 
-from ziplime.data.services.limex_hub_data_source import (
-    LimexHubDataSource,
-    fetch_historical_limex_data_task,
-)
+from ziplime.data.services.limex_hub_data_source import LimexHubDataSource
+from ziplime.data.services.limex_history_tasks import fetch_historical_limex_data_task
 
 
 def test_fetch_historical_limex_data_task():

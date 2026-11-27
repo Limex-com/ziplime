@@ -1,9 +1,8 @@
-import datetime
 import numpy as np
 import pytest
 
+from ziplime.utils.numpy_errors import NoDefaultMissingValue
 from ziplime.utils.numpy_utils import (
-    NoDefaultMissingValue,
     as_column,
     busday_count_mask_NaT,
     bytes_array_to_native_str_object_array,

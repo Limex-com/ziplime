@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ziplime.sweep import api, convert, cross, engine, frames, lazy, runner
+from ziplime.sweep import api, cross
 from ziplime.sweep.all_assets import ALL
 from ziplime.sweep.array_utils import is_array
 from ziplime.sweep.backends import Backend
@@ -33,13 +33,14 @@ importlib.import_module({entry_point!r})
 if {entry_point!r} == 'ziplime.sweep.api':
     assert 'ziplime.sweep.convert' not in sys.modules
     assert 'ziplime.sweep.engine' not in sys.modules
-from ziplime.sweep import api, convert
-from ziplime.sweep.all_assets import ALL
-assert api.ALL is convert.ALL is ALL
-assert convert.Context is api.Context
-assert convert.Data is api.Data
-assert api.Costs is importlib.import_module('ziplime.sweep.costs').Costs
-assert api.Windows is importlib.import_module('ziplime.sweep.windows').Windows
+from ziplime.sweep.api import Context, Data
+from ziplime.sweep.api.context import Context as ContextType
+from ziplime.sweep.api.data import Data as DataType
+from ziplime.sweep.convert import Runtime
+from ziplime.sweep.convert.runtime import Runtime as RuntimeType
+assert Context is ContextType
+assert Data is DataType
+assert Runtime is RuntimeType
 """
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -74,28 +75,27 @@ assert vectorized_containers.ALL is all_assets.ALL
     assert result.returncode == 0, result.stderr
 
 
-def test_legacy_imports_share_the_extracted_objects() -> None:
-    for module in (api, convert, cross, frames, lazy):
-        assert module.ALL is ALL
-    assert convert._AllAssets is type(ALL)
-    for module in (api, convert, cross, engine, frames, lazy, runner):
-        assert module.NotConvertible is NotConvertible
-    for module in (api, convert, cross, frames):
-        assert module.Vectorized is Vectorized
-    for module in (api, convert, cross):
-        assert module.VectorUniverse is VectorUniverse
-    for module in (api, convert, cross, engine, lazy):
-        assert module.is_array is is_array
+@pytest.mark.parametrize("package, implementation, name", [
+    ("ziplime.sweep.api", "ziplime.sweep.api.context", "Context"),
+    ("ziplime.sweep.api", "ziplime.sweep.api.data", "Data"),
+    ("ziplime.sweep.convert", "ziplime.sweep.convert.runtime", "Runtime"),
+    ("ziplime.sweep.convert", "ziplime.sweep.convert.converted", "Converted"),
+    ("ziplime.sweep.cross", "ziplime.sweep.cross.cross_section", "CrossSection"),
+    ("ziplime.sweep.cross", "ziplime.sweep.cross.ranking_value", "Ranking"),
+    ("ziplime.sweep.engine", "ziplime.sweep.engine.hooks", "Hooks"),
+    ("ziplime.sweep.engine", "ziplime.sweep.engine.result", "Result"),
+    ("ziplime.sweep.frames", "ziplime.sweep.frames.table", "Table"),
+    ("ziplime.sweep.lazy", "ziplime.sweep.lazy.lazy", "Lazy"),
+    ("ziplime.sweep.lazy", "ziplime.sweep.lazy.lazy_registry", "LazyRegistry"),
+])
+def test_package_exports_use_their_own_implementation_types(
+    package: str, implementation: str, name: str,
+) -> None:
+    import importlib
 
-
-def test_legacy_engine_types_share_the_extracted_objects() -> None:
-    from ziplime.sweep.costs import Costs
-    from ziplime.sweep.errors import Rediscover
-    from ziplime.sweep.windows import Windows
-
-    assert api.Costs is engine.Costs is Costs
-    assert api.Windows is engine.Windows is lazy.Windows is runner.Windows is Windows
-    assert engine.Rediscover is lazy.Rediscover is Rediscover
+    assert getattr(importlib.import_module(package), name) is getattr(
+        importlib.import_module(implementation), name,
+    )
 
 
 def test_api_and_cross_selection_use_the_same_all_state(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -103,12 +103,12 @@ def test_api_and_cross_selection_use_the_same_all_state(monkeypatch: pytest.Monk
     columns = api.Columns({"A": 10, "B": 20}, Backend("numpy"))
     values = np.array([[1.0, 2.0], [3.0, 4.0]])
 
-    np.testing.assert_array_equal(convert.ALL == "B", [[False, True]])
-    np.testing.assert_array_equal(cross.ALL != 10, [[False, True]])
+    np.testing.assert_array_equal(ALL == "B", [[False, True]])
+    np.testing.assert_array_equal(ALL != 10, [[False, True]])
     np.testing.assert_array_equal(cross.column_mask("B"), [[False, True]])
-    assert columns.select(values, convert.ALL) is values
-    assert columns.only(cross.ALL) is True
-    assert cross.column_mask(api.ALL) is True
+    assert columns.select(values, ALL) is values
+    assert columns.only(ALL) is True
+    assert cross.column_mask(ALL) is True
     assert ALL.sid is ALL
 
 
@@ -129,7 +129,7 @@ def test_vectorized_universe_emits_the_canonical_all() -> None:
 
 
 def test_extracted_sentinel_errors_are_caught_by_legacy_exception_import() -> None:
-    with pytest.raises(convert.NotConvertible, match="has no single .exchange"):
+    with pytest.raises(NotConvertible, match="has no single .exchange"):
         ALL.exchange
 
 

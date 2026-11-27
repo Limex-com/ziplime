@@ -29,7 +29,7 @@ from ziplime.assets.services.asset_service import AssetService
 from ziplime.data.domain.data_bundle import DataBundle
 from ziplime.sweep.initialize import Combinations
 from ziplime.sweep.params import SweepParams
-from ziplime.sweep.report import Stages
+from ziplime.sweep.stages import Stages
 
 #: Combinations per job: small enough to report progress, large enough to amortise a process's
 #: imports.

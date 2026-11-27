@@ -2,7 +2,8 @@
 from collections.abc import Sequence
 
 from ziplime.assets.domain.asset_type import AssetType
-from ziplime.data.data_sources.registry import DataProvider, register_provider
+from ziplime.data.data_sources.data_provider import DataProvider
+from ziplime.data.data_sources.registry import register_provider
 from ziplime.data.data_sources.yahoo.yahoo_finance_asset_data_source import (
     YahooFinanceAssetDataSource,
 )

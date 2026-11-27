@@ -14,7 +14,7 @@ from ziplime.assets.entities.dividend_payout import DividendPayout
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
 from ziplime.assets.entities.split import Split
-from ziplime.assets.entities.symbol_universe import SymbolsUniverse
+from ziplime.assets.entities.symbols_universe import SymbolsUniverse
 from ziplime.assets.models.asset_router import AssetRouter
 from ziplime.assets.entities.commodity import Commodity
 from ziplime.assets.entities.currency import Currency

@@ -1,4 +1,3 @@
-import functools
 import datetime
 import inspect
 import math
@@ -11,7 +10,6 @@ import warnings
 from typing import Callable
 import pandas as pd
 import structlog
-from pygments.styles import default
 
 import ziplime
 from itertools import chain, repeat
@@ -28,7 +26,8 @@ from ziplime.assets.entities.asset_symbol import AssetSymbol
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.option_contract import OptionContract
 from ziplime.finance.options.chain import OptionChain
-from ziplime.finance.options.greeks import Greeks, greeks, position_greeks, time_to_expiry
+from ziplime.finance.options.greek_values import Greeks
+from ziplime.finance.options.greeks import greeks, position_greeks, time_to_expiry
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.constants.logging_event import LoggingEvent
 from ziplime.core.algorithm_file import AlgorithmFile
@@ -72,15 +71,15 @@ from ziplime.errors import (
     SetSlippagePostInit,
     UnsupportedCancelPolicy,
     UnsupportedDatetimeFormat,
-    ZeroCapitalError, SymbolNotFound, BarSimulationError,
+    ZeroCapitalError,
+    SymbolNotFound,
+    BarSimulationError,
 )
 
 from ziplime.finance.execution import ExecutionStyle, MarketOrder, make_execution_style
 from ziplime.finance.asset_restrictions import Restrictions
 from ziplime.finance.cancel_policy import CancelPolicy
-from ziplime.finance.asset_restrictions import (
-    NoRestrictions,
-)
+from ziplime.finance.asset_restrictions import NoRestrictions
 from ziplime.assets.domain.continuous_future import ContinuousFuture
 from ziplime.finance.margin import FuturesMarginModel
 from ziplime.assets.entities.bond import Bond
@@ -90,34 +89,20 @@ from ziplime.assets.entities.equity import Equity
 from ziplime.finance.metrics_tracker import MetricsTracker
 from ziplime.pipeline import Pipeline
 import ziplime.pipeline.domain as domain
-from ziplime.pipeline.engine import (
-    ExplodingPipelineEngine,
-    SimplePipelineEngine,
-)
+from ziplime.pipeline.engine import ExplodingPipelineEngine, SimplePipelineEngine
 from ziplime.utils.api_support import (
     api_method,
     require_initialized,
     require_not_initialized,
-    ZiplineAPI,
     disallowed_in_before_trading_start,
 )
+from ziplime.utils.zipline_api import ZiplineAPI
 from ziplime.utils.compat import ExitStack
 from ziplime.utils.cache import ExpiringCache
 
-from ziplime.utils.events import (
-    EventManager,
-    make_eventrule,
-    date_rules,
-    time_rules,
-    calendars,
-    AfterOpen,
-    BeforeClose,
-)
+from ziplime.utils.events import EventManager, make_eventrule, date_rules, time_rules, calendars, AfterOpen, BeforeClose
 from ziplime.utils.event_rule import EventRule
-from ziplime.utils.math_utils import (
-    tolerant_equals,
-    round_if_near_integer,
-)
+from ziplime.utils.math_utils import tolerant_equals, round_if_near_integer
 from ziplime.sources.benchmark_source import BenchmarkSource
 from ziplime.finance.domain.currency_reporting import CurrencyReporting
 from ziplime.data.services.currency_conversion_service import CurrencyConversionService
@@ -128,9 +113,7 @@ from ziplime.finance.domain.order_valuations import OrderValuations
 from ziplime.finance.domain.order_price_basis import OrderPriceBasis
 from ziplime.finance.domain.order_quantity_basis import OrderQuantityBasis
 from ziplime.finance.monetary_valuation_service import MonetaryValuationService
-from ziplime.vectorized.signals import (
-    PricePanel, SignalPanel, as_of_panel, normalise_signals, verify_causality,
-)
+from ziplime.vectorized.signals import PricePanel, SignalPanel, as_of_panel, normalise_signals, verify_causality
 from ziplime.data.data_sources.huggingface.huggingface_data_source import Resolution
 from ziplime.finance.commission.commission_model import CommissionModel
 from ziplime.finance.controls.account_control import AccountControl
@@ -142,6 +125,9 @@ from ziplime.pipeline.loaders.pipeline_loader import PipelineLoader
 from ziplime.pipeline.terms.loadable_term import LoadableTerm
 from ziplime.meta.mixin import StrategiesMixin
 from ziplime.meta.exchange import is_strategy_listing
+from ziplime.trading.algorithm_utils import _named_universe
+from ziplime.trading.algorithm_utils import _as_datetime
+from ziplime.trading.algorithm_utils import _resolves_continuous_future
 
 # For creating and storing pipeline instances
 AttachedPipeline = namedtuple("AttachedPipeline", "pipe chunks eager")
@@ -154,53 +140,6 @@ class NoBenchmark(ValueError):
         )
 
 
-def _named_universe(
-    universe: (
-        dict[str, ExchangeAsset | ContinuousFuture] | list[ExchangeAsset | ContinuousFuture] | tuple[ExchangeAsset | ContinuousFuture, ...] | set[ExchangeAsset | ContinuousFuture] | frozenset[ExchangeAsset | ContinuousFuture]
-    ),
-) -> dict:
-    """Accept either shape a strategy already writes its universe in.
-
-    A dict names the panel's columns explicitly. A plain list -- which is what every strategy in
-    `examples/huggingface` already builds -- is named by ticker, so vectorising one of those is a
-    `compute_signals` function and nothing else.
-    """
-    if isinstance(universe, dict):
-        return universe
-    if not isinstance(universe, (list, tuple, set, frozenset)):
-        raise TypeError(
-            f"context.universe has to be a list of listings or a dict of name -> listing, got "
-            f"{type(universe).__name__}.")
-
-    named = {}
-    for listing in universe:
-        symbol = getattr(listing, "symbol", None)
-        if symbol is None:
-            raise TypeError(
-                f"context.universe holds a {type(listing).__name__}, which has no symbol to name "
-                f"a column by. Pass listings, or a dict of name -> listing.")
-        if symbol in named:
-            # Two venues, one ticker. Naming both "T" would silently drop one of them from the
-            # panel, so the strategy has to say which name means which listing.
-            raise ValueError(
-                f"Two listings in context.universe are both called {symbol!r} "
-                f"({named[symbol].mic} and {listing.mic}). Give them names: "
-                f"context.universe = {{'{symbol}.{named[symbol].mic}': ..., "
-                f"'{symbol}.{listing.mic}': ...}}.")
-        named[symbol] = listing
-    return named
-
-
-def _as_datetime(value: datetime.date | None, tz: datetime.tzinfo, default: datetime.date) -> datetime.datetime:
-    """A source's start bound as an aware datetime, however it was stored."""
-    if isinstance(value, datetime.datetime):
-        return value if value.tzinfo else value.replace(tzinfo=tz)
-    if isinstance(value, datetime.date):
-        return datetime.datetime.combine(value, datetime.time.min, tzinfo=tz)
-    return datetime.datetime.combine(default, datetime.time.min, tzinfo=tz)
-
-
-
 def _ordered_strategy(algorithm, asset):
     """The strategy an order method was handed in place of an asset, or None.
 
@@ -209,29 +148,6 @@ def _ordered_strategy(algorithm, asset):
     resolve = getattr(algorithm, "_strategy_of", None)
     return resolve(asset) if resolve is not None else None
 
-
-def _resolves_continuous_future(method: Callable):
-    """Let an order method take a continuous future: it is placed in the contract held right now.
-
-    The specifier itself is a data request, not a listing, so the order goes to the contract the
-    chain's roll rule names for the current bar, and that contract is remembered as the one the
-    position lives in -- :meth:`TradingAlgorithm._roll_continuous_futures` moves it when the
-    front changes. ``None`` (no order) when the chain has no live contract.
-    """
-    @functools.wraps(method)
-    async def wrapper(self, *args, **kwargs):
-        if args and isinstance(args[0], ContinuousFuture):
-            contract = await self._contract_for(args[0])
-            if contract is None:
-                return None
-            args = (contract, *args[1:])
-        elif isinstance(kwargs.get("asset"), ContinuousFuture):
-            contract = await self._contract_for(kwargs["asset"])
-            if contract is None:
-                return None
-            kwargs["asset"] = contract
-        return await method(self, *args, **kwargs)
-    return wrapper
 
 class TradingAlgorithm(StrategiesMixin, BaseTradingAlgorithm):
     """A class that represents a trading strategy and parameters to execute
@@ -1950,7 +1866,8 @@ class TradingAlgorithm(StrategiesMixin, BaseTradingAlgorithm):
         Only the hosted runtime knows the user; in a local run this raises.
         """
         from ziplime.data.data_sources.huggingface.huggingface_data_source import Resolution
-        from ziplime.data.data_sources.user_datasets import SCHEME, mount_user_dataset
+        from ziplime.data.data_sources.user_datasets.support import SCHEME
+        from ziplime.data.data_sources.user_datasets.utils import mount_user_dataset
         address = name if str(name).startswith(SCHEME) else f"{SCHEME}{name}"
         source = mount_user_dataset(
             address, **{**getattr(self, "_address_context", {}),

@@ -6,7 +6,6 @@ from ziplime.currency import Currency
 from ziplime.data.fx import DEFAULT_FX_RATE
 from ziplime.pipeline.data import Column, DataSet
 from ziplime.pipeline.data.currency_conversion import CurrencyConversion
-from ziplime.pipeline.data.dataset import CurrencyConversion as LegacyCurrencyConversion
 from ziplime.pipeline.domain import Domain, GENERIC
 from ziplime.pipeline.errors.invalid_classifier_comparison import InvalidClassifierComparison
 
@@ -38,11 +37,10 @@ def test_column_specialization_preserves_owner_and_domain():
     assert Prices.close.domain is GENERIC
 
 
-def test_currency_conversion_preserves_legacy_import_and_pickle_path():
+def test_currency_conversion_pickle_round_trip():
     conversion = CurrencyConversion(currency="USD", field=DEFAULT_FX_RATE)
 
-    assert LegacyCurrencyConversion is CurrencyConversion
-    assert CurrencyConversion.__module__ == "ziplime.pipeline.data.dataset"
+    assert CurrencyConversion.__module__ == "ziplime.pipeline.data.currency_conversion"
     restored = pickle.loads(pickle.dumps(conversion))
     assert type(restored) is CurrencyConversion
     assert restored == conversion

@@ -1,7 +1,7 @@
 import pytest
 
+from ziplime.utils.zipline_api import ZiplineAPI
 from ziplime.utils.api_support import (
-    ZiplineAPI,
     api_method,
     disallowed_in_before_trading_start,
     require_initialized,

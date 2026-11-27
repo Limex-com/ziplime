@@ -9,9 +9,8 @@ import unittest
 from unittest import mock
 
 from ziplime.data.data_sources import registry
-from ziplime.data.data_sources.registry import (
-    DataProvider, MissingProviderCredentials, UnknownDataProvider,
-)
+from ziplime.data.data_sources.data_provider import DataProvider
+from ziplime.data.data_sources.provider_errors import MissingProviderCredentials, UnknownDataProvider
 
 
 class RegistryIsolationMixin:

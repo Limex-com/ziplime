@@ -7,6 +7,7 @@ us where the current coupon period starts or ends.
 """
 import datetime
 import enum
+from ziplime.assets.domain.day_count_utils import _thirty_360_days
 
 
 class DayCount(enum.Enum):
@@ -38,11 +39,3 @@ class DayCount(enum.Enum):
         year_start = datetime.date(start.year, 1, 1)
         year_end = datetime.date(start.year + 1, 1, 1)
         return days / (year_end - year_start).days
-
-
-def _thirty_360_days(start: datetime.date, end: datetime.date) -> int:
-    """Days between two dates under the 30/360 US convention."""
-    d1, d2 = min(start.day, 30), end.day
-    if d1 == 30 and d2 == 31:
-        d2 = 30
-    return 360 * (end.year - start.year) + 30 * (end.month - start.month) + (d2 - d1)

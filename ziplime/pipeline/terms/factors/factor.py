@@ -7,14 +7,15 @@ from ziplime.pipeline.terms.computable_term import ComputableTerm
 from ziplime.pipeline.terms.factors.utils.grouped_row_transform_utils import demean, zscore, winsorize
 from ziplime.pipeline.terms.factors.utils.operators import binary_operator, reflected_binary_operator, unary_operator, \
     function_application
-from ziplime.pipeline.terms.factors.utils.summary_funcs import summary_method, summary_funcs
+from ziplime.pipeline.terms.factors.utils.summary_funcs import summary_method
+from ziplime.pipeline.terms.factors.utils.summary_operations import summary_funcs
 from ziplime.pipeline.terms.term import Term
 from ziplime.errors import BadPercentileBounds
 from ziplime.lib.rank import rankdata_1d_descending
 from ziplime.pipeline.terms.classifiers import Classifier, Quantiles
 from ziplime.pipeline.dtypes import FACTOR_DTYPES
 
-from ziplime.pipeline.expression import (
+from ziplime.pipeline.expression_utils import (
     COMPARISONS,
     MATH_BINOPS,
     method_name_for_op,

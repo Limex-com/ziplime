@@ -4,20 +4,9 @@ A backtest that runs cleanly is not the same as a backtest that is realistic. Th
 the gaps explicitly so a result can be read with them in mind, rather than leaving them to be
 rediscovered later.
 """
-import dataclasses
 
 from ziplime.finance.margin import FuturesMarginModel
-
-
-@dataclasses.dataclass(frozen=True)
-class RealismWarning:
-    """One effect the simulation does not reproduce."""
-
-    code: str
-    detail: str
-
-    def __str__(self) -> str:
-        return f"{self.code}: {self.detail}"
+from ziplime.finance.realism_warning import RealismWarning
 
 
 #: Effects no execution model in ziplime currently reproduces.

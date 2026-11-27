@@ -19,7 +19,6 @@ error, it surfaces as a better return.
 """
 from __future__ import annotations
 
-import dataclasses
 
 from ziplime.finance.commission.commission_model import CommissionModel
 from ziplime.finance.commission.no_commission import NoCommission
@@ -33,39 +32,8 @@ from ziplime.finance.slippage.slippage_model import SlippageModel
 
 from ziplime.vectorized.kernel.models import VectorKernelError
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
-
-
-@dataclasses.dataclass(frozen=True)
-class ResolvedSlippage:
-    """A slippage model reduced to what the kernel needs: a price rule and a volume cap."""
-
-    #: Fraction of the price added when buying, subtracted when selling. 0.0005 = 5bps.
-    percentage: float = 0.0
-    #: Absolute spread; half of it is added when buying, subtracted when selling.
-    spread: float = 0.0
-    #: Largest share of a bar's volume one order may take, or None for no cap.
-    volume_limit: float | None = None
-
-    def fill_price(self, price: float, direction: int) -> float:
-        """The price an order of this direction fills at. `direction` is +1 buy, -1 sell.
-
-        Mirrors `FixedBasisPointsSlippage.process_order` (`price + price * percentage * direction`)
-        and `FixedSlippage.process_order` (`price + spread / 2 * direction`). Both, so a model
-        carrying each is expressed without a second code path.
-        """
-        return price + price * self.percentage * direction + self.spread / 2.0 * direction
-
-    def cap(self, wanted: float, volume: float | None) -> float:
-        """How much of `wanted` the bar can absorb. Magnitudes, not signed amounts.
-
-        A cap never turns an order around: the event-driven model clamps remaining capacity at
-        zero for exactly this reason, and the same clamp is here. `None` volume means the caller
-        gave no volume frame, which is "no opinion" rather than "a bar that trades nothing" --
-        capping to zero there would silently stop every strategy that did not pass volumes.
-        """
-        if self.volume_limit is None or volume is None:
-            return wanted
-        return min(wanted, max(0.0, float(volume) * self.volume_limit))
+from ziplime.vectorized.kernel.resolved_slippage import ResolvedSlippage
+from ziplime.vectorized.kernel.resolved_commission import ResolvedCommission
 
 
 def resolve_slippage(model: SlippageModel | None) -> ResolvedSlippage:
@@ -85,35 +53,6 @@ def resolve_slippage(model: SlippageModel | None) -> ResolvedSlippage:
         f"signals instead (ziplime.vectorized.signals) -- the blotter fills every order there and "
         f"every slippage model applies."
     )
-
-
-@dataclasses.dataclass(frozen=True)
-class ResolvedCommission:
-    """A commission model reduced to four numbers the compiled loop can use.
-
-    The model itself offers `calculate_for_asset`, which is already order-free -- so until the
-    inner loop was compiled there was nothing to reduce and this did not exist. Numba cannot call
-    into an arbitrary Python object, and a commission is charged on the path that decides whether
-    the *next* order fits, so it cannot be computed afterwards either.
-
-    Every commission model the vector path supports fits one expression:
-
-        max(min_trade, per_unit x |quantity| + per_dollar x |value| + fixed)
-
-    NoCommission zeroes all four; PerShare sets `per_unit` and `min_trade`; PerTrade sets `fixed`;
-    PerDollar sets `per_dollar`. `CommissionParityTests` runs each model both ways and requires
-    the same number, which is what keeps this from drifting away from the models it stands for.
-    """
-
-    per_unit: float = 0.0
-    per_dollar: float = 0.0
-    fixed: float = 0.0
-    min_trade: float = 0.0
-
-    def charge(self, quantity: float, value: float) -> float:
-        """One fill's commission. Magnitudes in, non-negative out."""
-        return max(self.min_trade,
-                   self.per_unit * abs(quantity) + self.per_dollar * abs(value) + self.fixed)
 
 
 def resolve_commission(model: CommissionModel | None) -> ResolvedCommission:

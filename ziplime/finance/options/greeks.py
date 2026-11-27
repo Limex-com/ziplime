@@ -33,6 +33,8 @@ import datetime
 import math
 
 from ziplime.assets.domain.option_type import OptionType
+from ziplime.finance.options.greek_values import Greeks
+
 
 #: Below this many years to expiry the closed-form formulas stop being usable -- ``sqrt(t)``
 #: underflows the price into the noise -- and the expiry limits are returned instead. One second
@@ -57,35 +59,6 @@ def _vollib():
     except ImportError as error:  # pragma: no cover - exercised only without the extra
         raise ImportError(_IMPORT_HINT) from error
     return black_scholes, analytical, iv
-
-
-@dataclasses.dataclass(frozen=True)
-class Greeks:
-    """One option's price and sensitivities, per unit of the underlying.
-
-    See the module docstring for the scaling of each field; they are ``vollib``'s conventions and
-    they are not all per-year or all per-1.00.
-    """
-
-    price: float
-    delta: float
-    gamma: float
-    #: Per calendar day.
-    theta: float
-    #: Per volatility point.
-    vega: float
-    #: Per percentage point of the interest rate.
-    rho: float
-    #: The volatility these were computed at. Echoed back so a caller that passed an implied
-    #: volatility solved from a market price does not have to carry it alongside.
-    volatility: float
-    #: Years to expiry the figures were computed for. Zero means the contract has expired and the
-    #: figures are the expiry limits.
-    time_to_expiry: float
-
-    @property
-    def is_expired(self) -> bool:
-        return self.time_to_expiry <= 0.0
 
 
 def time_to_expiry(now: datetime.datetime, expires_at: datetime.datetime) -> float:

@@ -13,7 +13,7 @@ from ziplime.assets.entities.currency import Currency
 from ziplime.assets.entities.equity import Equity
 from ziplime.assets.entities.exchange_asset import ExchangeAsset
 from ziplime.assets.entities.exchange_info import ExchangeInfo
-from ziplime.assets.entities.symbol_universe import SymbolsUniverse
+from ziplime.assets.entities.symbols_universe import SymbolsUniverse
 from ziplime.assets.entities.symbols_universe_asset import SymbolsUniverseAsset
 from ziplime.assets.services.asset_service import AssetService
 from ziplime.data.data_sources.asset_data_source import AssetDataSource

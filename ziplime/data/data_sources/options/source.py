@@ -36,7 +36,7 @@ from ziplime.assets.domain.exercise_style import ExerciseStyle
 from ziplime.assets.domain.option_type import OptionType
 from ziplime.assets.domain.premium_style import PremiumStyle
 from ziplime.assets.domain.settlement_type import SettlementType
-from ziplime.assets.entities.option_contract import format_occ_symbol
+from ziplime.assets.domain.option_symbols import format_occ_symbol
 
 #: Columns :meth:`OptionChainSource.bars` must produce. The first eight are the bundle's own
 #: schema; the rest are what makes an option bar usable and are specific to this asset class.

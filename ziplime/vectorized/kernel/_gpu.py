@@ -14,7 +14,7 @@ Three things differ from `_core`, and the hardware decided each of them:
 **float32.** Metal has no double precision, nor do many OpenCL GPUs, and CUDA runs the same
 float32 source so that every GPU ranks a sweep the same way. Prices, sizes and cash are seven
 significant digits here -- a cent or so on a six-figure account -- which is why a batch result
-ranks and :meth:`~ziplime.vectorized.kernel.batch.BatchSimulationResult.rerun` reports.
+ranks and :meth:`~ziplime.vectorized.kernel.batch_simulation_result.BatchSimulationResult.rerun` reports.
 
 **NaN is decided on the CPU.** Metal compiles with fast math, under which `isfinite` is allowed
 to fold to `true`. So the host turns every price, size and volume into a finite number plus a
@@ -35,7 +35,8 @@ from __future__ import annotations
 import numpy as np
 
 from ziplime.vectorized.kernel import _core
-from ziplime.vectorized.kernel.costs import ResolvedCommission, ResolvedSlippage
+from ziplime.vectorized.kernel.resolved_commission import ResolvedCommission
+from ziplime.vectorized.kernel.resolved_slippage import ResolvedSlippage
 
 #: Per-cell flag bits, set on the host where NaN can still be seen.
 PRICE_OK = 1
